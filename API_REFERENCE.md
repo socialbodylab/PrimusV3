@@ -1,0 +1,357 @@
+# PrimusV3 Art-Net API Reference
+
+This document describes the network API exposed by PrimusV3 LED receiver nodes and strategies for integrating them into common creative-coding and lighting-control environments.
+
+---
+
+## Network Overview
+
+| Function | Protocol | Port | Direction |
+|---|---|---|---|
+| **LED data** (ArtDmx) | UDP / Art-Net | 6454 | Sender → Node |
+| **Discovery** (ArtPoll / ArtPollReply) | UDP / Art-Net | 6454 | Bidirectional |
+| **Device naming** (ArtAddress) | UDP / Art-Net | 6454 | Sender → Node |
+| **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
+| **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
+
+All communication is standard Art-Net 4 over IPv4 UDP, plus two custom opcodes. No TCP, no HTTP, no proprietary framing — any software that speaks Art-Net can drive these nodes directly.
+
+---
+
+## 1. Discovery — ArtPoll / ArtPollReply
+
+### How It Works
+
+1. A controller broadcasts an **ArtPoll** packet (14 bytes) to port **6454**.
+2. Every PrimusV3 node on the network replies with an **ArtPollReply** (239 bytes) containing its IP, name, port count, and universe mapping.
+3. Nodes also broadcast an unsolicited ArtPollReply at startup, so controllers that are already listening will see them appear automatically.
+
+### ArtPoll Packet (sender → network)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` (ASCII + null) |
+| 8–9 | 2 | Opcode | `0x2000` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | TalkToMe | `0x00` |
+| 13 | 1 | Priority | `0x00` |
+
+**Total: 14 bytes.** Send to `<broadcast>:6454` (255.255.255.255 or subnet broadcast like 192.168.1.255).
+
+### ArtPollReply Packet (node → sender)
+
+Key fields in the 239-byte reply:
+
+| Offset | Length | Field | Description |
+|--------|--------|-------|-------------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x2100` (little-endian) |
+| 10–13 | 4 | IP Address | Node's IPv4 address (4 bytes) |
+| 14–15 | 2 | Port | `0x1936` (6454, little-endian) |
+| 26–43 | 18 | Short Name | `"PrimusV3"` or custom name (null-terminated) |
+| 44–107 | 64 | Long Name | e.g. `"PrimusV3 LED Node \| A0:Short Strip A1:Long Strip A2:Grid 8x8"` |
+| 108–171 | 64 | Node Report | Status string, e.g. `"#0001 [0482] PrimusV3 OK — 30 fps"` |
+| 172–173 | 2 | NumPorts | Number of active outputs (big-endian) |
+| 174–177 | 4 | PortTypes | `0xC0` per active port (DMX output) |
+| 190–193 | 4 | SwOut | Universe assignment per port (low nibble) |
+| 201–206 | 6 | MAC Address | Node's WiFi MAC |
+
+### Discovery Tips
+
+- **Broadcast or unicast both work.** If broadcast is unreliable on your network, send ArtPoll directly to the node's IP.
+- **Timeout of 2 seconds** is usually sufficient for WiFi nodes.
+- Nodes re-broadcast their ArtPollReply at power-on, so persistent listeners will see new nodes appear without polling.
+
+---
+
+## 2. LED Data — ArtDmx
+
+### Output Types
+
+Each physical output maps to one Art-Net universe. Outputs can be dynamically reassigned at runtime via ArtOutputConfig (see §5).
+
+| Output Type | Pixels | Bytes (RGB×3) | Layout |
+|-------------|-------:|----:|---------|
+| Off (none) | 0 | 0 | — |
+| Short Strip | 30 | 90 | Linear |
+| Long Strip | 72 | 216 | Linear |
+| Grid 8×8 | 64 | 192 | Grid (serpentine) |
+
+### Default Universe Layout
+
+| Output | Default Type | Pixels | Universe |
+|--------|------|-------:|---------|
+| A0 | Short Strip | 30 | 0 |
+| A1 | Long Strip | 72 | 1 |
+| A2 | Grid 8×8 | 64 | 2 |
+
+All data fits within the 512-byte Art-Net universe limit. One ArtDmx packet per universe, per frame.
+
+### ArtDmx Packet Structure
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x5000` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | Sequence | 1–255 (incrementing), 0 = disable |
+| 13 | 1 | Physical | `0x00` |
+| 14–15 | 2 | Universe | Universe number (little-endian) |
+| 16–17 | 2 | Length | Data length in bytes (big-endian) |
+| 18+ | N | Data | RGB pixel data (R, G, B, R, G, B, …) |
+
+### Pixel Data Format
+
+- **Color order:** RGB (3 bytes per pixel)
+- **Channel mapping:** Pixel 0 = bytes 0–2, Pixel 1 = bytes 3–5, etc.
+- **Brightness:** Controlled entirely by the RGB values you send. There is no separate brightness channel — send the exact colors you want.
+- **Padding:** Art-Net requires even-length data. If your byte count is odd, pad with one `0x00`.
+- **Grid pixel order:** Grids always use serpentine ordering — even rows left-to-right, odd rows right-to-left.
+
+### Frame Rate
+
+- The node renders data as fast as it arrives. For smooth animation, **30 FPS** is a good default. The hardware supports up to ~60+ FPS depending on strip length.
+- Packets for universes 0, 1, and 2 within a **5 ms window** are assembled into a single frame. If a universe is missing, the timeout fires and the frame renders with stale data for that output.
+- The **sequence byte** (offset 12) should increment 1→255→1 with each frame. This lets the node detect and discard out-of-order packets.
+
+---
+
+## 3. FPS Telemetry Back-Channel (Optional)
+
+When enabled, the node sends a small status packet to the sender's IP on port **6455** once per second.
+
+| Offset | Length | Field | Description |
+|--------|--------|-------|-------------|
+| 0–2 | 3 | Magic | `"PFP"` (ASCII) |
+| 3–4 | 2 | FPS | Frames per second (uint16, big-endian) |
+| 5–6 | 2 | Packet Rate | Packets per second (uint16, big-endian) |
+
+**Total: 7 bytes.** This is a custom (non-Art-Net) packet. Listen on UDP port 6455 if you want real-time performance data from the node. This is optional — the node functions identically whether or not anything is listening.
+
+---
+
+## 4. Device Naming — ArtAddress
+
+PrimusV3 nodes support remote renaming via the standard Art-Net **ArtAddress** opcode (`0x6000`). The custom name is stored in NVS (non-volatile storage) and persists across reboots. The TFT display header updates immediately.
+
+### ArtAddress Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x6000` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12–13 | 2 | Reserved | `0x0000` |
+| 14–31 | 18 | Short Name | New name (null-terminated, max 17 chars) |
+
+The node stores the name in ESP32 NVS Preferences, updates the TFT display header, and broadcasts an updated ArtPollReply.
+
+---
+
+## 5. Remote Output Configuration — ArtOutputConfig (custom opcode 0x8100)
+
+PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. This allows the sender to change what type of LED (strip, grid, off) is connected to each physical output without reflashing firmware.
+
+### ArtOutputConfig Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x8100` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | NumOutputs | Number of outputs to configure (1–3) |
+| 13+ | N | Type IDs | One byte per output: 0=Off, 1=Short Strip, 2=Long Strip, 3=Grid |
+
+**Total: 13 + NumOutputs bytes.** The node updates its output configuration, clears pixel buffers, recounts active outputs, and broadcasts an updated ArtPollReply.
+
+### Type ID Mapping
+
+| ID | Type | Pixels |
+|----|------|--------|
+| 0 | Off | 0 |
+| 1 | Short Strip | 30 |
+| 2 | Long Strip | 72 |
+| 3 | Grid 8×8 | 64 |
+
+---
+
+## 6. Effects Engine (Companion Tool)
+
+The companion `led_controller.py` provides a web-based effects engine with the following built-in effects:
+
+| Effect | Description | Extra Parameters |
+|--------|-------------|------------------|
+| none | Output off (black) | — |
+| solid | Static color | — |
+| pulse | Breathing/fading | speed |
+| linear | Color gradient sweep | speed, angle (grid) |
+| constrainbow | Constrained rainbow gradient | speed |
+| rainbow | Full-spectrum rainbow | speed |
+| knight_rider | Bouncing highlight bar | speed, highlight_width |
+| chase | Progressive color fill | speed, chase_origin, angle (grid) |
+| radial | Radial gradient from center (grid only) | speed |
+| spiral | Spiral pattern (grid only) | speed |
+
+### Look Architecture
+
+The effects engine uses a **Look** architecture — animation state is computed once per frame and sent identically to all connected devices. Each Look has 3 output slots matching the 3 physical outputs (A0, A1, A2). Each slot has its own type, effect, colors, speed, and parameters.
+
+---
+
+## 7. HTTP Control API (Companion Tool)
+
+The companion tool serves a web UI and exposes a JSON API:
+
+### GET Endpoints
+
+| Route | Description |
+|---|---|
+| `GET /` | HTML control interface |
+| `GET /api/state` | Full JSON state dump (look, devices, effects, FPS) |
+
+### POST Endpoints
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/update` | Various fields | Update state: output type, effect, color, speed, FPS, device IP, grid rotation, angle, highlight_width, chase_origin, playback mode |
+| `POST /api/connect` | `{device: N}` | Connect device by index |
+| `POST /api/disconnect` | `{device: N}` | Disconnect device by index |
+| `POST /api/connect_all` | `{}` | Connect all devices |
+| `POST /api/disconnect_all` | `{}` | Disconnect all devices |
+| `POST /api/discover` | `{}` | Run ArtPoll discovery, returns `[{ip, short_name, long_name, num_ports, universes}]` |
+| `POST /api/add_discovered` | `{ip, short_name, ...}` | Add discovered node as device and auto-connect |
+| `POST /api/remove_device` | `{device: N}` | Remove device by index |
+| `POST /api/rename_node` | `{device: N, name: "..."}` | Rename device — also sends ArtAddress to firmware |
+
+---
+
+## 8. TFT Display
+
+The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Screen modes are cycled with button D0:
+
+| Screen | Content |
+|--------|---------|
+| **Home** (default) | Large device name, WiFi status + RSSI, IP address, SSID, live FPS |
+| **Status** | Per-output type/pixel count/universe, RECV/IDLE status, FPS, heap |
+| **Error** | Error message and details |
+| **Test Mode** | Test pattern name (entered via D1 button) |
+
+The device name shown on the TFT is the custom name (set via ArtAddress/Rename) or the default firmware name "PrimusV3".
+
+---
+
+## 9. Integration Strategies by Tool
+
+### TouchDesigner
+
+TouchDesigner has native Art-Net support via the **Art-Net CHOP Out**.
+
+1. **Discovery:** TouchDesigner's Art-Net nodes auto-discover via ArtPoll. PrimusV3 nodes should appear automatically.
+2. **Sending data:** Create an Art-Net Out CHOP, set Universe (0/1/2), set Destination IP to the node's IP. Feed RGB as CHOP samples.
+3. **FPS monitoring:** Use a UDP In DAT on port 6455 to capture the 7-byte telemetry packet.
+
+### MadMapper / MadLight
+
+1. **Discovery:** Preferences → Protocols → Art-Net. Nodes appear after scan.
+2. **Patch:** Map fixtures to universes 0, 1, 2 with appropriate pixel counts.
+
+### Isadora
+
+1. **Setup:** Preferences → Communications → Art-Net.
+2. **Output:** Use Art-Net Output actor, set Universe to 0/1/2.
+
+### Processing (Java)
+
+Use [ArtNet4j](https://github.com/cansik/artnet4j) or manual UDP:
+
+```java
+import ch.bildspur.artnet.*;
+ArtNetClient artnet = new ArtNetClient();
+artnet.start();
+byte[] dmx = new byte[90];  // 30 pixels × 3
+artnet.unicastDmx("192.168.1.100", 0, 0, dmx);
+```
+
+### Python (Direct)
+
+```python
+import socket, struct
+
+ARTNET_HEADER = b"Art-Net\x00"
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+def send_artdmx(ip, universe, rgb_bytes, sequence=1):
+    if len(rgb_bytes) % 2 != 0:
+        rgb_bytes += b'\x00'
+    pkt = bytearray()
+    pkt += ARTNET_HEADER
+    pkt += struct.pack("<H", 0x5000)
+    pkt += struct.pack(">H", 14)
+    pkt += bytes([sequence, 0])
+    pkt += struct.pack("<H", universe)
+    pkt += struct.pack(">H", len(rgb_bytes))
+    pkt += rgb_bytes
+    sock.sendto(pkt, (ip, 6454))
+
+data = bytes([255, 0, 0] * 30)
+send_artdmx("192.168.1.100", 0, data)
+```
+
+### Any Software with sACN/E1.31
+
+PrimusV3 speaks **Art-Net only** (not sACN). Use OLA (Open Lighting Architecture) to bridge sACN → Art-Net if needed.
+
+---
+
+## 10. Quick-Start Checklist
+
+1. **Verify network.** Sender and node must be on the same subnet (default: 192.168.1.x/24, WiFi SSID: NETGEAR44).
+2. **Discover.** Send ArtPoll to broadcast:6454. Expect ArtPollReply within ~100 ms.
+3. **Send data.** Build ArtDmx packets for active universes with correct pixel counts. Send to node IP on port 6454.
+4. **Verify.** The TFT display shows device name, WiFi status, IP, RSSI, and live FPS.
+5. **Optional telemetry.** Listen on UDP 6455 for 7-byte FPS packets from the node.
+
+---
+
+## 11. Adding a New Output Type
+
+### On the Arduino side (config.h)
+
+Add a row to `OUTPUT_TYPE_TABLE[]` and a value to the `OutputType` enum:
+
+```c
+enum OutputType {
+  OUTPUT_OFF         = 0,
+  OUTPUT_SHORT_STRIP = 1,
+  OUTPUT_LONG_STRIP  = 2,
+  OUTPUT_GRID        = 3,
+  OUTPUT_RING        = 4,          // ← new
+};
+
+const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
+  { "Off",          0, 0, LAYOUT_NONE,   0, 0 },
+  { "Short Strip", 30, 3, LAYOUT_LINEAR, 0, 0 },
+  { "Long Strip",  72, 3, LAYOUT_LINEAR, 0, 0 },
+  { "Grid 8x8",   64, 3, LAYOUT_GRID,   8, 8 },
+  { "Ring",        24, 3, LAYOUT_LINEAR, 0, 0 },  // ← new
+};
+```
+
+### On the sender side (led_controller.py)
+
+Add a matching entry to `OUTPUT_TYPES` and `LOOK_OUTPUT_TYPES`:
+
+```python
+OUTPUT_TYPES = {
+    "none":        {"pixels": 0,  "layout": "none"},
+    "short_strip": {"pixels": 30, "layout": "linear"},
+    "long_strip":  {"pixels": 72, "layout": "linear"},
+    "grid":        {"pixels": 64, "layout": "grid", "grid_size": [8, 8]},
+    "ring":        {"pixels": 24, "layout": "linear"},  # ← new
+}
+
+LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "ring"]
+# Indices must match firmware OutputType enum IDs
+```
+
+Pixel counts and byte sizes propagate automatically from these tables — no other code changes needed.
