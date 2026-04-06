@@ -22,7 +22,7 @@ A visual interface to all of the saved looks. It should be a simple, open format
 # Look Mixer
 This works as a simple timeline style interface that allows the creation of a 'Look'. A scene can have multiple 'Clips' combined and crossfaded together over time using this interface.
 Constraints
--A scene should be defined by the number and type of outputs. For instance A0-grid, A1-short strip, A2-none. 
+-A scene should be defined by the number and type of outputs. For instance A0-grid, A1-short strip. 
 -It should have its own playback method once, loop, boomerang.
 -Look Types should be draggable onto the timeline and also moved / scaled by dragging
 
