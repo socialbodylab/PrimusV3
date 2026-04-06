@@ -1,5 +1,5 @@
 # Goals for V 3.1 update
-the current version of the sender and the Arduino work well to create simple animated patterns and stream it to selected devices over wifi. For version 3.1 the focus is to expand the workflow to be able to design "Clips" using the existing interface, but then save them into a "Clip Library" where they can then be combined into triggerable timelines in the using the "Look Mixer". The "Look Controller" will be used to trigger looks during performance.
+the current version of the sender and the Arduino work well to create simple animated patterns and stream it to selected devices over wifi. For version 3.1 the focus is to expand the workflow to be able to design "Clips" using the existing interface, but then save them into a "Clip Library" where they can then be combined into triggerable timelines using the "Look Mixer". The "Look Controller" will be used to trigger looks during performance.
 
 # Simplify Outputs
 - Reduce number of outputs to 2. A0 , A1
