@@ -7,7 +7,7 @@ the current version of the sender and the Arduino work well to create simple ani
 
 # Live Clip Designer
 This is similar to what the interface currently does. The notion is that this is where the components of looks can be prototyped.
-- - To add
+- To add
 This will need a 'Save Look' which will require naming. It should split the components into individual units, but be named conventionally. For example, lets say a prototyped look has 1 short strip and 1 grid. When a look is saved and the user calls it "LoadingAnim" the indidividual units should be called LoadingAnim_sStrip1, LoadingAnim_grid1. (They are numbered because there can be multiple of the same type).
 
 # Clip Library
