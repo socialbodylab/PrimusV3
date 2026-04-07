@@ -7,6 +7,8 @@ import os
 import threading
 import time
 
+from mixer import load_look
+
 
 def _cues_file():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "cues.json")
@@ -48,10 +50,14 @@ class CueList:
 
     def get_json(self):
         with self.lock:
+            elapsed = 0.0
+            if self.playing and self.play_start_time > 0:
+                elapsed = round(time.monotonic() - self.play_start_time, 1)
             return {
                 "cues": list(self.cues),
                 "current_index": self.current_index,
                 "playing": self.playing,
+                "elapsed": elapsed,
             }
 
     def set_cues(self, cues):
@@ -74,10 +80,14 @@ class CueList:
             next_idx = self.current_index + 1
             if next_idx >= len(self.cues):
                 next_idx = 0  # wrap around
+            cue = self.cues[next_idx]
+            look_id = cue.get("look_id")
+            if look_id and load_look(look_id) is None:
+                return None  # look was deleted
             self.current_index = next_idx
             self.playing = True
             self.play_start_time = time.monotonic()
-            return dict(self.cues[self.current_index])
+            return dict(cue)
 
     def stop(self):
         """Stop playback."""
@@ -89,6 +99,9 @@ class CueList:
         with self.lock:
             for i, cue in enumerate(self.cues):
                 if cue.get("number") == number:
+                    look_id = cue.get("look_id")
+                    if look_id and load_look(look_id) is None:
+                        return None  # look was deleted
                     self.current_index = i
                     self.playing = True
                     self.play_start_time = time.monotonic()

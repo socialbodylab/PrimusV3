@@ -12,10 +12,35 @@ document.addEventListener("alpine:init", () => {
         looks: [],
         addModal: false,
         addLookId: "",
+        elapsed: 0,
+        _elapsedInterval: null,
 
         async init() {
             await this.refresh();
             await this.loadLooks();
+            // Keyboard shortcuts: Space=GO, Escape=STOP
+            this._keyHandler = (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+                if (Alpine.store("app").mode !== "controller") return;
+                if (e.code === "Space") { e.preventDefault(); this.go(); }
+                if (e.code === "Escape") { e.preventDefault(); this.stop(); }
+            };
+            document.addEventListener("keydown", this._keyHandler);
+            // Elapsed timer
+            this._elapsedInterval = setInterval(() => this._pollElapsed(), 250);
+        },
+
+        destroy() {
+            if (this._keyHandler) document.removeEventListener("keydown", this._keyHandler);
+            if (this._elapsedInterval) clearInterval(this._elapsedInterval);
+        },
+
+        async _pollElapsed() {
+            if (!this.playing) { this.elapsed = 0; return; }
+            try {
+                const data = await api("GET", "/api/cues");
+                this.elapsed = data.elapsed || 0;
+            } catch(e) {}
         },
 
         async refresh() {
@@ -101,6 +126,17 @@ document.addEventListener("alpine:init", () => {
         isStandby(idx) {
             if (!this.playing) return idx === 0;
             return idx === this.currentIndex + 1;
+        },
+
+        nextCueName() {
+            let nextIdx;
+            if (!this.playing) {
+                nextIdx = 0;
+            } else {
+                nextIdx = this.currentIndex + 1;
+                if (nextIdx >= this.cues.length) nextIdx = 0;
+            }
+            return this.cues[nextIdx] ? this.cues[nextIdx].name : '-';
         },
     }));
 });

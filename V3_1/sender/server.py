@@ -160,6 +160,19 @@ class Handler(BaseHTTPRequestHandler):
             cue = self.cue_list.go_to_cue(number)
             self._json_response({"cue": cue})
 
+        elif path == "/api/mixer/preview":
+            # Start previewing a look on connected devices
+            look = data
+            if look and look.get("tracks"):
+                self.controller_state.start_mixer_preview(look)
+                self._ok()
+            else:
+                self._respond(400, "application/json", b'{"error":"invalid look"}')
+
+        elif path == "/api/mixer/stop_preview":
+            self.controller_state.stop_mixer_preview()
+            self._ok()
+
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
 

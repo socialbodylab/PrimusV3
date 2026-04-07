@@ -170,6 +170,9 @@ class ControllerState:
 
         # Mixer / controller override pixel buffers (set externally)
         self._override_pixels = None  # list of pixel lists per output, or None
+        # Mixer live preview state
+        self._mixer_preview_look = None
+        self._mixer_preview_start = 0.0
 
     # ------------------------------------------------------------------
     #  JSON serialization
@@ -403,6 +406,27 @@ class ControllerState:
         """Set override pixels from mixer or controller. Pass None to clear."""
         with self.lock:
             self._override_pixels = pixels_per_output
+
+    def start_mixer_preview(self, look):
+        """Start previewing a look from the mixer on connected devices."""
+        with self.lock:
+            self._mixer_preview_look = look
+            self._mixer_preview_start = time.monotonic()
+            self.playback_source = self.SOURCE_MIXER
+
+    def stop_mixer_preview(self):
+        """Stop mixer preview, return to designer."""
+        with self.lock:
+            self._mixer_preview_look = None
+            self._override_pixels = None
+            self.playback_source = self.SOURCE_DESIGNER
+
+    def get_mixer_preview(self):
+        """Return (look, elapsed) if mixer preview is active, else (None, 0)."""
+        with self.lock:
+            if self._mixer_preview_look:
+                return self._mixer_preview_look, time.monotonic() - self._mixer_preview_start
+            return None, 0.0
 
     # ------------------------------------------------------------------
     #  Animation tick

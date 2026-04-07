@@ -8,6 +8,7 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("clipDesigner", () => ({
         saveModal: false,
         saveName: "",
+        saveDuration: 5.0,
 
         get state() { return Alpine.store("app").state; },
         get look() { return this.state?.look; },
@@ -81,7 +82,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ── Save ──
-        openSave() { this.saveName = ""; this.saveModal = true; },
+        openSave() { this.saveName = ""; this.saveDuration = 5.0; this.saveModal = true; },
 
         async doSave() {
             if (!this.saveName.trim()) return;
@@ -95,6 +96,7 @@ document.addEventListener("alpine:init", () => {
                 angle: o.angle,
                 highlight_width: o.highlight_width,
                 chase_origin: o.chase_origin,
+                duration: this.saveDuration,
             }));
             await api("POST", "/api/clips/save", {
                 name: this.saveName.trim(),

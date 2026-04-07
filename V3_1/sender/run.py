@@ -21,17 +21,48 @@ from server import create_server
 def _mixer_controller_loop(state, cue_list):
     """Background thread: when controller is playing, compute look frames."""
     import time
+    # Caches persist across frames for performance and stateful effects
+    _look_cache = {}      # look_id -> look dict
+    _clip_cache = {}      # clip_id -> clip dict
+    _state_cache = {}     # segment_id -> effect state list
+    _current_look_id = None
+
     while state.running:
+        # Mixer preview takes priority over controller
+        preview_look, preview_elapsed = state.get_mixer_preview()
+        if preview_look:
+            pixels = compute_look_frame(preview_look, preview_elapsed,
+                                        fps=state.fps,
+                                        clip_cache=_clip_cache,
+                                        state_cache=_state_cache)
+            state.set_override_pixels(pixels)
+            time.sleep(1.0 / max(1, state.fps))
+            continue
+
         look_id = cue_list.get_current_look_id()
         if look_id and cue_list.playing:
-            look = load_look(look_id)
+            # Reload look if it changed
+            if look_id != _current_look_id:
+                _current_look_id = look_id
+                _look_cache.pop(look_id, None)
+                _state_cache.clear()
+            if look_id not in _look_cache:
+                look = load_look(look_id)
+                if look:
+                    _look_cache[look_id] = look
+            look = _look_cache.get(look_id)
             if look:
                 elapsed = cue_list.get_elapsed()
-                pixels = compute_look_frame(look, elapsed)
+                pixels = compute_look_frame(look, elapsed, fps=state.fps,
+                                            clip_cache=_clip_cache,
+                                            state_cache=_state_cache)
                 state.set_override_pixels(pixels)
             else:
                 state.set_override_pixels(None)
         elif state.playback_source == state.SOURCE_DESIGNER:
+            if _current_look_id is not None:
+                _current_look_id = None
+                _state_cache.clear()
             state.set_override_pixels(None)
         time.sleep(1.0 / max(1, state.fps))
 

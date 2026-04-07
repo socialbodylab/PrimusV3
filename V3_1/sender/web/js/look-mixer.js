@@ -14,7 +14,16 @@ document.addEventListener("alpine:init", () => {
         saveModal: false,
         saveName: "",
         saveDesc: "",
+        loadModal: false,
+        savedLooks: [],
         pixelsPerSecond: 80,
+        editModal: false,
+        editTrack: -1,
+        editSeg: -1,
+        editData: null,
+        // Drag state
+        _drag: null,
+        previewing: false,
 
         get outputTypes() {
             return Alpine.store("app").state?.look_output_types || [];
@@ -63,6 +72,7 @@ document.addEventListener("alpine:init", () => {
             const lastEnd = track.segments.reduce(
                 (max, s) => Math.max(max, s.start_time + s.duration), 0);
             track.segments.push({
+                id: crypto.randomUUID(),
                 clip_id: clip.id,
                 clip_name: clip.name,
                 start_color: clip.start_color,
@@ -81,6 +91,79 @@ document.addEventListener("alpine:init", () => {
 
         removeSegment(trackIdx, segIdx) {
             this.look.tracks[trackIdx]?.segments.splice(segIdx, 1);
+        },
+
+        openEditSegment(trackIdx, segIdx) {
+            const seg = this.look.tracks[trackIdx]?.segments[segIdx];
+            if (!seg) return;
+            this.editTrack = trackIdx;
+            this.editSeg = segIdx;
+            this.editData = {
+                start_time: seg.start_time,
+                duration: seg.duration,
+                fade_in: seg.fade_in,
+                fade_out: seg.fade_out,
+            };
+            this.editModal = true;
+        },
+
+        applyEditSegment() {
+            const seg = this.look.tracks[this.editTrack]?.segments[this.editSeg];
+            if (!seg || !this.editData) return;
+            seg.start_time = Math.max(0, this.editData.start_time);
+            seg.duration = Math.max(0.1, this.editData.duration);
+            seg.fade_in = Math.max(0, Math.min(this.editData.fade_in, seg.duration / 2));
+            seg.fade_out = Math.max(0, Math.min(this.editData.fade_out, seg.duration / 2));
+            this.editModal = false;
+        },
+
+        // ── Drag to move/resize segments ──
+        startDrag(event, trackIdx, segIdx, mode) {
+            // mode: 'move' or 'resize-end'
+            event.preventDefault();
+            const seg = this.look.tracks[trackIdx]?.segments[segIdx];
+            if (!seg) return;
+            this._drag = {
+                trackIdx, segIdx, mode,
+                startX: event.clientX,
+                origStart: seg.start_time,
+                origDuration: seg.duration,
+            };
+            const onMove = (e) => this._onDragMove(e);
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                this._drag = null;
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        },
+
+        _onDragMove(event) {
+            if (!this._drag) return;
+            const dx = event.clientX - this._drag.startX;
+            const dtSec = dx / this.pixelsPerSecond;
+            const seg = this.look.tracks[this._drag.trackIdx]?.segments[this._drag.segIdx];
+            if (!seg) return;
+            if (this._drag.mode === 'move') {
+                seg.start_time = Math.max(0, this._drag.origStart + dtSec);
+            } else if (this._drag.mode === 'resize-end') {
+                seg.duration = Math.max(0.5, this._drag.origDuration + dtSec);
+            }
+        },
+
+        // ── Preview on devices ──
+        async previewOnDevices() {
+            if (!this.look) return;
+            await api("POST", "/api/mixer/preview", this.look);
+            this.previewing = true;
+            this.play();
+        },
+
+        async stopPreview() {
+            await api("POST", "/api/mixer/stop_preview");
+            this.previewing = false;
+            this.stop();
         },
 
         // ── Segment positioning (CSS) ──
@@ -171,6 +254,11 @@ document.addEventListener("alpine:init", () => {
             const saved = await api("POST", "/api/looks/save", this.look);
             this.look.id = saved.id;
             this.saveModal = false;
+        },
+
+        async openLoad() {
+            this.savedLooks = await api("GET", "/api/looks");
+            this.loadModal = true;
         },
 
         // ── Load existing ──

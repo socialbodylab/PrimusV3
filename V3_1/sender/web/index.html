@@ -231,6 +231,14 @@
                            placeholder="e.g. OpeningChase"
                            @keydown.enter="doSave()">
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Duration (seconds)</label>
+                    <div class="flex items-center gap-2">
+                        <input type="range" class="form-range" min="0.5" max="60" step="0.5"
+                               x-model.number="saveDuration">
+                        <span class="text-sm" x-text="saveDuration + 's'"></span>
+                    </div>
+                </div>
                 <p class="text-sm text-muted">Each non-empty output will be saved as a separate clip (e.g. OpeningChase_grid1, OpeningChase_short_strip1).</p>
                 <div class="modal-actions">
                     <button class="btn" @click="saveModal = false">Cancel</button>
@@ -295,6 +303,7 @@
             <h2 class="section-title" style="margin:0">Look Mixer</h2>
             <div class="btn-group">
                 <button class="btn" @click="newLook()">New</button>
+                <button class="btn" @click="openLoad()">Load</button>
                 <button class="btn btn-primary" @click="openSave()">Save</button>
             </div>
         </div>
@@ -333,6 +342,11 @@
                     x-text="playing ? 'Pause' : 'Play'"></button>
             <button class="btn" @click="reset()">Reset</button>
             <span class="transport-time" x-text="formatTime(playTime)"></span>
+            <div style="flex:1"></div>
+            <button class="btn btn-primary" @click="previewOnDevices()"
+                    x-show="!previewing">Preview on Devices</button>
+            <button class="btn btn-danger" @click="stopPreview()"
+                    x-show="previewing">Stop Preview</button>
         </div>
 
         <!-- Timeline -->
@@ -352,12 +366,15 @@
                 <div class="timeline-track">
                     <span class="timeline-track-label"
                           x-text="track.port"></span>
-                    <template x-for="(seg, si) in track.segments" :key="si">
+                    <template x-for="(seg, si) in track.segments" :key="seg.id || si">
                         <div class="timeline-segment"
                              :style="segmentStyle(seg)"
-                             :title="seg.clip_name"
-                             @dblclick="removeSegment(ti, si)">
-                            <span x-text="seg.clip_name"></span>
+                             :title="seg.clip_name + ' (' + seg.duration.toFixed(1) + 's)'"
+                             @mousedown="startDrag($event, ti, si, 'move')"
+                             @dblclick.stop="openEditSegment(ti, si)">
+                            <span class="segment-label" x-text="seg.clip_name"></span>
+                            <div class="segment-resize-handle"
+                                 @mousedown.stop="startDrag($event, ti, si, 'resize-end')"></div>
                         </div>
                     </template>
                 </div>
@@ -388,6 +405,55 @@
             </template>
         </div>
 
+        <!-- Segment edit modal -->
+        <div class="modal-overlay" x-show="editModal" @click.self="editModal = false">
+            <div class="modal">
+                <div class="modal-title">Edit Segment</div>
+                <template x-if="editData">
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label">Start Time (s)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" class="form-input" min="0" step="0.1"
+                                       x-model.number="editData.start_time" style="width:100px">
+                                <span class="text-sm text-muted" x-text="editData.start_time.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Duration (s)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" class="form-range" min="0.5" max="60" step="0.5"
+                                       x-model.number="editData.duration">
+                                <span class="text-sm" x-text="editData.duration.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Fade In (s)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" class="form-range" min="0" max="10" step="0.1"
+                                       x-model.number="editData.fade_in">
+                                <span class="text-sm" x-text="editData.fade_in.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Fade Out (s)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" class="form-range" min="0" max="10" step="0.1"
+                                       x-model.number="editData.fade_out">
+                                <span class="text-sm" x-text="editData.fade_out.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+                <div class="modal-actions">
+                    <button class="btn btn-danger btn-sm" @click="removeSegment(editTrack, editSeg); editModal = false">Delete</button>
+                    <div style="flex:1"></div>
+                    <button class="btn" @click="editModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="applyEditSegment()">Apply</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Save modal -->
         <div class="modal-overlay" x-show="saveModal" @click.self="saveModal = false">
             <div class="modal">
@@ -407,6 +473,28 @@
                 </div>
             </div>
         </div>
+
+        <!-- Load modal -->
+        <div class="modal-overlay" x-show="loadModal" @click.self="loadModal = false">
+            <div class="modal">
+                <div class="modal-title">Load Look</div>
+                <template x-if="savedLooks.length === 0">
+                    <p class="text-muted">No saved looks yet.</p>
+                </template>
+                <div style="max-height:300px;overflow-y:auto">
+                    <template x-for="sl in savedLooks" :key="sl.id">
+                        <div class="device-card" style="cursor:pointer" @click="loadLook(sl.id); loadModal = false">
+                            <div class="device-name" x-text="sl.name"></div>
+                            <div class="text-sm text-muted" x-text="sl.description || 'No description'"></div>
+                            <div class="text-sm text-muted" x-text="sl.total_duration + 's · ' + (sl.tracks?.reduce((n,t) => n + t.segments.length, 0) || 0) + ' segments'"></div>
+                        </div>
+                    </template>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" @click="loadModal = false">Cancel</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ──── PANEL: Look Controller ──── -->
@@ -417,9 +505,25 @@
         </div>
 
         <!-- Transport -->
-        <div class="flex gap-4 mb-4 items-center">
-            <button class="btn-go" @click="go()">GO</button>
-            <button class="btn-stop" @click="stop()">STOP</button>
+        <div class="controller-transport">
+            <div class="controller-transport-main">
+                <button class="btn-go" @click="go()">GO</button>
+                <button class="btn-stop" @click="stop()">STOP</button>
+            </div>
+            <div class="controller-status">
+                <div class="controller-now" x-show="playing && currentIndex >= 0">
+                    <span class="controller-label">NOW</span>
+                    <span class="controller-cue-name" x-text="currentIndex >= 0 && cues[currentIndex] ? cues[currentIndex].name : '-'"></span>
+                    <span class="controller-elapsed" x-text="elapsed.toFixed(1) + 's'"></span>
+                </div>
+                <div class="controller-next">
+                    <span class="controller-label">NEXT</span>
+                    <span class="controller-cue-name" x-text="nextCueName()"></span>
+                </div>
+            </div>
+            <div class="text-sm text-muted" style="margin-top:8px">
+                Space = GO &middot; Esc = STOP
+            </div>
         </div>
 
         <!-- Cue list table -->

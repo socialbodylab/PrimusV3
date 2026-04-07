@@ -354,6 +354,26 @@ input[type="color"] {
     white-space: nowrap;
     text-overflow: ellipsis;
     border: 1px solid rgba(255,255,255,0.2);
+    user-select: none;
+}
+.timeline-segment:active { cursor: grabbing; }
+
+.segment-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.segment-resize-handle {
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 6px;
+    cursor: ew-resize;
+    background: rgba(255,255,255,0.15);
+    border-left: 1px solid rgba(255,255,255,0.3);
+}
+.segment-resize-handle:hover {
+    background: rgba(255,255,255,0.3);
 }
 
 .timeline-playhead {
@@ -396,6 +416,66 @@ input[type="color"] {
 }
 .cue-row.standby {
     background: rgba(255, 170, 0, 0.08);
+}
+
+/* ── CONTROLLER TRANSPORT ──────────────────────────────── */
+
+.controller-transport {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.controller-transport-main {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.controller-status {
+    display: flex;
+    gap: 16px;
+}
+
+.controller-now, .controller-next {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    flex: 1;
+}
+
+.controller-now {
+    border-left: 3px solid var(--accent);
+}
+
+.controller-next {
+    border-left: 3px solid var(--warning);
+}
+
+.controller-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    min-width: 36px;
+}
+
+.controller-cue-name {
+    font-size: 16px;
+    font-weight: 600;
+    flex: 1;
+}
+
+.controller-elapsed {
+    font-family: monospace;
+    font-size: 18px;
+    color: var(--accent);
 }
 
 .cue-number {

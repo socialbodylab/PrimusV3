@@ -46,7 +46,11 @@ def new_look(name, outputs, description=""):
 
 def save_look(look):
     d = _ensure_dir()
+    if not look.get("id"):
+        look["id"] = str(uuid.uuid4())
     look["modified"] = datetime.now(timezone.utc).isoformat()
+    if not look.get("created"):
+        look["created"] = look["modified"]
     path = os.path.join(d, f"{look['id']}.json")
     with open(path, "w") as f:
         json.dump(look, f, indent=2)
@@ -108,9 +112,19 @@ def _wrap_time(t, total_duration, playback):
         return t % total_duration
 
 
-def _compute_segment_pixels(segment, local_t, pixel_count, grid):
+def _compute_segment_pixels(segment, local_t, pixel_count, grid, fps=30,
+                            clip_cache=None, state_cache=None):
     """Compute pixel output for one segment at local time."""
-    clip = load_clip(segment["clip_id"])
+    clip_id = segment["clip_id"]
+    seg_id = segment.get("id", clip_id)
+
+    # Use cache to avoid disk reads every frame
+    if clip_cache is not None and clip_id in clip_cache:
+        clip = clip_cache[clip_id]
+    else:
+        clip = load_clip(clip_id)
+        if clip_cache is not None and clip is not None:
+            clip_cache[clip_id] = clip
     if clip is None:
         return [(0, 0, 0)] * pixel_count
 
@@ -120,13 +134,21 @@ def _compute_segment_pixels(segment, local_t, pixel_count, grid):
     scaled_t = local_t * speed
     af = compute_anim_factor(scaled_t, clip.get("playback", "loop"))
 
+    # Preserve per-segment effect state (for stateful effects like constrainbow)
+    if state_cache is not None:
+        if seg_id not in state_cache:
+            state_cache[seg_id] = []
+        state = state_cache[seg_id]
+    else:
+        state = []
+
     return fn(
-        count=pixel_count, t=scaled_t, dt=1.0 / 30,
+        count=pixel_count, t=scaled_t, dt=1.0 / max(fps, 1),
         speed=speed, anim_factor=af,
         playback=clip.get("playback", "loop"),
         start_color=tuple(clip.get("start_color", (255, 0, 255))),
         end_color=tuple(clip.get("end_color", (0, 255, 255))),
-        state=[],
+        state=state,
         grid=grid, angle=clip.get("angle", 0),
         highlight_width=clip.get("highlight_width", 5),
         chase_origin=clip.get("chase_origin", "start"),
@@ -151,12 +173,17 @@ def _segment_fade_factor(segment, local_t):
     return max(0.0, min(1.0, factor))
 
 
-def compute_look_frame(look, t):
+def compute_look_frame(look, t, fps=30, clip_cache=None, state_cache=None):
     """Compute pixel buffers for all tracks at time `t`.
 
     Returns a list of pixel lists, one per output/track.
     Each pixel list is [(r,g,b), ...] or empty if the output type is 'none'.
     """
+    if clip_cache is None:
+        clip_cache = {}
+    if state_cache is None:
+        state_cache = {}
+
     total_duration = look.get("total_duration", 10.0)
     playback = look.get("playback", "loop")
     local_t = _wrap_time(t, total_duration, playback)
@@ -195,7 +222,9 @@ def compute_look_frame(look, t):
         blended = None
         for seg in active:
             seg_local_t = local_t - seg.get("start_time", 0.0)
-            pixels = _compute_segment_pixels(seg, seg_local_t, pixel_count, grid)
+            pixels = _compute_segment_pixels(seg, seg_local_t, pixel_count, grid,
+                                             fps=fps, clip_cache=clip_cache,
+                                             state_cache=state_cache)
             fade = _segment_fade_factor(seg, seg_local_t)
 
             # Apply fade envelope
