@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrimusV3.1 LED Controller</title>
+<link rel="stylesheet" href="/css/style.css">
+<script defer src="/js/alpine.min.js"></script>
+<script src="/js/app.js"></script>
+<script src="/js/clip-designer.js"></script>
+<script src="/js/clip-library.js"></script>
+<script src="/js/look-mixer.js"></script>
+<script src="/js/look-controller.js"></script>
+</head>
+<body>
+
+<!-- ==================== NAVBAR ==================== -->
+<nav class="navbar">
+    <div class="navbar-brand">PrimusV3.1</div>
+    <div class="navbar-tabs">
+        <template x-data x-for="m in $store.app.modes">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="$store.app.modeLabels[m]"></div>
+        </template>
+    </div>
+    <div class="navbar-status" x-data>
+        <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
+        <span x-text="$store.conn.devices.filter(d=>d.connected).length + '/' + $store.conn.devices.length + ' devices'"></span>
+    </div>
+</nav>
+
+<!-- ==================== MAIN ==================== -->
+<div class="main-content" x-data>
+
+    <!-- ──── SIDEBAR: Devices ──── -->
+    <div class="sidebar">
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Devices</span>
+            <div class="btn-group">
+                <button class="btn btn-sm" @click="$store.conn.connectAll()">All On</button>
+                <button class="btn btn-sm" @click="$store.conn.disconnectAll()">All Off</button>
+            </div>
+        </div>
+
+        <template x-for="(dev, di) in $store.conn.devices" :key="di">
+            <div class="device-card">
+                <div class="device-header">
+                    <span class="device-name" x-text="dev.name"></span>
+                    <div class="btn-group">
+                        <button class="btn btn-sm"
+                                :class="{ 'btn-primary': !dev.connected }"
+                                @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
+                                x-text="dev.connected ? 'Off' : 'On'"></button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
+                    </div>
+                </div>
+                <div class="device-ip" x-text="dev.ip"></div>
+                <div class="device-outputs">
+                    <template x-for="o in dev.outputs">
+                        <span class="output-badge" x-text="o.name + ': ' + o.type"></span>
+                    </template>
+                </div>
+                <div class="text-sm text-muted mt-2"
+                     x-show="dev.receiver_fps != null"
+                     x-text="'RX: ' + dev.receiver_fps + ' fps'"></div>
+            </div>
+        </template>
+
+        <button class="btn btn-sm mt-2" style="width:100%"
+                @click="$store.conn.discover()"
+                :disabled="$store.conn.discovering">
+            <span x-text="$store.conn.discovering ? 'Scanning...' : 'Discover Devices'"></span>
+        </button>
+
+        <template x-if="$store.conn.discovered.length > 0">
+            <div class="mt-2">
+                <div class="text-sm text-muted mb-2">Discovered:</div>
+                <template x-for="node in $store.conn.discovered" :key="node.ip">
+                    <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
+                        <div class="device-name" x-text="node.short_name || node.ip"></div>
+                        <div class="device-ip" x-text="node.ip"></div>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- ──── PANEL: Clip Designer ──── -->
+    <div class="panel" x-show="$store.app.mode === 'designer'" x-data="clipDesigner">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="section-title" style="margin:0">Clip Designer</h2>
+            <div class="btn-group">
+                <button class="btn btn-primary" @click="openSave()">Save Clip</button>
+            </div>
+        </div>
+
+        <!-- FPS -->
+        <div class="output-section" x-show="state">
+            <div class="form-group">
+                <label class="form-label">FPS</label>
+                <div class="flex items-center gap-2">
+                    <input type="range" class="form-range" min="1" max="60"
+                           :value="state?.fps || 30"
+                           @input="updateFps($event.target.value)">
+                    <span class="text-sm" x-text="state?.fps || 30"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-output controls -->
+        <template x-for="(out, oi) in outputs" :key="oi">
+            <div class="output-section">
+                <div class="output-header">
+                    <span class="output-name" x-text="out.name"></span>
+                    <span class="text-sm text-muted" x-text="out.count + 'px'"></span>
+                </div>
+
+                <!-- Preview -->
+                <canvas class="preview-canvas mb-2"
+                        :x-ref="'preview_' + oi"
+                        :style="out.grid ? 'width:128px;height:128px' : 'width:100%;height:24px'"
+                        x-effect="drawPreview(oi)"></canvas>
+
+                <!-- Output Type -->
+                <div class="form-group">
+                    <label class="form-label">Output Type</label>
+                    <select class="form-select"
+                            :value="out.type"
+                            @change="updateOutputType(oi, $event.target.value)">
+                        <template x-for="t in outputTypes">
+                            <option :value="t" x-text="t"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <!-- Effect -->
+                <div class="form-group" x-show="out.type !== 'none'">
+                    <label class="form-label">Effect</label>
+                    <select class="form-select"
+                            :value="out.effect"
+                            @change="updateOutput(oi, 'effect', $event.target.value)">
+                        <template x-for="e in effects">
+                            <option :value="e" x-text="e"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <!-- Colors -->
+                <div class="form-group" x-show="out.type !== 'none' && needsColors(out.effect)">
+                    <label class="form-label">Colors</label>
+                    <div class="color-row">
+                        <input type="color"
+                               :value="startHex(oi)"
+                               @input="updateColor(oi, 'start_color', $event.target.value)">
+                        <span class="text-sm">Start</span>
+                        <input type="color"
+                               :value="endHex(oi)"
+                               @input="updateColor(oi, 'end_color', $event.target.value)">
+                        <span class="text-sm">End</span>
+                    </div>
+                </div>
+
+                <!-- Speed -->
+                <div class="form-group" x-show="out.type !== 'none' && out.effect !== 'none' && out.effect !== 'solid'">
+                    <label class="form-label">Speed</label>
+                    <div class="flex items-center gap-2">
+                        <input type="range" class="form-range" min="0.1" max="10" step="0.1"
+                               :value="out.speed"
+                               @input="updateOutput(oi, 'speed', parseFloat($event.target.value))">
+                        <span class="text-sm" x-text="out.speed?.toFixed(1)"></span>
+                    </div>
+                </div>
+
+                <!-- Playback -->
+                <div class="form-group" x-show="out.type !== 'none' && out.effect !== 'none' && out.effect !== 'solid'">
+                    <label class="form-label">Playback</label>
+                    <select class="form-select"
+                            :value="out.playback"
+                            @change="updateOutput(oi, 'playback', $event.target.value)">
+                        <option value="loop">Loop</option>
+                        <option value="boomerang">Boomerang</option>
+                        <option value="once">Once</option>
+                    </select>
+                </div>
+
+                <!-- Angle (linear/chase) -->
+                <div class="form-group" x-show="out.type !== 'none' && needsAngle(out.effect)">
+                    <label class="form-label">Angle</label>
+                    <div class="flex items-center gap-2">
+                        <input type="range" class="form-range" min="0" max="360" step="15"
+                               :value="out.angle || 0"
+                               @input="updateOutput(oi, 'angle', parseFloat($event.target.value))">
+                        <span class="text-sm" x-text="(out.angle || 0) + '\u00B0'"></span>
+                    </div>
+                </div>
+
+                <!-- Highlight width (knight_rider) -->
+                <div class="form-group" x-show="out.type !== 'none' && needsHighlight(out.effect)">
+                    <label class="form-label">Highlight Width</label>
+                    <div class="flex items-center gap-2">
+                        <input type="range" class="form-range" min="1" max="30"
+                               :value="out.highlight_width || 5"
+                               @input="updateOutput(oi, 'highlight_width', parseInt($event.target.value))">
+                        <span class="text-sm" x-text="out.highlight_width || 5"></span>
+                    </div>
+                </div>
+
+                <!-- Chase origin -->
+                <div class="form-group" x-show="out.type !== 'none' && needsChaseOrigin(out.effect)">
+                    <label class="form-label">Chase Origin</label>
+                    <select class="form-select"
+                            :value="out.chase_origin || 'start'"
+                            @change="updateOutput(oi, 'chase_origin', $event.target.value)">
+                        <option value="start">Start</option>
+                        <option value="center">Center</option>
+                        <option value="end">End</option>
+                    </select>
+                </div>
+            </div>
+        </template>
+
+        <!-- Save modal -->
+        <div class="modal-overlay" x-show="saveModal" @click.self="saveModal = false">
+            <div class="modal">
+                <div class="modal-title">Save Clip</div>
+                <div class="form-group">
+                    <label class="form-label">Group Name</label>
+                    <input class="form-input" x-model="saveName"
+                           placeholder="e.g. OpeningChase"
+                           @keydown.enter="doSave()">
+                </div>
+                <p class="text-sm text-muted">Each non-empty output will be saved as a separate clip (e.g. OpeningChase_grid1, OpeningChase_short_strip1).</p>
+                <div class="modal-actions">
+                    <button class="btn" @click="saveModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="doSave()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ──── PANEL: Clip Library ──── -->
+    <div class="panel" x-show="$store.app.mode === 'library'" x-data="clipLibrary">
+        <h2 class="section-title">Clip Library</h2>
+
+        <!-- Search & filters -->
+        <div class="search-bar">
+            <input class="form-input" placeholder="Search clips..."
+                   x-model="search" @input.debounce.300ms="doSearch()">
+            <select class="form-select" style="width:auto"
+                    :value="sortBy" @change="setSort($event.target.value)">
+                <option value="modified">Recent</option>
+                <option value="name">Name</option>
+                <option value="output_type">Type</option>
+                <option value="effect">Effect</option>
+            </select>
+        </div>
+
+        <div class="filter-pills mb-4">
+            <div class="filter-pill" :class="{ active: !filterType }"
+                 @click="setFilter('')">All</div>
+            <template x-for="t in outputTypes.filter(t => t !== 'none')">
+                <div class="filter-pill" :class="{ active: filterType === t }"
+                     @click="setFilter(t)" x-text="t"></div>
+            </template>
+        </div>
+
+        <!-- Clip grid -->
+        <div class="card-grid">
+            <template x-for="clip in clips" :key="clip.id">
+                <div class="card" @click="loadIntoDesigner(clip)">
+                    <div class="card-thumb" :style="thumbStyle(clip)"></div>
+                    <div class="card-body">
+                        <div class="card-title" x-text="clip.name"></div>
+                        <div class="card-meta">
+                            <span x-text="clip.output_type"></span> &middot;
+                            <span x-text="clip.effect"></span>
+                        </div>
+                    </div>
+                    <div style="padding:0 10px 8px">
+                        <button class="btn btn-sm btn-danger"
+                                @click.stop="deleteClip(clip)">Delete</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <p class="text-muted mt-2" x-show="clips.length === 0">No clips saved yet. Use the Clip Designer to create and save clips.</p>
+    </div>
+
+    <!-- ──── PANEL: Look Mixer ──── -->
+    <div class="panel" x-show="$store.app.mode === 'mixer'" x-data="lookMixer">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="section-title" style="margin:0">Look Mixer</h2>
+            <div class="btn-group">
+                <button class="btn" @click="newLook()">New</button>
+                <button class="btn btn-primary" @click="openSave()">Save</button>
+            </div>
+        </div>
+
+        <!-- Output type selectors -->
+        <div class="flex gap-4 mb-4" x-show="look">
+            <template x-for="(out, ti) in look?.outputs || []" :key="ti">
+                <div class="form-group" style="flex:1">
+                    <label class="form-label" x-text="out.port + ' Type'"></label>
+                    <select class="form-select" :value="out.type"
+                            @change="setOutputType(ti, $event.target.value)">
+                        <template x-for="t in outputTypes">
+                            <option :value="t" x-text="t"></option>
+                        </template>
+                    </select>
+                </div>
+            </template>
+            <div class="form-group">
+                <label class="form-label">Duration (s)</label>
+                <input class="form-input" type="number" min="1" max="600" step="1"
+                       x-model.number="look.total_duration" style="width:80px">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Playback</label>
+                <select class="form-select" x-model="look.playback" style="width:auto">
+                    <option value="loop">Loop</option>
+                    <option value="boomerang">Boomerang</option>
+                    <option value="once">Once</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Transport -->
+        <div class="transport" x-show="look">
+            <button class="btn" @click="playing ? stop() : play()"
+                    x-text="playing ? 'Pause' : 'Play'"></button>
+            <button class="btn" @click="reset()">Reset</button>
+            <span class="transport-time" x-text="formatTime(playTime)"></span>
+        </div>
+
+        <!-- Timeline -->
+        <div class="timeline-container" x-show="look"
+             :style="'width:' + (timelineWidth() + 40) + 'px;min-width:100%'">
+            <!-- Ruler -->
+            <div class="timeline-ruler" :style="'width:' + timelineWidth() + 'px'">
+                <template x-for="tick in rulerTicks()" :key="tick.t">
+                    <span style="position:absolute;top:6px"
+                          :style="'left:' + tick.left + 'px'"
+                          x-text="tick.t + 's'"></span>
+                </template>
+            </div>
+
+            <!-- Tracks -->
+            <template x-for="(track, ti) in look?.tracks || []" :key="ti">
+                <div class="timeline-track">
+                    <span class="timeline-track-label"
+                          x-text="track.port"></span>
+                    <template x-for="(seg, si) in track.segments" :key="si">
+                        <div class="timeline-segment"
+                             :style="segmentStyle(seg)"
+                             :title="seg.clip_name"
+                             @dblclick="removeSegment(ti, si)">
+                            <span x-text="seg.clip_name"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Playhead -->
+            <div class="timeline-playhead"
+                 :style="'left:' + playheadLeft() + 'px'"></div>
+        </div>
+
+        <!-- Clip palette per track -->
+        <div class="mt-4" x-show="look">
+            <h3 class="form-label mb-2">Add Clips to Timeline</h3>
+            <template x-for="(track, ti) in look?.tracks || []" :key="'palette-' + ti">
+                <div class="mb-2">
+                    <span class="text-sm" x-text="track.port + ' clips:'"></span>
+                    <div class="flex gap-2 mt-2" style="flex-wrap:wrap">
+                        <template x-for="clip in clipsForTrack(ti)" :key="clip.id">
+                            <button class="btn btn-sm" @click="addSegment(ti, clip)"
+                                    x-text="clip.name"></button>
+                        </template>
+                        <span class="text-sm text-muted"
+                              x-show="clipsForTrack(ti).length === 0">
+                            No clips for this output type. Save some in Clip Designer first.
+                        </span>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Save modal -->
+        <div class="modal-overlay" x-show="saveModal" @click.self="saveModal = false">
+            <div class="modal">
+                <div class="modal-title">Save Look</div>
+                <div class="form-group">
+                    <label class="form-label">Name</label>
+                    <input class="form-input" x-model="saveName"
+                           @keydown.enter="doSave()">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input class="form-input" x-model="saveDesc">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" @click="saveModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="doSave()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ──── PANEL: Look Controller ──── -->
+    <div class="panel" x-show="$store.app.mode === 'controller'" x-data="lookController">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="section-title" style="margin:0">Look Controller</h2>
+            <button class="btn" @click="openAddCue()">+ Add Cue</button>
+        </div>
+
+        <!-- Transport -->
+        <div class="flex gap-4 mb-4 items-center">
+            <button class="btn-go" @click="go()">GO</button>
+            <button class="btn-stop" @click="stop()">STOP</button>
+        </div>
+
+        <!-- Cue list table -->
+        <table class="cue-list">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>Name</th>
+                    <th>Look</th>
+                    <th style="width:120px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="(cue, idx) in cues" :key="idx">
+                    <tr class="cue-row"
+                        :class="{ active: isActive(idx), standby: isStandby(idx) }">
+                        <td class="cue-number" x-text="cue.number"></td>
+                        <td x-text="cue.name"></td>
+                        <td class="text-sm text-muted" x-text="lookName(cue.look_id)"></td>
+                        <td>
+                            <div class="btn-group">
+                                <button class="btn btn-sm" @click="goToCue(cue.number)">Go</button>
+                                <button class="btn btn-sm" @click="moveCue(idx, -1)"
+                                        :disabled="idx === 0">^</button>
+                                <button class="btn btn-sm" @click="moveCue(idx, 1)"
+                                        :disabled="idx === cues.length-1">v</button>
+                                <button class="btn btn-sm btn-danger"
+                                        @click="removeCue(idx)">&times;</button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+
+        <p class="text-muted mt-2" x-show="cues.length === 0">No cues yet. Save some Looks in the Look Mixer, then add them as cues here.</p>
+
+        <!-- Add cue modal -->
+        <div class="modal-overlay" x-show="addModal" @click.self="addModal = false">
+            <div class="modal">
+                <div class="modal-title">Add Cue</div>
+                <div class="form-group">
+                    <label class="form-label">Look</label>
+                    <select class="form-select" x-model="addLookId">
+                        <template x-for="l in looks" :key="l.id">
+                            <option :value="l.id" x-text="l.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet.</p>
+                <div class="modal-actions">
+                    <button class="btn" @click="addModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="addCue()"
+                            :disabled="!addLookId">Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>
