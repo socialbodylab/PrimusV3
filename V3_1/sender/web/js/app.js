@@ -26,16 +26,15 @@ document.addEventListener("alpine:init", () => {
 
     // --- App store: mode, polling ---
     Alpine.store("app", {
-        mode: "designer",
-        modes: ["designer", "library", "mixer", "controller"],
+        mode: "mixer",
+        modes: ["mixer", "controller"],
         modeLabels: {
-            designer: "Clip Designer",
-            library: "Clip Library",
             mixer: "Look Mixer",
             controller: "Look Controller",
         },
         state: null,
         polling: null,
+        mixerPreviewDevices: null,
 
         init() {
             this.fetchState();
@@ -84,7 +83,23 @@ document.addEventListener("alpine:init", () => {
         },
 
         setMode(m) {
+            if (this.mode === 'mixer' && m !== 'mixer') {
+                api("POST", "/api/mixer/stop_preview");
+                api("POST", "/api/set_playback_source", { source: "idle" });
+            }
             this.mode = m;
+        },
+
+        toggleMixerDevice(di) {
+            if (!this.mixerPreviewDevices) {
+                const count = (this.state?.devices || []).length;
+                const all = Array.from({length: count}, (_, i) => i);
+                this.mixerPreviewDevices = all.filter(i => i !== di);
+            } else if (this.mixerPreviewDevices.includes(di)) {
+                this.mixerPreviewDevices = this.mixerPreviewDevices.filter(i => i !== di);
+            } else {
+                this.mixerPreviewDevices = [...this.mixerPreviewDevices, di];
+            }
         },
     });
 
@@ -93,9 +108,19 @@ document.addEventListener("alpine:init", () => {
         discovering: false,
         discovered: [],
         manualIp: "",
+        renamingDevice: -1,
+        renameValue: "",
+        groupModal: false,
+        editGroup: null,
+        editGroupName: "",
+        editGroupIps: [],
 
         get devices() {
             return Alpine.store("app").state?.devices || [];
+        },
+
+        get deviceGroups() {
+            return Alpine.store("app").state?.device_groups || [];
         },
 
         get anyConnected() {
@@ -132,8 +157,80 @@ document.addEventListener("alpine:init", () => {
             await api("POST", "/api/remove_device", { device: di });
         },
 
+        startRename(di) {
+            this.renamingDevice = di;
+            this.renameValue = this.devices[di]?.name || "";
+        },
+
+        async finishRename(di) {
+            const name = this.renameValue.trim();
+            if (name && name !== this.devices[di]?.name) {
+                await api("POST", "/api/rename_node", { device: di, name });
+            }
+            this.renamingDevice = -1;
+            this.renameValue = "";
+        },
+
+        cancelRename() {
+            this.renamingDevice = -1;
+            this.renameValue = "";
+        },
+
         async renameDevice(di, name) {
             await api("POST", "/api/rename_node", { device: di, name });
+        },
+
+        // -- Device groups --
+        openNewGroup() {
+            this.editGroup = null;
+            this.editGroupName = "";
+            this.editGroupIps = [];
+            this.groupModal = true;
+        },
+
+        openEditGroup(group) {
+            this.editGroup = group;
+            this.editGroupName = group.name;
+            this.editGroupIps = [...group.device_ips];
+            this.groupModal = true;
+        },
+
+        toggleGroupIp(ip) {
+            if (this.editGroupIps.includes(ip)) {
+                this.editGroupIps = this.editGroupIps.filter(i => i !== ip);
+            } else {
+                this.editGroupIps.push(ip);
+            }
+        },
+
+        async saveGroup() {
+            const group = {
+                id: this.editGroup?.id || crypto.randomUUID(),
+                name: this.editGroupName.trim() || "Untitled Group",
+                device_ips: this.editGroupIps,
+            };
+            await api("POST", "/api/device_groups", group);
+            this.groupModal = false;
+        },
+
+        async deleteGroup(gid) {
+            await api("DELETE", "/api/device_groups/" + gid);
+        },
+
+        async connectGroup(group) {
+            for (let di = 0; di < this.devices.length; di++) {
+                if (group.device_ips.includes(this.devices[di].ip) && !this.devices[di].connected) {
+                    await api("POST", "/api/connect", { device: di });
+                }
+            }
+        },
+
+        async disconnectGroup(group) {
+            for (let di = 0; di < this.devices.length; di++) {
+                if (group.device_ips.includes(this.devices[di].ip) && this.devices[di].connected) {
+                    await api("POST", "/api/disconnect", { device: di });
+                }
+            }
         },
     });
 });

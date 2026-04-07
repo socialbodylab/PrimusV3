@@ -8,6 +8,9 @@ Usage:
 """
 
 import argparse
+import os
+import signal
+import subprocess
 import threading
 import webbrowser
 
@@ -16,6 +19,38 @@ from state import ControllerState, animation_loop
 from controller import CueList
 from mixer import load_look, compute_look_frame
 from server import create_server
+
+
+def _kill_existing():
+    """Kill any other running instances of this script and wait for them to exit."""
+    import time
+    my_pid = os.getpid()
+    my_script = os.path.abspath(__file__)
+    try:
+        out = subprocess.check_output(
+            ["pgrep", "-f", my_script], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return
+    killed = []
+    for line in out.strip().splitlines():
+        pid = int(line.strip())
+        if pid == my_pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed.append(pid)
+            print(f"Killed previous instance (PID {pid})")
+        except ProcessLookupError:
+            pass
+    # Wait for killed processes to release their sockets
+    for pid in killed:
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)  # check if still alive
+                time.sleep(0.1)
+            except ProcessLookupError:
+                break
 
 
 def _mixer_controller_loop(state, cue_list):
@@ -59,7 +94,7 @@ def _mixer_controller_loop(state, cue_list):
                 state.set_override_pixels(pixels)
             else:
                 state.set_override_pixels(None)
-        elif state.playback_source == state.SOURCE_DESIGNER:
+        elif state.playback_source in (state.SOURCE_DESIGNER, state.SOURCE_IDLE):
             if _current_look_id is not None:
                 _current_look_id = None
                 _state_cache.clear()
@@ -76,12 +111,18 @@ def main():
                         help="Don't open browser on startup")
     args = parser.parse_args()
 
+    _kill_existing()
+
     fps_listener = FpsListener()
     fps_thread = threading.Thread(target=fps_listener.run, daemon=True)
     fps_thread.start()
 
     state = ControllerState(fps_listener)
     cue_list = CueList()
+
+    # Restore previously saved devices
+    print("Restoring saved devices...")
+    state.restore_devices()
 
     server = create_server("127.0.0.1", args.port, state, cue_list)
     port = server.server_address[1]

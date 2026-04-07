@@ -93,10 +93,17 @@ class FpsListener:
         self.running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
-        except OSError:
+        bound = False
+        for attempt in range(10):
+            try:
+                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                bound = True
+                break
+            except OSError:
+                time.sleep(0.2)
+        if not bound:
             self._sock.bind(("0.0.0.0", 0))
+            print(f"WARNING: FPS telemetry port {FPS_LISTEN_PORT} in use — receiver FPS will not display.")
         self._sock.settimeout(1.0)
 
     def run(self):

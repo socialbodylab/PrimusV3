@@ -62,8 +62,14 @@ _STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 def _save_output_types(types):
     try:
+        with open(_STATE_FILE, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data["output_types"] = types
+    try:
         with open(_STATE_FILE, "w") as f:
-            json.dump({"output_types": types}, f)
+            json.dump(data, f)
     except OSError:
         pass
 
@@ -78,6 +84,53 @@ def _load_output_types():
     except (OSError, json.JSONDecodeError, KeyError):
         pass
     return None
+
+
+def _save_devices(devices):
+    """Persist device list (IP + name only) so they survive restarts."""
+    try:
+        with open(_STATE_FILE, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data["devices"] = [{"ip": d["ip"], "name": d["name"]} for d in devices]
+    try:
+        with open(_STATE_FILE, "w") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
+def _load_devices():
+    try:
+        with open(_STATE_FILE, "r") as f:
+            data = json.load(f)
+        return data.get("devices", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_device_groups(groups):
+    try:
+        with open(_STATE_FILE, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data["device_groups"] = groups
+    try:
+        with open(_STATE_FILE, "w") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
+def _load_device_groups():
+    try:
+        with open(_STATE_FILE, "r") as f:
+            data = json.load(f)
+        return data.get("device_groups", [])
+    except (OSError, json.JSONDecodeError):
+        return []
 
 
 # ======================================================================
@@ -147,6 +200,7 @@ class ControllerState:
     SOURCE_DESIGNER = "designer"
     SOURCE_MIXER = "mixer"
     SOURCE_CONTROLLER = "controller"
+    SOURCE_IDLE = "idle"
 
     def __init__(self, fps_listener):
         self.lock = threading.Lock()
@@ -156,7 +210,7 @@ class ControllerState:
         self.start_time = time.monotonic()
         self.last_tick = self.start_time
         self.devices = []
-        self.playback_source = self.SOURCE_DESIGNER
+        self.playback_source = self.SOURCE_IDLE
 
         # Active Look — the animation being sent to all connected devices
         saved_types = _load_output_types()
@@ -168,11 +222,42 @@ class ControllerState:
             look_outputs.append(_make_look_output(cfg))
         self.active_look = {"name": "Look 1", "outputs": look_outputs}
 
+        # Device groups
+        self.device_groups = _load_device_groups()
+
         # Mixer / controller override pixel buffers (set externally)
         self._override_pixels = None  # list of pixel lists per output, or None
         # Mixer live preview state
         self._mixer_preview_look = None
         self._mixer_preview_start = 0.0
+        self._mixer_preview_device_filter = None
+
+    def restore_devices(self):
+        """Restore saved devices on startup (call after FPS listener is ready)."""
+        saved = _load_devices()
+        if not saved:
+            return
+        from artnet import discover_artnet_nodes
+        known_ips = [d["ip"] for d in saved]
+        nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0)
+        node_map = {n["ip"]: n for n in nodes}
+        for sd in saved:
+            ip = sd["ip"]
+            if any(d["ip"] == ip for d in self.devices):
+                continue
+            node = node_map.get(ip)
+            if node:
+                node["short_name"] = sd.get("name") or node.get("short_name", "Node")
+                self.add_device_from_node(node, auto_save=False)
+            else:
+                # Add offline device with saved name
+                self.add_device_from_node({
+                    "ip": ip,
+                    "short_name": sd.get("name", ip),
+                    "long_name": "",
+                    "num_ports": 0,
+                    "universes": [0, 1],
+                }, auto_save=False)
 
     # ------------------------------------------------------------------
     #  JSON serialization
@@ -207,6 +292,7 @@ class ControllerState:
                 "look_output_types": LOOK_OUTPUT_TYPES,
                 "look": look,
                 "devices": [],
+                "device_groups": self.device_groups,
                 "playback_source": self.playback_source,
             }
             for dev in self.devices:
@@ -301,6 +387,17 @@ class ControllerState:
         types = [lo["type"] for lo in self.active_look["outputs"]]
         type_to_id = {name: i for i, name in enumerate(LOOK_OUTPUT_TYPES)}
         send_output_config(dev["ip"], types, type_to_id)
+        # Sync local device output records with the Look output types
+        for oi, lo in enumerate(self.active_look["outputs"]):
+            if oi < len(dev["outputs"]):
+                typedef = OUTPUT_TYPES.get(lo["type"])
+                if typedef:
+                    dev["outputs"][oi]["type"] = lo["type"]
+                    dev["outputs"][oi]["count"] = typedef["pixels"]
+                    dev["outputs"][oi]["grid"] = (
+                        typedef.get("grid_size")
+                        if typedef["layout"] == "grid" else None
+                    )
 
     # ------------------------------------------------------------------
     #  Device management
@@ -323,7 +420,7 @@ class ControllerState:
             dev["sender"].disconnect()
             dev["connected"] = False
 
-    def add_device_from_node(self, node_info):
+    def add_device_from_node(self, node_info, auto_save=True):
         with self.lock:
             for dev in self.devices:
                 if dev["ip"] == node_info["ip"]:
@@ -357,6 +454,8 @@ class ControllerState:
                     "grid_rotation": 0,
                 })
             self.devices.append(dev)
+            if auto_save:
+                _save_devices(self.devices)
             return {"status": "added", "device_index": len(self.devices) - 1}
 
     def remove_device(self, di):
@@ -368,6 +467,7 @@ class ControllerState:
                     dev["sender"].blackout(info)
                     dev["sender"].disconnect()
                 self.devices.pop(di)
+                _save_devices(self.devices)
                 return True
         return False
 
@@ -377,6 +477,7 @@ class ControllerState:
                 dev = self.devices[di]
                 send_art_address(dev["ip"], new_name)
                 dev["name"] = new_name
+                _save_devices(self.devices)
                 return True
         return False
 
@@ -399,6 +500,33 @@ class ControllerState:
                     dev["connected"] = False
 
     # ------------------------------------------------------------------
+    #  Device groups
+    # ------------------------------------------------------------------
+
+    def get_device_groups(self):
+        with self.lock:
+            return list(self.device_groups)
+
+    def save_device_group(self, group):
+        """Create or update a device group. group = {id, name, device_ips}."""
+        with self.lock:
+            gid = group.get("id")
+            for i, g in enumerate(self.device_groups):
+                if g["id"] == gid:
+                    self.device_groups[i] = group
+                    _save_device_groups(self.device_groups)
+                    return group
+            self.device_groups.append(group)
+            _save_device_groups(self.device_groups)
+            return group
+
+    def delete_device_group(self, gid):
+        with self.lock:
+            self.device_groups = [g for g in self.device_groups if g["id"] != gid]
+            _save_device_groups(self.device_groups)
+            return True
+
+    # ------------------------------------------------------------------
     #  Override pixels (for mixer / controller playback)
     # ------------------------------------------------------------------
 
@@ -407,19 +535,26 @@ class ControllerState:
         with self.lock:
             self._override_pixels = pixels_per_output
 
-    def start_mixer_preview(self, look):
+    def start_mixer_preview(self, look, device_filter=None):
         """Start previewing a look from the mixer on connected devices."""
         with self.lock:
             self._mixer_preview_look = look
             self._mixer_preview_start = time.monotonic()
+            self._mixer_preview_device_filter = device_filter
             self.playback_source = self.SOURCE_MIXER
 
     def stop_mixer_preview(self):
-        """Stop mixer preview, return to designer."""
+        """Stop mixer preview, return to idle (no output)."""
         with self.lock:
             self._mixer_preview_look = None
             self._override_pixels = None
-            self.playback_source = self.SOURCE_DESIGNER
+            self._mixer_preview_device_filter = None
+            self.playback_source = self.SOURCE_IDLE
+
+    def set_playback_source(self, source):
+        """Explicitly set the playback source (designer, idle, etc.)."""
+        with self.lock:
+            self.playback_source = source
 
     def get_mixer_preview(self):
         """Return (look, elapsed) if mixer preview is active, else (None, 0)."""
@@ -448,7 +583,7 @@ class ControllerState:
                         lo["pixels"] = [list(p) for p in self._override_pixels[i]]
                     else:
                         lo["pixels"] = []
-            else:
+            elif self.playback_source == self.SOURCE_DESIGNER:
                 # Compute from designer (active look)
                 for lo in self.active_look["outputs"]:
                     if lo["type"] == "none" or lo["count"] == 0:
@@ -461,6 +596,7 @@ class ControllerState:
                     pixels = fn(
                         count=lo["count"], t=scaled_t, dt=dt,
                         speed=speed, anim_factor=af,
+                        duration=5.0,
                         playback=lo["playback"],
                         start_color=tuple(lo["start_color"]),
                         end_color=tuple(lo["end_color"]),
@@ -470,10 +606,17 @@ class ControllerState:
                         chase_origin=lo["chase_origin"],
                     )
                     lo["pixels"] = [list(p) for p in pixels]
+            else:
+                # Idle: no output (black)
+                for lo in self.active_look["outputs"]:
+                    lo["pixels"] = []
 
             # Send to connected devices
-            for dev in self.devices:
+            dev_filter = self._mixer_preview_device_filter
+            for di, dev in enumerate(self.devices):
                 if not dev["sender"].connected:
+                    continue
+                if dev_filter is not None and di not in dev_filter:
                     continue
                 for oi, o in enumerate(dev["outputs"]):
                     if oi >= len(self.active_look["outputs"]):

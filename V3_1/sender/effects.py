@@ -50,14 +50,15 @@ def blend_pixels(pixels_a, pixels_b, factor):
 #  ANIMATION FACTOR
 # ======================================================================
 
-def compute_anim_factor(scaled_t, playback):
+def compute_anim_factor(scaled_t, playback, duration=5.0):
+    rate = 1.0 / max(duration, 0.1)
     if playback == "once":
-        return min(scaled_t * 0.2, 1.0)
+        return min(scaled_t * rate, 1.0)
     elif playback == "boomerang":
-        cyc = (scaled_t * 0.2) % 2.0
+        cyc = (scaled_t * rate) % 2.0
         return cyc if cyc <= 1.0 else 2.0 - cyc
     else:
-        return (scaled_t * 0.2) % 1.0
+        return (scaled_t * rate) % 1.0
 
 
 # ======================================================================
@@ -72,8 +73,9 @@ def fx_solid(count, start_color, **kw):
     return [start_color] * count
 
 
-def fx_pulse(count, t, start_color, end_color, **kw):
-    f = (math.sin(t) + 1.0) / 2.0
+def fx_pulse(count, t, start_color, end_color, duration=5.0, **kw):
+    rate = math.tau / max(duration, 0.1)
+    f = (math.sin(t * rate) + 1.0) / 2.0
     c = lerp_color(start_color, end_color, f)
     return [c] * count
 
@@ -115,6 +117,11 @@ def fx_constrainbow(count, dt, speed, playback,
     for i in range(count):
         s = state[i]
         s["prg"] += inc
+        # Handle reverse direction (negative dt from boomerang)
+        while s["prg"] < 0.0:
+            s["nxt"] = s["cur"]
+            s["cur"] = random_color_between(start_color, end_color)
+            s["prg"] += 1.0
         if playback == "boomerang":
             cp = (s["prg"] * 2.0) % 2.0
             f = cp if cp < 1.0 else 2.0 - cp
@@ -135,27 +142,29 @@ def fx_constrainbow(count, dt, speed, playback,
     return pixels
 
 
-def fx_rainbow(count, t, grid=None, **kw):
+def fx_rainbow(count, t, grid=None, duration=5.0, **kw):
+    rate = 1.0 / max(duration, 0.1)
     pixels = []
     if grid:
         cols, rows = grid
         for idx in range(count):
             x, y = idx % cols, idx // cols
             offset = (x / cols + y / rows) * 0.5
-            hue = (t * 0.2 + offset) % 1.0
+            hue = (t * rate + offset) % 1.0
             pixels.append(hsv_to_rgb(hue, 1.0, 1.0))
     else:
         for i in range(count):
             pos = i / max(count - 1, 1)
-            hue = (pos + t * 0.2) % 1.0
+            hue = (pos + t * rate) % 1.0
             pixels.append(hsv_to_rgb(hue, 1.0, 1.0))
     return pixels
 
 
 def fx_radial(count, t, anim_factor, start_color, end_color,
-              grid=None, **kw):
+              grid=None, duration=5.0, **kw):
     if not grid:
-        f = (math.sin(t) + 1.0) / 2.0
+        rate = math.tau / max(duration, 0.1)
+        f = (math.sin(t * rate) + 1.0) / 2.0
         return [lerp_color(start_color, end_color, f)] * count
     cols, rows = grid
     cx, cy = (cols - 1) / 2.0, (rows - 1) / 2.0
@@ -170,12 +179,13 @@ def fx_radial(count, t, anim_factor, start_color, end_color,
 
 
 def fx_spiral(count, t, anim_factor, start_color, end_color,
-              grid=None, **kw):
+              grid=None, duration=5.0, **kw):
     if not grid:
+        rate = 1.0 / max(duration, 0.1)
         pixels = []
         for i in range(count):
             pos = i / max(count - 1, 1)
-            hue = (pos + t * 0.2) % 1.0
+            hue = (pos + t * rate) % 1.0
             pixels.append(hsv_to_rgb(hue, 1.0, 1.0))
         return pixels
     cols, rows = grid
@@ -192,12 +202,13 @@ def fx_spiral(count, t, anim_factor, start_color, end_color,
 
 
 def fx_knight_rider(count, t, start_color, end_color,
-                    highlight_width=5, **kw):
+                    highlight_width=5, duration=5.0, **kw):
     if count <= 1:
         return [list(start_color)] * count
     hw = max(int(highlight_width), 1)
     radius = hw * count / 30.0
-    cyc = (t * 0.3) % 2.0
+    rate = 2.0 / max(duration, 0.1)
+    cyc = (t * rate) % 2.0
     pos = cyc if cyc <= 1.0 else 2.0 - cyc
     center = pos * (count - 1)
     pixels = []

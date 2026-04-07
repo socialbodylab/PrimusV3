@@ -188,7 +188,8 @@ class Handler(BaseHTTPRequestHandler):
             # Start previewing a look on connected devices
             look = data
             if look and look.get("tracks"):
-                self.controller_state.start_mixer_preview(look)
+                device_filter = look.pop("device_filter", None)
+                self.controller_state.start_mixer_preview(look, device_filter)
                 self._ok()
             else:
                 self._respond(400, "application/json", b'{"error":"invalid look"}')
@@ -196,6 +197,19 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/mixer/stop_preview":
             self.controller_state.stop_mixer_preview()
             self._ok()
+
+        elif path == "/api/set_playback_source":
+            source = data.get("source", "idle")
+            if source in ("designer", "idle"):
+                self.controller_state.set_playback_source(source)
+                self._ok()
+            else:
+                self._respond(400, "application/json",
+                              b'{"error":"invalid source"}')
+
+        elif path == "/api/device_groups":
+            group = self.controller_state.save_device_group(data)
+            self._json_response(group)
 
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
@@ -213,6 +227,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/looks/"):
             look_id = path.split("/api/looks/")[1]
             mixer.delete_look(look_id)
+            self._ok()
+        elif path.startswith("/api/device_groups/"):
+            gid = path.split("/api/device_groups/")[1]
+            self.controller_state.delete_device_group(gid)
             self._ok()
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')

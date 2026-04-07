@@ -112,7 +112,15 @@ def _wrap_time(t, total_duration, playback):
         return t % total_duration
 
 
-def _compute_segment_pixels(segment, local_t, pixel_count, grid, fps=30,
+def _time_direction(t, total_duration, playback):
+    """Return +1.0 for forward, -1.0 for backward (boomerang reverse phase)."""
+    if playback == "boomerang" and total_duration > 0:
+        cyc = t % (total_duration * 2)
+        return -1.0 if cyc > total_duration else 1.0
+    return 1.0
+
+
+def _compute_segment_pixels(segment, local_t, pixel_count, grid, dt=0.033,
                             clip_cache=None, state_cache=None):
     """Compute pixel output for one segment at local time."""
     clip_id = segment["clip_id"]
@@ -130,9 +138,10 @@ def _compute_segment_pixels(segment, local_t, pixel_count, grid, fps=30,
 
     effect_name = clip.get("effect", "none")
     fn = EFFECTS.get(effect_name, fx_none)
-    speed = clip.get("speed", 1.0)
+    speed = segment.get("speed_override") if segment.get("speed_override") is not None else clip.get("speed", 1.0)
+    clip_duration = clip.get("duration", 5.0)
     scaled_t = local_t * speed
-    af = compute_anim_factor(scaled_t, clip.get("playback", "loop"))
+    af = compute_anim_factor(scaled_t, clip.get("playback", "loop"), duration=clip_duration)
 
     # Preserve per-segment effect state (for stateful effects like constrainbow)
     if state_cache is not None:
@@ -143,8 +152,9 @@ def _compute_segment_pixels(segment, local_t, pixel_count, grid, fps=30,
         state = []
 
     return fn(
-        count=pixel_count, t=scaled_t, dt=1.0 / max(fps, 1),
+        count=pixel_count, t=scaled_t, dt=dt,
         speed=speed, anim_factor=af,
+        duration=clip_duration,
         playback=clip.get("playback", "loop"),
         start_color=tuple(clip.get("start_color", (255, 0, 255))),
         end_color=tuple(clip.get("end_color", (0, 255, 255))),
@@ -186,7 +196,16 @@ def compute_look_frame(look, t, fps=30, clip_cache=None, state_cache=None):
 
     total_duration = look.get("total_duration", 10.0)
     playback = look.get("playback", "loop")
-    local_t = _wrap_time(t, total_duration, playback)
+    global_speed = look.get("speed", 1.0)
+    scaled_t = t * global_speed
+    local_t = _wrap_time(scaled_t, total_duration, playback)
+    # Clamp to prevent segment boundary exclusion at boomerang peak
+    if local_t >= total_duration and total_duration > 0:
+        local_t = total_duration - 1e-9
+
+    direction = _time_direction(scaled_t, total_duration, playback)
+    base_dt = 1.0 / max(fps, 1)
+    signed_dt = base_dt * direction
 
     outputs = look.get("outputs", [])
     tracks = look.get("tracks", [])
@@ -223,7 +242,7 @@ def compute_look_frame(look, t, fps=30, clip_cache=None, state_cache=None):
         for seg in active:
             seg_local_t = local_t - seg.get("start_time", 0.0)
             pixels = _compute_segment_pixels(seg, seg_local_t, pixel_count, grid,
-                                             fps=fps, clip_cache=clip_cache,
+                                             dt=signed_dt, clip_cache=clip_cache,
                                              state_cache=state_cache)
             fade = _segment_fade_factor(seg, seg_local_t)
 
