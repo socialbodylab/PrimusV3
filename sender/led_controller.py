@@ -194,19 +194,37 @@ class ArtNetSender:
 # ======================================================================
 
 def _get_subnet_broadcast():
-    """Derive the subnet broadcast address from the host's local IP."""
+    """Return a set of broadcast addresses for all local IPv4 interfaces."""
+    addrs = set()
     try:
-        # Connect trick to find the local IP on the LAN
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-        # Assume /24 — replace last octet with 255
-        parts = local_ip.split(".")
-        parts[3] = "255"
-        return ".".join(parts)
+        import subprocess, re
+        out = subprocess.check_output(["ifconfig"], text=True,
+                                      stderr=subprocess.DEVNULL)
+        for m in re.finditer(r"broadcast\s+([\d.]+)", out):
+            addrs.add(m.group(1))
     except Exception:
-        return None
+        pass
+    if not addrs:
+        try:
+            import subprocess, re
+            out = subprocess.check_output(["ip", "addr"], text=True,
+                                          stderr=subprocess.DEVNULL)
+            for m in re.finditer(r"brd\s+([\d.]+)\s+scope\s+global", out):
+                addrs.add(m.group(1))
+        except Exception:
+            pass
+    if not addrs:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            parts = ip.split(".")
+            parts[3] = "255"
+            addrs.add(".".join(parts))
+        except Exception:
+            pass
+    return addrs
 
 
 def discover_artnet_nodes(timeout=2.0):
@@ -235,13 +253,14 @@ def discover_artnet_nodes(timeout=2.0):
     #  2) subnet broadcast   (usually works on local LAN)
     #  3) unicast to every configured device IP (guaranteed delivery)
     targets = {"255.255.255.255"}
-    subnet_bc = _get_subnet_broadcast()
-    if subnet_bc:
-        targets.add(subnet_bc)
+    targets.update(_get_subnet_broadcast())
     for dev in DEVICES:
         targets.add(dev["ip"])
     for dest in targets:
-        sock.sendto(bytes(poll), (dest, ARTNET_PORT))
+        try:
+            sock.sendto(bytes(poll), (dest, ARTNET_PORT))
+        except OSError:
+            pass
 
     nodes = {}
     deadline = time.monotonic() + timeout

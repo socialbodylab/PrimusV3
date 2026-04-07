@@ -111,6 +111,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.controller_state.connect(result["device_index"])
             self._json_response(result)
 
+        elif path == "/api/add_manual":
+            ip = str(data.get("ip", "")).strip()
+            if not ip:
+                self._respond(400, "application/json",
+                              b'{"error":"ip required"}')
+                return
+            # Try unicast discovery first to get node info
+            nodes = discover_artnet_nodes(known_ips=[ip], timeout=2.0)
+            node = next((n for n in nodes if n["ip"] == ip), None)
+            if node:
+                result = self.controller_state.add_device_from_node(node)
+            else:
+                # No reply -- add as bare device with default outputs
+                result = self.controller_state.add_device_from_node({
+                    "ip": ip,
+                    "short_name": ip,
+                    "long_name": "",
+                    "num_ports": 0,
+                    "universes": [0, 1],
+                })
+            if result.get("status") == "added":
+                self.controller_state.connect(result["device_index"])
+            self._json_response(result)
+
         elif path == "/api/remove_device":
             di = data.get("device", -1)
             self.controller_state.remove_device(di)

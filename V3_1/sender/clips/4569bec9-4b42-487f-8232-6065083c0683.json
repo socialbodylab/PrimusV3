@@ -1,0 +1,25 @@
+{
+  "id": "4569bec9-4b42-487f-8232-6065083c0683",
+  "name": "Test2_short_strip1",
+  "group": "Test2",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 1,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5,
+  "created": "2026-04-07T15:31:15.009817+00:00",
+  "modified": "2026-04-07T15:31:15.009950+00:00"
+}

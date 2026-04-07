@@ -50,36 +50,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ── Preview drawing ──
-        drawPreview(oi) {
-            const canvas = this.$refs["preview_" + oi];
-            if (!canvas) return;
-            const pixels = this.outputs[oi]?.pixels || [];
-            const grid = this.outputs[oi]?.grid;
-            const ctx = canvas.getContext("2d");
-
-            if (grid) {
-                const [cols, rows] = grid;
-                canvas.width = cols;
-                canvas.height = rows;
-                ctx.clearRect(0, 0, cols, rows);
-                for (let i = 0; i < pixels.length; i++) {
-                    const x = i % cols, y = Math.floor(i / cols);
-                    const p = pixels[i] || [0,0,0];
-                    ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
-                    ctx.fillRect(x, y, 1, 1);
-                }
-            } else {
-                const count = pixels.length || 1;
-                canvas.width = count;
-                canvas.height = 1;
-                ctx.clearRect(0, 0, count, 1);
-                for (let i = 0; i < pixels.length; i++) {
-                    const p = pixels[i] || [0,0,0];
-                    ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
-                    ctx.fillRect(i, 0, 1, 1);
-                }
-            }
-        },
+        // Preview is drawn centrally by app.js _drawPreviews() after each poll
 
         // ── Save ──
         openSave() { this.saveName = ""; this.saveDuration = 5.0; this.saveModal = true; },

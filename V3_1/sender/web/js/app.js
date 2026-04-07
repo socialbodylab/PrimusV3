@@ -39,13 +39,48 @@ document.addEventListener("alpine:init", () => {
 
         init() {
             this.fetchState();
-            this.polling = setInterval(() => this.fetchState(), 200);
+            this.polling = setInterval(() => this.fetchState(), 66);
         },
 
         async fetchState() {
             try {
                 this.state = await api("GET", "/api/state");
+                this._drawPreviews();
             } catch (e) { /* ignore */ }
+        },
+
+        _drawPreviews() {
+            const outputs = this.state?.look?.outputs;
+            if (!outputs) return;
+            for (let oi = 0; oi < outputs.length; oi++) {
+                const canvas = document.getElementById("preview_" + oi);
+                if (!canvas) continue;
+                const out = outputs[oi];
+                const pixels = out.pixels || [];
+                const grid = out.grid;
+                const ctx = canvas.getContext("2d");
+                if (grid) {
+                    const [cols, rows] = grid;
+                    canvas.width = cols;
+                    canvas.height = rows;
+                    ctx.clearRect(0, 0, cols, rows);
+                    for (let i = 0; i < pixels.length; i++) {
+                        const x = i % cols, y = Math.floor(i / cols);
+                        const p = pixels[i] || [0,0,0];
+                        ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
+                        ctx.fillRect(x, y, 1, 1);
+                    }
+                } else if (pixels.length > 0) {
+                    canvas.width = pixels.length;
+                    canvas.height = 1;
+                    ctx.clearRect(0, 0, pixels.length, 1);
+                    for (let i = 0; i < pixels.length; i++) {
+                        const p = pixels[i] || [0,0,0];
+                        ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
+                        ctx.fillRect(i, 0, 1, 1);
+                    }
+                }
+            }
         },
 
         setMode(m) {
@@ -57,6 +92,7 @@ document.addEventListener("alpine:init", () => {
     Alpine.store("conn", {
         discovering: false,
         discovered: [],
+        manualIp: "",
 
         get devices() {
             return Alpine.store("app").state?.devices || [];
@@ -83,6 +119,13 @@ document.addEventListener("alpine:init", () => {
         async addDiscovered(node) {
             await api("POST", "/api/add_discovered", node);
             this.discovered = this.discovered.filter(n => n.ip !== node.ip);
+        },
+
+        async addManualIp() {
+            const ip = this.manualIp.trim();
+            if (!ip) return;
+            await api("POST", "/api/add_manual", { ip });
+            this.manualIp = "";
         },
 
         async removeDevice(di) {

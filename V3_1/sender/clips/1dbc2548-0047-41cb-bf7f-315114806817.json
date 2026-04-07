@@ -1,0 +1,25 @@
+{
+  "id": "1dbc2548-0047-41cb-bf7f-315114806817",
+  "name": "test1_grid1",
+  "group": "test1",
+  "output_type": "grid",
+  "effect": "radial",
+  "start_color": [
+    153,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 5,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5,
+  "created": "2026-04-07T15:30:16.869612+00:00",
+  "modified": "2026-04-07T15:30:16.869735+00:00"
+}

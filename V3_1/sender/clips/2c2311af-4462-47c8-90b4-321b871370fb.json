@@ -1,0 +1,25 @@
+{
+  "id": "2c2311af-4462-47c8-90b4-321b871370fb",
+  "name": "test1_short_strip1",
+  "group": "test1",
+  "output_type": "short_strip",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    255
+  ],
+  "speed": 1,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5,
+  "created": "2026-04-07T15:30:16.867098+00:00",
+  "modified": "2026-04-07T15:30:16.867533+00:00"
+}

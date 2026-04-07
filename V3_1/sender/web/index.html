@@ -74,6 +74,16 @@
             <span x-text="$store.conn.discovering ? 'Scanning...' : 'Discover Devices'"></span>
         </button>
 
+        <div class="mt-2" style="display:flex;gap:4px">
+            <input type="text" class="input" placeholder="IP address"
+                   x-model="$store.conn.manualIp"
+                   @keydown.enter="$store.conn.addManualIp()"
+                   style="flex:1;font-size:12px;padding:4px 6px">
+            <button class="btn btn-sm"
+                    @click="$store.conn.addManualIp()"
+                    :disabled="!$store.conn.manualIp">Add</button>
+        </div>
+
         <template x-if="$store.conn.discovered.length > 0">
             <div class="mt-2">
                 <div class="text-sm text-muted mb-2">Discovered:</div>
@@ -119,9 +129,8 @@
 
                 <!-- Preview -->
                 <canvas class="preview-canvas mb-2"
-                        :x-ref="'preview_' + oi"
-                        :style="out.grid ? 'width:128px;height:128px' : 'width:100%;height:24px'"
-                        x-effect="drawPreview(oi)"></canvas>
+                        :id="'preview_' + oi"
+                        :style="out.grid ? 'width:128px;height:128px' : 'width:100%;height:24px'"></canvas>
 
                 <!-- Output Type -->
                 <div class="form-group">

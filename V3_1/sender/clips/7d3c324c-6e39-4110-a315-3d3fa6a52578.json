@@ -1,0 +1,25 @@
+{
+  "id": "7d3c324c-6e39-4110-a315-3d3fa6a52578",
+  "name": "Test2_grid1",
+  "group": "Test2",
+  "output_type": "grid",
+  "effect": "knight_rider",
+  "start_color": [
+    153,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 5,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5,
+  "created": "2026-04-07T15:31:15.011246+00:00",
+  "modified": "2026-04-07T15:31:15.011360+00:00"
+}
