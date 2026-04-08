@@ -1,0 +1,25 @@
+{
+  "id": "ed787f02-6466-475a-b3c9-aa76b4fc0f44",
+  "name": "End Chase Cyan",
+  "group": "End Chase Cyan",
+  "output_type": "long_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    180,
+    200
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "end",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.683122+00:00",
+  "modified": "2026-04-08T18:59:58.683139+00:00"
+}

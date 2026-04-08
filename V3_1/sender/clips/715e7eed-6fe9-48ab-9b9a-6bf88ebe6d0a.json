@@ -1,0 +1,25 @@
+{
+  "id": "715e7eed-6fe9-48ab-9b9a-6bf88ebe6d0a",
+  "name": "Cyan Breathe",
+  "group": "Cyan Breathe",
+  "output_type": "short_strip",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    200,
+    220
+  ],
+  "end_color": [
+    0,
+    40,
+    60
+  ],
+  "speed": 0.7,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.672552+00:00",
+  "modified": "2026-04-08T18:59:58.672565+00:00"
+}

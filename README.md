@@ -10,40 +10,62 @@ WiFi-controlled LED lighting system for live performance costumes. A Python send
 │  (Python)    │    port 6454      │  (ESP32-S3)      │
 │              │  ◄──────────────  │                  │
 │  Web UI      │   FPS telemetry   │  3× NeoPixel out │
-│  :8080       │    port 6455      │  TFT display     │
+│              │    port 6455      │  TFT display     │
 └──────────────┘                   └──────────────────┘
 ```
 
 The sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. Each node drives up to 3 NeoPixel outputs through level-shifted NeoPXL8.
 
+## Versions
+
+### V3.1 (Active)
+
+Modular Python sender with a full clip/look workflow for live performance. The sender is split into focused modules and the web UI uses Alpine.js with separate HTML/CSS/JS files.
+
+Key features:
+- **Clip Designer** — Prototype effects per-output with live preview, save as reusable clips
+- **Clip Library** — 100+ preset clips with animated hover preview, search, and per-output-type filtering
+- **Look Mixer** — Timeline-based editor to arrange clips into sequenced Looks with crossfades, drag-to-place, and segment resizing
+- **Look Controller** — Trigger saved Looks during live performance with cue list playback
+- **Device Groups** — Organize receiver nodes into named groups
+- **Playback modes** — Loop, boomerang, once — per-clip and per-look
+
+### V3.0 (Archived)
+
+Single-file Python sender (`led_controller.py`, ~1800 lines) with the HTTP server, Art-Net engine, effects engine, and full HTML/CSS/JS web UI embedded as string literals. Functional for direct effect control but no clip/look workflow. Kept in `V3_0/` for reference.
+
 ## Quick Start
 
-### Sender
+### Sender (V3.1)
 
 ```bash
-python3 sender/led_controller.py
+python3 V3_1/sender/run.py
 ```
 
-Opens a web UI at [http://localhost:8080](http://localhost:8080). No external dependencies — Python 3 stdlib only.
+Opens a web UI at the printed URL (auto-selects an available port). No external dependencies — Python 3 stdlib only.
 
-From the web UI you can:
-- Discover receiver nodes on the network
-- Connect/disconnect devices
-- Choose output types (strip, grid, off) per port
-- Apply effects with color and speed controls
-- Rename devices
-- Monitor live FPS from each node
+```bash
+python3 V3_1/sender/run.py --port 8080        # specify port
+python3 V3_1/sender/run.py --no-browser        # don't auto-open browser
+```
+
+### Sender (V3.0)
+
+```bash
+python3 V3_0/sender/led_controller.py
+```
+
+Opens a web UI at [http://localhost:8080](http://localhost:8080).
 
 ### Firmware
 
 ```bash
-cd Arduino
+cd V3_1/Arduino
 ./upload.sh
 ```
 
 Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the board, installs libraries, compiles, and uploads. See `./upload.sh --help` for options.
 
-**Other commands:**
 ```bash
 ./upload.sh --compile    # compile only, no upload
 ./upload.sh --install    # install required libraries only
@@ -100,20 +122,44 @@ Any Art-Net compatible software (TouchDesigner, MadMapper, etc.) can drive these
 
 ```
 PrimusV3/
-├── sender/
-│   └── led_controller.py           # Sender + web UI (single file, ~1800 lines)
-├── Arduino/
-│   ├── upload.sh                    # Build & upload script
-│   └── primusV3_receiver/
-│       ├── primusV3_receiver.ino    # Main firmware
-│       ├── config.h                 # Output types, pins, network config
-│       ├── display.h                # TFT display screens
-│       └── buttons.h                # Button handling
-├── API_REFERENCE.md                 # Full protocol documentation
-├── DEPLOYMENT_STRATEGY.md           # Packaging & distribution plan
-├── CLAUDE.md                        # Agent context (Claude)
+├── V3_1/                            # Active version
+│   ├── sender/
+│   │   ├── run.py                   # Entry point
+│   │   ├── state.py                 # Core state, animation loop, device mgmt
+│   │   ├── server.py                # HTTP server + JSON API
+│   │   ├── effects.py               # Effect functions + color utilities
+│   │   ├── clips.py                 # Clip CRUD, library, preview engine
+│   │   ├── mixer.py                 # Look timeline computation
+│   │   ├── controller.py            # Cue list playback
+│   │   ├── artnet.py                # Art-Net transport + discovery
+│   │   ├── clips/                   # Clip JSON files (100+)
+│   │   ├── looks/                   # Saved Look JSON files
+│   │   └── web/
+│   │       ├── index.html           # Single-page app (Alpine.js)
+│   │       ├── css/style.css        # UI styles
+│   │       └── js/
+│   │           ├── alpine.min.js    # Alpine.js v3.14.9 (vendored)
+│   │           ├── app.js           # Shared stores, polling, preview render
+│   │           ├── look-mixer.js    # Designer + Timeline + Library component
+│   │           └── look-controller.js  # Cue list component
+│   └── Arduino/
+│       ├── upload.sh                # Build & upload script
+│       └── primusV3_receiver/
+│           ├── primusV3_receiver.ino
+│           ├── config.h
+│           ├── display.h
+│           └── buttons.h
+├── V3_0/                            # Archived original version
+│   ├── sender/
+│   │   └── led_controller.py       # Single-file sender (~1800 lines)
+│   └── Arduino/
+│       └── primusV3_receiver/
+├── API_REFERENCE.md
+├── DEPLOYMENT_STRATEGY.md
+├── V3_1Plan.md                      # V3.1 design spec
+├── CLAUDE.md
 └── .github/
-    └── copilot-instructions.md      # Agent context (Copilot)
+    └── copilot-instructions.md
 ```
 
 ## Adding Output Types
@@ -126,7 +172,7 @@ OUTPUT_RING = 4,  // add to OutputType enum
 { "Ring", 24, 3, LAYOUT_LINEAR, 0, 0 },  // add to OUTPUT_TYPE_TABLE
 ```
 
-**led_controller.py:**
+**state.py (V3.1) / led_controller.py (V3.0):**
 ```python
 "ring": {"pixels": 24, "layout": "linear"},  # add to OUTPUT_TYPES
 LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "ring"]

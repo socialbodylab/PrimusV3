@@ -1,0 +1,25 @@
+{
+  "id": "68196e62-0f80-459a-af92-4b35a7364f98",
+  "name": "Slow Rainbow Grid",
+  "group": "Slow Rainbow Grid",
+  "output_type": "grid",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    255
+  ],
+  "end_color": [
+    0,
+    255,
+    255
+  ],
+  "speed": 0.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.690014+00:00",
+  "modified": "2026-04-08T18:59:58.690037+00:00"
+}

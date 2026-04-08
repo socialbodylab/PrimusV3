@@ -1,0 +1,25 @@
+{
+  "id": "bab468ce-efcf-414f-ae6c-7ca8c7c6e229",
+  "name": "Pink Scanner",
+  "group": "Pink Scanner",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    50,
+    150
+  ],
+  "end_color": [
+    40,
+    5,
+    20
+  ],
+  "speed": 2.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 3,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.681827+00:00",
+  "modified": "2026-04-08T18:59:58.681857+00:00"
+}

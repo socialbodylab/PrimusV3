@@ -175,9 +175,9 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 
 ---
 
-## 6. Effects Engine (Companion Tool)
+## 6. Effects Engine
 
-The companion `led_controller.py` provides a web-based effects engine with the following built-in effects:
+The sender provides a built-in effects engine (V3.1: `effects.py`, V3.0: embedded in `led_controller.py`) with the following effects:
 
 | Effect | Description | Extra Parameters |
 |--------|-------------|------------------|
@@ -194,22 +194,34 @@ The companion `led_controller.py` provides a web-based effects engine with the f
 
 ### Look Architecture
 
-The effects engine uses a **Look** architecture — animation state is computed once per frame and sent identically to all connected devices. Each Look has 3 output slots matching the 3 physical outputs (A0, A1, A2). Each slot has its own type, effect, colors, speed, and parameters.
+The effects engine uses a **Look** architecture. In **V3.0**, animation state is computed once per frame and sent identically to all connected devices, with 3 output slots matching the 3 physical outputs.
+
+In **V3.1**, this is extended with a clip/look workflow:
+- **Clips** are saved effect presets (effect type, colors, speed, playback mode) scoped to an output type.
+- **Looks** are timeline-based compositions of clips across multiple tracks, with per-segment timing and crossfades.
+- **Playback sources** determine what drives the outputs: `designer` (live effect editing), `mixer` (look preview), `controller` (cue list playback), or `idle` (black).
+
+Each Look has output slots matching physical outputs. Each slot has its own type, effect, colors, speed, and parameters.
 
 ---
 
-## 7. HTTP Control API (Companion Tool)
+## 7. HTTP Control API (V3.1 Sender)
 
-The companion tool serves a web UI and exposes a JSON API:
+The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server auto-selects a port (printed at startup).
 
 ### GET Endpoints
 
 | Route | Description |
 |---|---|
-| `GET /` | HTML control interface |
-| `GET /api/state` | Full JSON state dump (look, devices, effects, FPS) |
+| `GET /` | HTML control interface (Alpine.js SPA) |
+| `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
+| `GET /api/clips` | List all clips. Query params: `?type=short_strip`, `?search=fire`, `?sort=modified\|created\|name` |
+| `GET /api/clips/:id` | Load a single clip by ID |
+| `GET /api/looks` | List all saved looks |
+| `GET /api/looks/:id` | Load a single look by ID |
+| `GET /api/cues` | Get cue list state (cues, current index, playing flag) |
 
-### POST Endpoints
+### POST Endpoints — Device Management
 
 | Route | Body | Description |
 |---|---|---|
@@ -220,8 +232,45 @@ The companion tool serves a web UI and exposes a JSON API:
 | `POST /api/disconnect_all` | `{}` | Disconnect all devices |
 | `POST /api/discover` | `{}` | Run ArtPoll discovery, returns `[{ip, short_name, long_name, num_ports, universes}]` |
 | `POST /api/add_discovered` | `{ip, short_name, ...}` | Add discovered node as device and auto-connect |
+| `POST /api/add_manual` | `{ip: "..."}` | Add device by IP address (tries unicast discovery first, falls back to bare device) |
 | `POST /api/remove_device` | `{device: N}` | Remove device by index |
-| `POST /api/rename_node` | `{device: N, name: "..."}` | Rename device — also sends ArtAddress to firmware |
+| `POST /api/rename_node` | `{device: N, name: "..."}` | Rename device — sends ArtAddress to firmware, updates TFT |
+| `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically |
+| `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
+| `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
+
+### POST Endpoints — Clips
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/clip/preview` | `{clip_id, t}` | Compute one preview frame for a clip at time `t`. Returns `{pixels, grid, count}` |
+| `POST /api/clips/save` | `{name, outputs}` or clip dict | Save clip(s) from designer outputs, or save a single clip dict |
+| `POST /api/clips/save_single` | Clip dict | Save or update a single clip. Auto-generates ID and timestamp if missing |
+
+### POST Endpoints — Looks & Mixer
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/looks/save` | Look dict | Save or update a look (timeline with tracks, segments, metadata) |
+| `POST /api/mixer/preview` | Look dict (+ optional `device_filter`) | Start previewing a look on connected devices |
+| `POST /api/mixer/stop_preview` | `{}` | Stop mixer preview, return to idle |
+
+### POST Endpoints — Cue Controller
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/cues` | `{cues: [...]}` | Set the full cue list |
+| `POST /api/cues/go` | `{}` | Advance to next cue (fire) |
+| `POST /api/cues/stop` | `{}` | Stop cue playback |
+| `POST /api/cues/goto` | `{number: N}` | Jump to a specific cue number |
+
+### DELETE Endpoints
+
+| Route | Description |
+|---|---|
+| `DELETE /api/clips/:id` | Delete a clip by ID |
+| `DELETE /api/looks/:id` | Delete a look by ID |
+| `DELETE /api/device_groups/:id` | Delete a device group by ID |
 
 ---
 
@@ -337,7 +386,7 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
 };
 ```
 
-### On the sender side (led_controller.py)
+### On the sender side (V3.1: state.py / V3.0: led_controller.py)
 
 Add a matching entry to `OUTPUT_TYPES` and `LOOK_OUTPUT_TYPES`:
 

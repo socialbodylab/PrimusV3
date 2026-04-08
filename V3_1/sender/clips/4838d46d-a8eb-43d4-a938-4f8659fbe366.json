@@ -1,0 +1,25 @@
+{
+  "id": "4838d46d-a8eb-43d4-a938-4f8659fbe366",
+  "name": "Radial Sunset",
+  "group": "Radial Sunset",
+  "output_type": "grid",
+  "effect": "radial",
+  "start_color": [
+    255,
+    60,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    50
+  ],
+  "speed": 0.8,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.685568+00:00",
+  "modified": "2026-04-08T18:59:58.685588+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "b27b4572-d4e8-4768-b1cd-3b2edd3db649",
+  "name": "Firefly Scatter",
+  "group": "Firefly Scatter",
+  "output_type": "short_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    200,
+    180,
+    0
+  ],
+  "end_color": [
+    50,
+    30,
+    0
+  ],
+  "speed": 1.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.672975+00:00",
+  "modified": "2026-04-08T18:59:58.672986+00:00"
+}

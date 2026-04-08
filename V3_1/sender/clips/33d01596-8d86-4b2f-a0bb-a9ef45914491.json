@@ -1,0 +1,25 @@
+{
+  "id": "33d01596-8d86-4b2f-a0bb-a9ef45914491",
+  "name": "Diagonal Stripes",
+  "group": "Diagonal Stripes",
+  "output_type": "grid",
+  "effect": "linear",
+  "start_color": [
+    0,
+    0,
+    255
+  ],
+  "end_color": [
+    255,
+    255,
+    0
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.685953+00:00",
+  "modified": "2026-04-08T18:59:58.685972+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "f0d0694f-d03e-441f-b486-53628cefd63c",
+  "name": "Mint Chase",
+  "group": "Mint Chase",
+  "output_type": "short_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    100,
+    255,
+    180
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.673276+00:00",
+  "modified": "2026-04-08T18:59:58.673289+00:00"
+}

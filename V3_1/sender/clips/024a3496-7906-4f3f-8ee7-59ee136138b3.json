@@ -1,0 +1,25 @@
+{
+  "id": "024a3496-7906-4f3f-8ee7-59ee136138b3",
+  "name": "Lavender Drift",
+  "group": "Lavender Drift",
+  "output_type": "short_strip",
+  "effect": "linear",
+  "start_color": [
+    180,
+    130,
+    255
+  ],
+  "end_color": [
+    100,
+    50,
+    200
+  ],
+  "speed": 0.6,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.671443+00:00",
+  "modified": "2026-04-08T18:59:58.671582+00:00"
+}
