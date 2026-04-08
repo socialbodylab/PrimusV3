@@ -1,20 +1,29 @@
-# PrimusV2 Deployment Strategy
+# PrimusV3 Deployment Strategy
 
-Guidelines for packaging and distributing the PrimusV2 LED controller to non-technical users.
+Guidelines for packaging and distributing the PrimusV3 LED controller to non-technical users.
 
 ---
 
 ## Current Architecture
 
-The sender (`led_controller.py`) is a single-file Python 3 program with **zero external dependencies** (stdlib only). It provides:
+The V3.1 sender (`V3_1/sender/`) is a modular Python 3 application with **zero external dependencies** (stdlib only). It consists of:
 
-- UDP sockets for Art-Net (send/receive)
-- A basic HTTP server for the web UI
-- An embedded HTML/JS control interface
-- ArtPoll discovery
-- FPS telemetry listener
+- `run.py` — Entry point. Starts all subsystems.
+- `state.py` — Core state, animation loop, device tracking.
+- `server.py` — HTTP server (port 8080) serving static web UI and 27 JSON API endpoints.
+- `effects.py` — 10 built-in effects engine.
+- `clips.py` — Clip CRUD and preview computation.
+- `mixer.py` — Look Mixer crossfade logic.
+- `controller.py` — Cue Controller for sequential playback.
+- `artnet.py` — Art-Net protocol (ArtPoll, ArtDmx, ArtAddress, ArtOutputConfig).
+- `web/` — Static Alpine.js SPA (HTML, JS, CSS — no build step).
+- `clips/` — 114 preset clip JSON files.
+- `looks/` — Saved look JSON files.
+- `cues.json` — Cue list.
 
-Total: ~1000 lines. The web UI auto-opens in the user's default browser.
+Total: ~2500 lines of Python across 8 modules, plus the web UI. The web UI auto-opens in the user's default browser.
+
+The original V3.0 sender (`sender/led_controller.py`) is a single-file (~1800 lines) archived version that is still functional.
 
 ---
 
@@ -22,7 +31,7 @@ Total: ~1000 lines. The web UI auto-opens in the user's default browser.
 
 ### 1. PyInstaller — Recommended Short Term
 
-Bundle the Python script into a standalone executable. No Python installation required for end users.
+Bundle the Python application into a standalone executable. No Python installation required for end users.
 
 | | Detail |
 |---|---|
@@ -33,11 +42,19 @@ Bundle the Python script into a standalone executable. No Python installation re
 | **Dev effort** | Low — same Python code, add one build script |
 | **Rebuild needed** | Yes, when code changes |
 
-**Build command:**
+**Build command (V3.1):**
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name "PrimusV2 Controller" led_controller.py
+pyinstaller --onefile --windowed \
+  --name "PrimusV3 Controller" \
+  --add-data "V3_1/sender/web:web" \
+  --add-data "V3_1/sender/clips:clips" \
+  --add-data "V3_1/sender/looks:looks" \
+  --add-data "V3_1/sender/cues.json:. " \
+  V3_1/sender/run.py
 ```
+
+Note: V3.1's modular structure requires bundling the `web/`, `clips/`, and `looks/` data directories alongside the Python modules. The `--add-data` flags handle this. `server.py` must resolve its static file paths relative to the bundled data (PyInstaller sets `sys._MEIPASS` at runtime).
 
 **Distribution:** Attach platform binaries to GitHub Releases or provide a download link.
 
@@ -52,6 +69,7 @@ pyinstaller --onefile --windowed --name "PrimusV2 Controller" led_controller.py
 - Binary is ~30 MB (bundles Python interpreter)
 - macOS may require code signing / notarization for Gatekeeper
 - Needs rebuild on every code change
+- V3.1 requires bundling data directories (web UI, clips, looks) — slightly more complex than the old single-file build
 
 ---
 
@@ -65,7 +83,7 @@ Rewrite the server in Go for production-grade distribution.
 | **Install size** | ~8 MB |
 | **Cross-platform** | Cross-compile trivially (`GOOS=windows go build`) |
 | **User experience** | Double-click → browser opens → done |
-| **Dev effort** | Medium — rewrite ~1000 lines |
+| **Dev effort** | Medium — rewrite ~2500 lines of Python + web UI |
 | **Rebuild needed** | Yes, but cross-compilation from one machine |
 
 **Why Go fits this project:**
@@ -74,14 +92,17 @@ Rewrite the server in Go for production-grade distribution.
 - Cross-compilation is a single env var: `GOOS=windows GOARCH=amd64 go build`
 - Small binaries (~8 MB vs ~30 MB PyInstaller)
 - Many professional Art-Net/lighting tools are written in Go for exactly these reasons
-- Concurrency model (goroutines) maps cleanly to the current threading architecture
+- Concurrency model (goroutines) maps cleanly to V3.1's threaded architecture (animation loop, Art-Net listener, HTTP server)
+- `embed.FS` natively embeds static files — perfect for bundling the Alpine.js web UI, preset clips, and default looks into a single binary
 
 **Migration path:**
-1. Keep Python version for development and testing
-2. Port the Art-Net sender/receiver logic first (most mechanical)
-3. Port the HTTP server and embed the HTML as a Go `embed.FS`
-4. Port effects engine last (most creative code)
-5. Validate against the same ESP32 hardware
+1. Keep Python V3.1 for development and testing
+2. Port the Art-Net module (`artnet.py`) first (most mechanical)
+3. Port state management and device tracking (`state.py`)
+4. Port the HTTP server (`server.py`) and embed the web UI via Go `embed.FS`
+5. Port effects engine (`effects.py`) last (most creative code)
+6. Port clip/look/cue data model (`clips.py`, `mixer.py`, `controller.py`)
+7. Validate against the same ESP32 hardware
 
 ---
 
@@ -97,7 +118,7 @@ Wrap the web UI in a native desktop application shell.
 | **User experience** | Native app feel, tray icon, menu bar |
 | **Dev effort** | Medium — rewrite server in Node.js or spawn Python as subprocess |
 
-**Verdict: Overkill for this project.** 150 MB to wrap a web UI already served via HTTP is hard to justify. The browser _is_ the UI — that's a feature, not a limitation.
+**Verdict: Overkill for this project.** 150 MB to wrap a web UI already served via HTTP is hard to justify. V3.1 already serves a full Alpine.js SPA over HTTP — the browser _is_ the UI, and that's a feature, not a limitation.
 
 ---
 
@@ -145,8 +166,8 @@ This eliminates the Arduino CLI dependency entirely for end users.
 
 | Phase | Action | When |
 |---|---|---|
-| **Now** | Continue developing in Python | Current |
-| **Next** | Add PyInstaller build script, produce Mac + Windows binaries | When ready to share with first users |
+| **Now** | Continue developing V3.1 in Python (modular sender) | Current |
+| **Next** | Add PyInstaller build script for V3.1, produce Mac + Windows binaries | When ready to share with first users |
 | **Later** | Port to Go for production distribution | When project stabilizes and user base grows |
 | **ESP32** | Pre-build firmware `.bin` files, document ESP Web Flasher workflow | Alongside first user distribution |
 
