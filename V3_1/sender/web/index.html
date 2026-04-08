@@ -63,6 +63,8 @@
                                 :class="{ 'btn-primary': !dev.connected }"
                                 @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
                                 x-text="dev.connected ? 'Off' : 'On'"></button>
+                        <button class="btn btn-sm" x-show="dev.connected"
+                                @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
                     </div>
                 </div>
@@ -189,31 +191,21 @@
                 <button class="btn btn-primary" @click="openSave()">Save</button>
             </div>
             <div class="btn-group" x-show="subMode === 'designer'">
-                <button class="btn btn-primary" @click="openSaveClip()">Save Clip</button>
             </div>
         </div>
 
         <!-- ═══ DESIGNER SUB-MODE ═══ -->
         <div x-show="subMode === 'designer'">
 
-            <!-- FPS -->
-            <div class="output-section" x-show="state">
-                <div class="form-group">
-                    <label class="form-label">FPS</label>
-                    <div class="flex items-center gap-2">
-                        <input type="range" class="form-range" min="1" max="60"
-                               :value="state?.fps || 30"
-                               @input="updateFps($event.target.value)">
-                        <span class="text-sm" x-text="state?.fps || 30"></span>
-                    </div>
-                </div>
-            </div>
-
             <!-- Per-output controls -->
             <template x-for="(out, oi) in outputs" :key="oi">
                 <div class="output-section">
                     <div class="output-header">
-                        <span class="output-name" x-text="out.name"></span>
+                        <div class="flex items-center gap-2">
+                            <span class="output-name" x-text="out.name"></span>
+                            <span class="designer-clip-label"
+                                  x-text="loadedClips[oi]?.name || 'Untitled'"></span>
+                        </div>
                         <span class="text-sm text-muted" x-text="out.count + 'px'"></span>
                     </div>
 
@@ -317,6 +309,14 @@
                             <option value="end">End</option>
                         </select>
                     </div>
+
+                    <!-- Per-output save buttons -->
+                    <div class="designer-save-row" x-show="out.type !== 'none'">
+                        <button class="btn btn-sm btn-primary" @click="openSaveClip(oi)"
+                                x-text="loadedClips[oi] ? 'Update Clip' : 'Save as Clip'"></button>
+                        <button class="btn btn-sm" @click="openSaveNewClip(oi)"
+                                x-show="loadedClips[oi]">Save as New</button>
+                    </div>
                 </div>
             </template>
 
@@ -344,8 +344,14 @@
                 </div>
                 <div class="card-grid">
                     <template x-for="clip in clips" :key="clip.id">
-                        <div class="card" @click="loadIntoDesigner(clip)">
+                        <div class="card"
+                             @mouseenter="startClipPreview(clip, $el)"
+                             @mouseleave="stopClipPreview()">
                             <div class="card-thumb" :style="thumbStyle(clip)"></div>
+                            <canvas class="clip-preview-canvas"
+                                    x-show="_clipPreviewId === clip.id"
+                                    :style="clip.output_type === 'grid' ? 'width:100%;aspect-ratio:1' : 'width:100%;height:24px'">
+                            </canvas>
                             <div class="card-body">
                                 <div class="card-title" x-text="clip.name"></div>
                                 <div class="card-meta">
@@ -353,7 +359,9 @@
                                     <span x-text="clip.effect"></span>
                                 </div>
                             </div>
-                            <div style="padding:0 10px 8px">
+                            <div class="card-hover-actions">
+                                <button class="btn btn-sm btn-primary"
+                                        @click.stop="loadIntoDesigner(clip)">Open In Designer</button>
                                 <button class="btn btn-sm btn-danger"
                                         @click.stop="deleteClip(clip)">Delete</button>
                             </div>
@@ -366,7 +374,7 @@
             <!-- Clip save modal -->
             <div class="modal-overlay" x-show="clipSaveModal" @click.self="clipSaveModal = false">
                 <div class="modal">
-                    <div class="modal-title">Save Clip</div>
+                    <div class="modal-title" x-text="loadedClips[clipSaveOi] ? 'Update Clip' : 'Save Clip'"></div>
                     <div class="form-group">
                         <label class="form-label">Clip Name</label>
                         <input class="form-input" x-model="clipSaveName"
@@ -381,10 +389,10 @@
                             <span class="text-sm" x-text="clipSaveDuration + 's'"></span>
                         </div>
                     </div>
-                    <p class="text-sm text-muted">Each non-empty output will be saved as a separate clip.</p>
                     <div class="modal-actions">
                         <button class="btn" @click="clipSaveModal = false">Cancel</button>
-                        <button class="btn btn-primary" @click="doSaveClip()">Save</button>
+                        <button class="btn btn-primary" @click="doSaveClip()"
+                                x-text="loadedClips[clipSaveOi] ? 'Update' : 'Save'"></button>
                     </div>
                 </div>
             </div>
@@ -508,11 +516,24 @@
                     <span class="text-sm" x-text="track.port + ' clips:'"></span>
                     <div class="flex gap-2 mt-2" style="flex-wrap:wrap">
                         <template x-for="clip in clipsForTrack(ti)" :key="clip.id">
-                            <button class="clip-palette-btn" @click="addSegment(ti, clip)">
+                            <div class="clip-palette-btn"
+                                    @click="addSegment(ti, clip)"
+                                    @mouseenter="startClipPreview(clip, $el)"
+                                    @mouseleave="stopClipPreview()">
                                 <div class="clip-palette-thumb"
-                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'"></div>
+                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'}"></div>
+                                <canvas class="clip-palette-preview-canvas"
+                                        x-show="_clipPreviewId === clip.id"
+                                        :style="clip.output_type === 'grid' ? 'width:100%;aspect-ratio:1' : 'width:100%;height:16px'">
+                                </canvas>
                                 <span x-text="clip.name"></span>
-                            </button>
+                                <div class="clip-palette-hover-actions">
+                                    <button class="btn btn-xs btn-primary"
+                                            @click.stop="loadIntoDesigner(clip)">Designer</button>
+                                    <button class="btn btn-xs btn-danger"
+                                            @click.stop="deleteClip(clip)">Delete</button>
+                                </div>
+                            </div>
                         </template>
                         <span class="text-sm text-muted"
                               x-show="clipsForTrack(ti).length === 0">

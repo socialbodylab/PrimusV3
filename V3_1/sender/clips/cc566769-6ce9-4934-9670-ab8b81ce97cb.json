@@ -1,0 +1,25 @@
+{
+  "id": "cc566769-6ce9-4934-9670-ab8b81ce97cb",
+  "name": "Ice Knight Rider",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    100,
+    200,
+    255
+  ],
+  "end_color": [
+    0,
+    0,
+    40
+  ],
+  "speed": 1.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 6,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.287912+00:00",
+  "modified": "2026-04-08T13:57:40.287942+00:00"
+}

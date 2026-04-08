@@ -1,0 +1,25 @@
+{
+  "id": "7bb05346-9680-40e0-99c6-8a97f9df3444",
+  "name": "Gold Gradient",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "linear",
+  "start_color": [
+    255,
+    180,
+    0
+  ],
+  "end_color": [
+    180,
+    80,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.474808+00:00",
+  "modified": "2026-04-08T15:30:31.474822+00:00"
+}

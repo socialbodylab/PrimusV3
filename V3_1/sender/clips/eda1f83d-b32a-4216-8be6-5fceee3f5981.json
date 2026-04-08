@@ -1,0 +1,25 @@
+{
+  "id": "eda1f83d-b32a-4216-8be6-5fceee3f5981",
+  "name": "Frost Shimmer",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    150,
+    200,
+    255
+  ],
+  "end_color": [
+    255,
+    255,
+    255
+  ],
+  "speed": 2.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-04-08T15:30:31.475827+00:00",
+  "modified": "2026-04-08T15:30:31.475839+00:00"
+}

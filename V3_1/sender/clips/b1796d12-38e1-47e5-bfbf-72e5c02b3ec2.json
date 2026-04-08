@@ -1,0 +1,25 @@
+{
+  "id": "b1796d12-38e1-47e5-bfbf-72e5c02b3ec2",
+  "name": "Northern Lights",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    0,
+    255,
+    100
+  ],
+  "end_color": [
+    80,
+    0,
+    255
+  ],
+  "speed": 0.8,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.297145+00:00",
+  "modified": "2026-04-08T13:57:40.297176+00:00"
+}

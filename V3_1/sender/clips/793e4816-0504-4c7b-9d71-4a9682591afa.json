@@ -1,0 +1,25 @@
+{
+  "id": "793e4816-0504-4c7b-9d71-4a9682591afa",
+  "name": "Sunset Gradient",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "linear",
+  "start_color": [
+    255,
+    40,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.285792+00:00",
+  "modified": "2026-04-08T13:57:40.285836+00:00"
+}

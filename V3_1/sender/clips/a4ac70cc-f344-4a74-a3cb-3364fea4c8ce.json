@@ -1,0 +1,25 @@
+{
+  "id": "a4ac70cc-f344-4a74-a3cb-3364fea4c8ce",
+  "name": "Neon Strobe",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 5.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 1.0,
+  "created": "2026-04-08T13:57:40.302088+00:00",
+  "modified": "2026-04-08T13:57:40.302122+00:00"
+}

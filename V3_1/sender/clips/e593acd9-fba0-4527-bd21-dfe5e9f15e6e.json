@@ -1,0 +1,25 @@
+{
+  "id": "e593acd9-fba0-4527-bd21-dfe5e9f15e6e",
+  "name": "Fire Grid",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "constrainbow",
+  "start_color": [
+    255,
+    60,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    0
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.308382+00:00",
+  "modified": "2026-04-08T13:57:40.308410+00:00"
+}

@@ -1,7 +1,7 @@
 {
-  "id": "2c2311af-4462-47c8-90b4-321b871370fb",
-  "name": "test1_short_strip1",
-  "group": "test1",
+  "id": "53019376-73e4-4095-b98f-1d67b96fc110",
+  "name": "Rainbow Sprint",
+  "group": "short_strip",
   "output_type": "short_strip",
   "effect": "rainbow",
   "start_color": [
@@ -14,12 +14,12 @@
     0,
     255
   ],
-  "speed": 1,
+  "speed": 3.0,
   "playback": "loop",
   "angle": 0,
   "highlight_width": 5,
   "chase_origin": "start",
-  "duration": 5,
-  "created": "2026-04-07T15:30:16.867098+00:00",
-  "modified": "2026-04-07T15:30:16.867533+00:00"
+  "duration": 2.0,
+  "created": "2026-04-08T15:30:31.476346+00:00",
+  "modified": "2026-04-08T15:30:31.476367+00:00"
 }

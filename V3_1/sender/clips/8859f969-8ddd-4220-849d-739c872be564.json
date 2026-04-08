@@ -1,0 +1,25 @@
+{
+  "id": "8859f969-8ddd-4220-849d-739c872be564",
+  "name": "UV Purple Solid",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "solid",
+  "start_color": [
+    100,
+    0,
+    255
+  ],
+  "end_color": [
+    100,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.292183+00:00",
+  "modified": "2026-04-08T13:57:40.292222+00:00"
+}

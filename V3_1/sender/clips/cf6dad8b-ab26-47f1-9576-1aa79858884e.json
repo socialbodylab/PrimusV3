@@ -1,0 +1,25 @@
+{
+  "id": "cf6dad8b-ab26-47f1-9576-1aa79858884e",
+  "name": "Teal Solid",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "solid",
+  "start_color": [
+    0,
+    200,
+    180
+  ],
+  "end_color": [
+    0,
+    200,
+    180
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.308690+00:00",
+  "modified": "2026-04-08T13:57:40.308719+00:00"
+}

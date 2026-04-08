@@ -1,0 +1,25 @@
+{
+  "id": "8d1dd083-95d3-4a7b-93f9-5623ca6d6557",
+  "name": "Wide Knight Rider",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    20,
+    0,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 8,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.298443+00:00",
+  "modified": "2026-04-08T13:57:40.298483+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "13b66434-8899-4907-92fb-db2a7707b24d",
+  "name": "Slow Gold Wave",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    255,
+    200,
+    0
+  ],
+  "end_color": [
+    100,
+    50,
+    0
+  ],
+  "speed": 0.5,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 8.0,
+  "created": "2026-04-08T15:30:31.478233+00:00",
+  "modified": "2026-04-08T15:30:31.478244+00:00"
+}

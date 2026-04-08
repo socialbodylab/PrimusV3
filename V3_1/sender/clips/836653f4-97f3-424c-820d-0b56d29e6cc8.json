@@ -1,0 +1,25 @@
+{
+  "id": "836653f4-97f3-424c-820d-0b56d29e6cc8",
+  "name": "Chase Reverse",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    0,
+    100
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "end",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.289359+00:00",
+  "modified": "2026-04-08T13:57:40.289410+00:00"
+}

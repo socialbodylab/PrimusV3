@@ -1,0 +1,25 @@
+{
+  "id": "5a4988dd-64c3-4b59-b599-8f9a408305bc",
+  "name": "Mint Scanner",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    0,
+    255,
+    200
+  ],
+  "end_color": [
+    0,
+    40,
+    30
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 4,
+  "chase_origin": "start",
+  "duration": 3.0,
+  "created": "2026-04-08T15:30:31.478484+00:00",
+  "modified": "2026-04-08T15:30:31.478503+00:00"
+}

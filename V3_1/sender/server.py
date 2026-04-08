@@ -5,6 +5,7 @@ server.py — HTTP server serving static files and JSON API.
 import json
 import os
 import mimetypes
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import clips
@@ -146,6 +147,23 @@ class Handler(BaseHTTPRequestHandler):
             if new_name:
                 self.controller_state.rename_device(di, new_name)
             self._ok()
+
+        elif path == "/api/hello_device":
+            di = data.get("device", -1)
+            threading.Thread(
+                target=self.controller_state.hello_device,
+                args=(di,), daemon=True).start()
+            self._ok()
+
+        elif path == "/api/clip/preview":
+            clip_id = data.get("clip_id")
+            t = float(data.get("t", 0))
+            clip = clips.load_clip(clip_id) if clip_id else None
+            if not clip:
+                self._respond(404, "application/json", b'{"error":"not found"}')
+            else:
+                result = clips.compute_clip_preview(clip, t)
+                self._json_response(result)
 
         # -- Clip routes --
         elif path == "/api/clips/save":

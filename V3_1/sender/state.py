@@ -526,6 +526,29 @@ class ControllerState:
             _save_device_groups(self.device_groups)
             return True
 
+    def hello_device(self, di):
+        """Send a quick red flash to all outputs on a device to help locate it."""
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return
+            dev = self.devices[di]
+            if not dev["sender"].connected:
+                return
+            outputs_info = []
+            for o in dev["outputs"]:
+                outputs_info.append((o["universe"], o["count"]))
+            sender = dev["sender"]
+
+        # Flash red then black (outside lock to avoid blocking animation)
+        for universe, count in outputs_info:
+            red = bytes([255, 0, 0] * count)
+            sender.send_output(universe, red)
+        sender.advance_sequence()
+        time.sleep(1.0)
+        for universe, count in outputs_info:
+            sender.send_output(universe, bytes(count * 3))
+        sender.advance_sequence()
+
     # ------------------------------------------------------------------
     #  Override pixels (for mixer / controller playback)
     # ------------------------------------------------------------------
@@ -555,6 +578,7 @@ class ControllerState:
         """Explicitly set the playback source (designer, idle, etc.)."""
         with self.lock:
             self.playback_source = source
+            self._override_pixels = None
 
     def get_mixer_preview(self):
         """Return (look, elapsed) if mixer preview is active, else (None, 0)."""

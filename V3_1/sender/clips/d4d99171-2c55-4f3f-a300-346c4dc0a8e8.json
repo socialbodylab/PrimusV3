@@ -1,0 +1,25 @@
+{
+  "id": "d4d99171-2c55-4f3f-a300-346c4dc0a8e8",
+  "name": "Slow Heartbeat",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "pulse",
+  "start_color": [
+    180,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    50,
+    50
+  ],
+  "speed": 0.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.283853+00:00",
+  "modified": "2026-04-08T13:57:40.283908+00:00"
+}

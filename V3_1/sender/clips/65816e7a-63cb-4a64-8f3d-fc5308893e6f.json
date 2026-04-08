@@ -1,0 +1,25 @@
+{
+  "id": "65816e7a-63cb-4a64-8f3d-fc5308893e6f",
+  "name": "Linear Sweep 45",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "linear",
+  "start_color": [
+    255,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    200
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.484547+00:00",
+  "modified": "2026-04-08T15:30:31.484568+00:00"
+}

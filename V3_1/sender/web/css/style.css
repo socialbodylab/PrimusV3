@@ -371,10 +371,20 @@ input[type="color"] {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
-    cursor: pointer;
+    cursor: default;
     transition: border-color 0.15s;
+    position: relative;
 }
 .card:hover { border-color: var(--accent); }
+
+.card-hover-actions {
+    display: none;
+    gap: 6px;
+    padding: 6px 10px 8px;
+}
+.card:hover .card-hover-actions {
+    display: flex;
+}
 
 .card-thumb {
     height: 80px;
@@ -400,6 +410,18 @@ input[type="color"] {
 .card-meta {
     font-size: 11px;
     color: var(--text-muted);
+}
+
+.clip-preview-canvas {
+    display: block;
+    background: #000;
+    image-rendering: pixelated;
+}
+
+.clip-palette-preview-canvas {
+    display: block;
+    background: #000;
+    image-rendering: pixelated;
 }
 
 /* ── TIMELINE (Look Mixer) ─────────────────────────────── */
@@ -557,10 +579,11 @@ input[type="color"] {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
-    cursor: pointer;
+    cursor: default;
     overflow: hidden;
     min-width: 80px;
     transition: border-color 0.15s;
+    position: relative;
 }
 .clip-palette-btn:hover { border-color: var(--accent); }
 .clip-palette-btn span {
@@ -568,6 +591,20 @@ input[type="color"] {
     font-size: 12px;
     color: var(--text-primary);
     text-align: center;
+}
+.clip-palette-hover-actions {
+    display: none;
+    gap: 4px;
+    padding: 4px 6px;
+    justify-content: center;
+}
+.clip-palette-btn:hover .clip-palette-hover-actions {
+    display: flex;
+}
+.btn-xs {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
 }
 .clip-palette-thumb {
     height: 16px;
@@ -790,6 +827,24 @@ input[type="color"] {
 .output-name {
     font-weight: 700;
     font-size: 14px;
+}
+
+.designer-clip-label {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+}
+
+.designer-save-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
 }
 
 /* ── SEARCH / FILTER BAR ───────────────────────────────── */

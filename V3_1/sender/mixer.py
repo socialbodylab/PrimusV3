@@ -237,26 +237,45 @@ def compute_look_frame(look, t, fps=30, clip_cache=None, state_cache=None):
             result.append([(0, 0, 0)] * pixel_count)
             continue
 
-        # Compute pixels for each active segment, blend if overlapping
-        blended = None
-        for seg in active:
+        if len(active) == 1:
+            # Single segment — apply fade in/out envelope
+            seg = active[0]
             seg_local_t = local_t - seg.get("start_time", 0.0)
             pixels = _compute_segment_pixels(seg, seg_local_t, pixel_count, grid,
                                              dt=signed_dt, clip_cache=clip_cache,
                                              state_cache=state_cache)
             fade = _segment_fade_factor(seg, seg_local_t)
-
-            # Apply fade envelope
             if fade < 1.0:
                 black = [(0, 0, 0)] * pixel_count
                 pixels = blend_pixels(black, pixels, fade)
+            result.append(pixels)
+        else:
+            # Overlapping segments — compute position-based crossfade.
+            # Sort by start time so earlier segment is A, later is B.
+            active_sorted = sorted(active, key=lambda s: s.get("start_time", 0.0))
+            seg_a = active_sorted[0]
+            seg_b = active_sorted[-1]  # use last for 3+ overlaps
 
-            if blended is None:
-                blended = pixels
+            seg_a_local = local_t - seg_a.get("start_time", 0.0)
+            seg_b_local = local_t - seg_b.get("start_time", 0.0)
+
+            pixels_a = _compute_segment_pixels(seg_a, seg_a_local, pixel_count, grid,
+                                               dt=signed_dt, clip_cache=clip_cache,
+                                               state_cache=state_cache)
+            pixels_b = _compute_segment_pixels(seg_b, seg_b_local, pixel_count, grid,
+                                               dt=signed_dt, clip_cache=clip_cache,
+                                               state_cache=state_cache)
+
+            # Crossfade region: from where B starts to where A ends
+            a_end = seg_a.get("start_time", 0.0) + seg_a.get("duration", 5.0)
+            b_start = seg_b.get("start_time", 0.0)
+            overlap = a_end - b_start
+            if overlap > 0:
+                crossfade_t = (local_t - b_start) / overlap
             else:
-                # Crossfade: average overlapping segments
-                blended = blend_pixels(blended, pixels, 0.5)
+                crossfade_t = 0.5
+            crossfade_t = max(0.0, min(1.0, crossfade_t))
 
-        result.append(blended or [(0, 0, 0)] * pixel_count)
+            result.append(blend_pixels(pixels_a, pixels_b, crossfade_t))
 
     return result

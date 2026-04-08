@@ -1,0 +1,25 @@
+{
+  "id": "537e1518-1dc9-4934-86b0-0fffa40a1b4a",
+  "name": "Amber Solid",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "solid",
+  "start_color": [
+    255,
+    160,
+    0
+  ],
+  "end_color": [
+    255,
+    160,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.291815+00:00",
+  "modified": "2026-04-08T13:57:40.291851+00:00"
+}

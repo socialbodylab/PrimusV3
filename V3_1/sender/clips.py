@@ -59,6 +59,10 @@ def new_clip(name, output_type, group=None, **overrides):
 def save_clip(clip):
     """Write clip JSON to clips/{id}.json. Returns the clip."""
     d = _ensure_dir()
+    if not clip.get("id"):
+        clip["id"] = str(uuid.uuid4())
+    if not clip.get("created"):
+        clip["created"] = datetime.now(timezone.utc).isoformat()
     clip["modified"] = datetime.now(timezone.utc).isoformat()
     path = os.path.join(d, f"{clip['id']}.json")
     with open(path, "w") as f:
@@ -109,6 +113,73 @@ def list_clips(filter_type=None, search=None, sort_by="modified"):
     reverse = sort_by in ("modified", "created")
     clips.sort(key=lambda c: c.get(sort_by, ""), reverse=reverse)
     return clips
+
+
+# ======================================================================
+#  CLIP PREVIEW
+# ======================================================================
+
+_preview_states = {}   # clip_id -> effect state list
+
+
+def compute_clip_preview(clip, t, dt=0.033):
+    """Compute one frame of pixels for a clip at time *t*.
+
+    Uses the same effects engine as the designer.
+    Returns {"pixels": [[r,g,b], ...], "grid": [cols,rows]|None, "count": int}.
+    """
+    from state import OUTPUT_TYPES
+    from effects import EFFECTS, fx_none, compute_anim_factor
+
+    output_type = clip.get("output_type", "short_strip")
+    typedef = OUTPUT_TYPES.get(output_type)
+    if not typedef or typedef["pixels"] == 0:
+        return {"pixels": [], "grid": None, "count": 0}
+
+    count = typedef["pixels"]
+    grid = typedef.get("grid_size")
+
+    effect_name = clip.get("effect", "none")
+    fn = EFFECTS.get(effect_name, fx_none)
+    speed = clip.get("speed", 1.0)
+    duration = clip.get("duration", 5.0)
+    scaled_t = t * speed
+    af = compute_anim_factor(
+        scaled_t, clip.get("playback", "loop"), duration=duration
+    )
+
+    clip_id = clip.get("id", "")
+    if clip_id not in _preview_states:
+        _preview_states[clip_id] = []
+    state = _preview_states[clip_id]
+
+    pixels = fn(
+        count=count, t=scaled_t, dt=dt,
+        speed=speed, anim_factor=af,
+        duration=duration,
+        playback=clip.get("playback", "loop"),
+        start_color=tuple(clip.get("start_color", (255, 0, 255))),
+        end_color=tuple(clip.get("end_color", (0, 255, 255))),
+        state=state,
+        grid=tuple(grid) if grid else None,
+        angle=clip.get("angle", 0),
+        highlight_width=clip.get("highlight_width", 5),
+        chase_origin=clip.get("chase_origin", "start"),
+    )
+
+    return {
+        "pixels": [list(p) for p in pixels],
+        "grid": list(grid) if grid else None,
+        "count": count,
+    }
+
+
+def clear_preview_state(clip_id=None):
+    """Clear cached effect state for clip previews."""
+    if clip_id:
+        _preview_states.pop(clip_id, None)
+    else:
+        _preview_states.clear()
 
 
 def save_from_designer(name, outputs):

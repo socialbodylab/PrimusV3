@@ -1,0 +1,25 @@
+{
+  "id": "a0c6f838-c2ab-49e7-8938-56e3d3fbe931",
+  "name": "Copper Gradient",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    200,
+    100,
+    50
+  ],
+  "end_color": [
+    80,
+    40,
+    20
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.477774+00:00",
+  "modified": "2026-04-08T15:30:31.477786+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "96a251ff-a307-4013-8d3f-e4ac0920d8d4",
+  "name": "White Solid",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "solid",
+  "start_color": [
+    255,
+    255,
+    255
+  ],
+  "end_color": [
+    255,
+    255,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.285336+00:00",
+  "modified": "2026-04-08T13:57:40.285369+00:00"
+}

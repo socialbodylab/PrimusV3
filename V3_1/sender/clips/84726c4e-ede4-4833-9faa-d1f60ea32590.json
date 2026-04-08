@@ -1,0 +1,25 @@
+{
+  "id": "84726c4e-ede4-4833-9faa-d1f60ea32590",
+  "name": "Purple Rain",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    100,
+    0,
+    200
+  ],
+  "end_color": [
+    200,
+    0,
+    255
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.475084+00:00",
+  "modified": "2026-04-08T15:30:31.475097+00:00"
+}

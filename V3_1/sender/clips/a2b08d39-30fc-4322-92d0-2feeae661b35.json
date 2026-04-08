@@ -1,0 +1,25 @@
+{
+  "id": "a2b08d39-30fc-4322-92d0-2feeae661b35",
+  "name": "Grid Constrainbow",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "constrainbow",
+  "start_color": [
+    255,
+    0,
+    100
+  ],
+  "end_color": [
+    100,
+    0,
+    255
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-04-08T15:30:31.483050+00:00",
+  "modified": "2026-04-08T15:30:31.483069+00:00"
+}

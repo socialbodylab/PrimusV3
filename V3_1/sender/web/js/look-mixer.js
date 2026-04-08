@@ -33,8 +33,10 @@ document.addEventListener("alpine:init", () => {
 
         // ── Designer state ──
         clipSaveModal: false,
+        clipSaveOi: -1,
         clipSaveName: "",
         clipSaveDuration: 5.0,
+        loadedClips: {},   // oi -> {id, name} of clip loaded in that output
 
         // ── Library state ──
         libSearch: "",
@@ -77,12 +79,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ── Sub-mode switching ──
-        setSubMode(m) {
+        async setSubMode(m) {
             if (m === 'designer' && this.previewing) {
-                this.stopPreview();
+                await this.stopPreview();
             }
             this.subMode = m;
-            api("POST", "/api/set_playback_source", {
+            await api("POST", "/api/set_playback_source", {
                 source: m === "designer" ? "designer" : "idle"
             });
         },
@@ -124,32 +126,51 @@ document.addEventListener("alpine:init", () => {
             return c ? rgbToHex(c) : "#00ffff";
         },
 
-        openSaveClip() {
-            this.clipSaveName = "";
-            this.clipSaveDuration = 5.0;
+        openSaveClip(oi) {
+            const loaded = this.loadedClips[oi];
+            this.clipSaveOi = oi;
+            this.clipSaveName = loaded?.name || "";
+            this.clipSaveDuration = loaded?.duration || 5.0;
             this.clipSaveModal = true;
         },
 
         async doSaveClip() {
             if (!this.clipSaveName.trim()) return;
-            const outs = this.outputs.map(o => ({
-                type: o.type,
-                effect: o.effect,
-                start_color: o.start_color,
-                end_color: o.end_color,
-                speed: o.speed,
-                playback: o.playback,
-                angle: o.angle,
-                highlight_width: o.highlight_width,
-                chase_origin: o.chase_origin,
-                duration: this.clipSaveDuration,
-            }));
-            await api("POST", "/api/clips/save", {
+            const oi = this.clipSaveOi;
+            const out = this.outputs[oi];
+            if (!out || out.type === 'none') return;
+            const loaded = this.loadedClips[oi];
+            const clip = {
+                id: loaded?.id || undefined,
                 name: this.clipSaveName.trim(),
-                outputs: outs,
-            });
+                group: this.clipSaveName.trim(),
+                output_type: out.type,
+                effect: out.effect,
+                start_color: out.start_color,
+                end_color: out.end_color,
+                speed: out.speed,
+                playback: out.playback,
+                angle: out.angle || 0,
+                highlight_width: out.highlight_width || 5,
+                chase_origin: out.chase_origin || "start",
+                duration: this.clipSaveDuration,
+            };
+            const saved = await api("POST", "/api/clips/save_single", clip);
+            this.loadedClips[oi] = { id: saved.id, name: saved.name, duration: saved.duration };
             this.clipSaveModal = false;
             await this.loadClips();
+        },
+
+        clearLoadedClip(oi) {
+            delete this.loadedClips[oi];
+        },
+
+        openSaveNewClip(oi) {
+            this.clipSaveOi = oi;
+            this.clipSaveName = "";
+            this.clipSaveDuration = this.loadedClips[oi]?.duration || 5.0;
+            delete this.loadedClips[oi];
+            this.clipSaveModal = true;
         },
 
         needsColors(effect) {
@@ -220,13 +241,84 @@ document.addEventListener("alpine:init", () => {
                 highlight_width: clip.highlight_width || 5,
                 chase_origin: clip.chase_origin || "start",
             });
-            this.subMode = "designer";
+            this.loadedClips[targetIdx] = {
+                id: clip.id, name: clip.name, duration: clip.duration || 5.0,
+            };
+            await this.setSubMode("designer");
         },
 
         async deleteClip(clip) {
             if (!confirm("Delete clip \"" + clip.name + "\"?")) return;
+            this.stopClipPreview();
             await fetch("/api/clips/" + clip.id, { method: "DELETE" });
             await this.loadClips();
+        },
+
+        // ══════════════════════════════════════════════════
+        //  CLIP HOVER PREVIEW
+        // ══════════════════════════════════════════════════
+
+        _clipPreviewInterval: null,
+        _clipPreviewT: 0,
+        _clipPreviewId: null,
+        _clipPreviewCanvas: null,
+
+        startClipPreview(clip, el) {
+            this.stopClipPreview();
+            this._clipPreviewId = clip.id;
+            this._clipPreviewT = 0;
+            this._clipPreviewCanvas = el.querySelector('canvas');
+            const dt = 0.066;
+            const fetchFrame = async () => {
+                if (this._clipPreviewId !== clip.id) return;
+                try {
+                    const res = await api("POST", "/api/clip/preview", {
+                        clip_id: clip.id, t: this._clipPreviewT,
+                    });
+                    this._drawClipPreview(res);
+                    this._clipPreviewT += dt;
+                } catch (e) { /* ignore */ }
+            };
+            fetchFrame();
+            this._clipPreviewInterval = setInterval(fetchFrame, 66);
+        },
+
+        stopClipPreview() {
+            if (this._clipPreviewInterval) {
+                clearInterval(this._clipPreviewInterval);
+                this._clipPreviewInterval = null;
+            }
+            this._clipPreviewId = null;
+            this._clipPreviewCanvas = null;
+        },
+
+        _drawClipPreview(data) {
+            const canvas = this._clipPreviewCanvas;
+            if (!canvas) return;
+            const pixels = data.pixels || [];
+            const grid = data.grid;
+            const ctx = canvas.getContext("2d");
+            if (grid) {
+                const [cols, rows] = grid;
+                canvas.width = cols;
+                canvas.height = rows;
+                ctx.clearRect(0, 0, cols, rows);
+                for (let i = 0; i < pixels.length; i++) {
+                    const x = i % cols, y = Math.floor(i / cols);
+                    const p = pixels[i] || [0,0,0];
+                    ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            } else if (pixels.length > 0) {
+                canvas.width = pixels.length;
+                canvas.height = 1;
+                ctx.clearRect(0, 0, pixels.length, 1);
+                for (let i = 0; i < pixels.length; i++) {
+                    const p = pixels[i] || [0,0,0];
+                    ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
+                    ctx.fillRect(i, 0, 1, 1);
+                }
+            }
         },
 
         // ══════════════════════════════════════════════════

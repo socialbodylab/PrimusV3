@@ -1,0 +1,25 @@
+{
+  "id": "36ba60ca-88e8-4c09-84e5-51a5351f038b",
+  "name": "Narrow Scanner",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    0,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    20,
+    0
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 2,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.288382+00:00",
+  "modified": "2026-04-08T13:57:40.288427+00:00"
+}

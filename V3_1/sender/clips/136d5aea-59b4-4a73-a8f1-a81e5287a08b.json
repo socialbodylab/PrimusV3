@@ -1,0 +1,25 @@
+{
+  "id": "136d5aea-59b4-4a73-a8f1-a81e5287a08b",
+  "name": "Aqua Pulse",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    200,
+    200
+  ],
+  "end_color": [
+    0,
+    50,
+    100
+  ],
+  "speed": 0.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 6.0,
+  "created": "2026-04-08T15:30:31.474502+00:00",
+  "modified": "2026-04-08T15:30:31.474522+00:00"
+}

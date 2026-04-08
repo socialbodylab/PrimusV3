@@ -1,0 +1,25 @@
+{
+  "id": "c4c1becf-f158-4f65-a6aa-8890f2d23943",
+  "name": "Tight Spiral",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "spiral",
+  "start_color": [
+    255,
+    0,
+    255
+  ],
+  "end_color": [
+    0,
+    255,
+    0
+  ],
+  "speed": 2.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 3.0,
+  "created": "2026-04-08T15:30:31.484816+00:00",
+  "modified": "2026-04-08T15:30:31.484833+00:00"
+}

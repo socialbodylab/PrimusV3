@@ -1,0 +1,25 @@
+{
+  "id": "e2af4395-92fb-452f-a251-fc9f08010633",
+  "name": "Pink Diagonal Wipe",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    100,
+    200
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-04-08T15:30:31.482393+00:00",
+  "modified": "2026-04-08T15:30:31.482411+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "cfa1c4b7-7509-4385-8e74-46350880c92a",
+  "name": "Fast Radial Rings",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "radial",
+  "start_color": [
+    0,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    80
+  ],
+  "speed": 3.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 2.0,
+  "created": "2026-04-08T13:57:40.303469+00:00",
+  "modified": "2026-04-08T13:57:40.303503+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "c1ec5d14-f4a0-4fcc-a8b1-631a49ee54b7",
+  "name": "Rainbow March",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.297663+00:00",
+  "modified": "2026-04-08T13:57:40.297697+00:00"
+}

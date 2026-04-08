@@ -1,0 +1,25 @@
+{
+  "id": "06fd995f-b10d-4758-8d9d-bd2d95fc8317",
+  "name": "Horizontal Sweep",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "linear",
+  "start_color": [
+    0,
+    255,
+    100
+  ],
+  "end_color": [
+    255,
+    0,
+    200
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.305599+00:00",
+  "modified": "2026-04-08T13:57:40.305627+00:00"
+}

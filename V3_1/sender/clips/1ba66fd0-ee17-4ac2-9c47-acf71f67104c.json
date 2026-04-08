@@ -1,0 +1,25 @@
+{
+  "id": "1ba66fd0-ee17-4ac2-9c47-acf71f67104c",
+  "name": "Slow Grid Pulse",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    100,
+    255
+  ],
+  "end_color": [
+    0,
+    20,
+    60
+  ],
+  "speed": 0.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 8.0,
+  "created": "2026-04-08T15:30:31.483882+00:00",
+  "modified": "2026-04-08T15:30:31.483906+00:00"
+}

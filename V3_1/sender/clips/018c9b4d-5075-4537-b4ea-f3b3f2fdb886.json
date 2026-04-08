@@ -1,0 +1,25 @@
+{
+  "id": "018c9b4d-5075-4537-b4ea-f3b3f2fdb886",
+  "name": "Chase Vertical",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    100,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "boomerang",
+  "angle": 90,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.306593+00:00",
+  "modified": "2026-04-08T13:57:40.306621+00:00"
+}

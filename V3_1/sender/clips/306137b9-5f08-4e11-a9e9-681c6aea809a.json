@@ -1,0 +1,25 @@
+{
+  "id": "306137b9-5f08-4e11-a9e9-681c6aea809a",
+  "name": "Ocean Chase Down",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    30,
+    80
+  ],
+  "end_color": [
+    0,
+    150,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "boomerang",
+  "angle": 90,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.481967+00:00",
+  "modified": "2026-04-08T15:30:31.481985+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "edf526f8-4d17-43df-a610-a27ee7e98d7f",
+  "name": "Diagonal Wipe",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "linear",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.305117+00:00",
+  "modified": "2026-04-08T13:57:40.305159+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "e36d0417-7502-46bf-a1d1-6fc9a7027fd5",
+  "name": "Emerald Flash",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    0,
+    255,
+    100
+  ],
+  "end_color": [
+    0,
+    50,
+    20
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 3,
+  "chase_origin": "start",
+  "duration": 3.0,
+  "created": "2026-04-08T15:30:31.475327+00:00",
+  "modified": "2026-04-08T15:30:31.475340+00:00"
+}
