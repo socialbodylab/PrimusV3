@@ -227,6 +227,7 @@ class ControllerState:
 
         # Mixer / controller override pixel buffers (set externally)
         self._override_pixels = None  # list of pixel lists per output, or None
+        self._controller_device_ips = None  # set of IP strings or None (all)
         # Mixer live preview state
         self._mixer_preview_look = None
         self._mixer_preview_start = 0.0
@@ -553,10 +554,13 @@ class ControllerState:
     #  Override pixels (for mixer / controller playback)
     # ------------------------------------------------------------------
 
-    def set_override_pixels(self, pixels_per_output):
-        """Set override pixels from mixer or controller. Pass None to clear."""
+    def set_override_pixels(self, pixels_per_output, device_ips=None):
+        """Set override pixels from mixer or controller. Pass None to clear.
+        device_ips: set of IP strings to target, or None for all devices.
+        """
         with self.lock:
             self._override_pixels = pixels_per_output
+            self._controller_device_ips = device_ips
 
     def start_mixer_preview(self, look, device_filter=None):
         """Start previewing a look from the mixer on connected devices."""
@@ -575,10 +579,13 @@ class ControllerState:
             self.playback_source = self.SOURCE_IDLE
 
     def set_playback_source(self, source):
-        """Explicitly set the playback source (designer, idle, etc.)."""
+        """Explicitly set the playback source (designer, idle, controller)."""
         with self.lock:
             self.playback_source = source
-            self._override_pixels = None
+            if source != self.SOURCE_MIXER:
+                self._mixer_preview_look = None
+            if source in (self.SOURCE_DESIGNER, self.SOURCE_IDLE):
+                self._override_pixels = None
 
     def get_mixer_preview(self):
         """Return (look, elapsed) if mixer preview is active, else (None, 0)."""
@@ -637,10 +644,13 @@ class ControllerState:
 
             # Send to connected devices
             dev_filter = self._mixer_preview_device_filter
+            ctrl_ips = self._controller_device_ips
             for di, dev in enumerate(self.devices):
                 if not dev["sender"].connected:
                     continue
                 if dev_filter is not None and di not in dev_filter:
+                    continue
+                if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
                     continue
                 for oi, o in enumerate(dev["outputs"]):
                     if oi >= len(self.active_look["outputs"]):

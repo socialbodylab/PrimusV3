@@ -657,8 +657,45 @@
 
     <!-- ──── PANEL: Look Controller ──── -->
     <div class="panel" x-show="$store.app.mode === 'controller'" x-data="lookController">
+
+        <!-- ── Control Panel: Look Palette ── -->
         <div class="flex justify-between items-center mb-4">
-            <h2 class="section-title" style="margin:0">Look Controller</h2>
+            <h2 class="section-title" style="margin:0">Control Panel</h2>
+            <div class="flex items-center gap-2" style="min-width:180px">
+                <label class="form-label" style="margin:0;font-size:.8rem">Fade</label>
+                <input type="range" class="fade-slider"
+                       x-model.number="defaultFadeTime" min="0" max="5" step="0.25">
+                <span class="text-muted text-sm" style="min-width:28px;text-align:right" x-text="defaultFadeTime + 's'"></span>
+            </div>
+        </div>
+
+        <div class="look-palette">
+            <button class="look-palette-card look-card-blackout"
+                    :class="{ 'look-card-active': blackout }"
+                    @click="doBlackout()">
+                <div class="look-card-name">Blackout</div>
+            </button>
+            <template x-for="look in looks" :key="look.id">
+                <button class="look-palette-card"
+                        :class="{ 'look-card-active': isLookActive(look.id) }"
+                        @click="activateLook(look.id)">
+                    <div class="look-card-name" x-text="look.name"></div>
+                    <div class="look-card-info text-muted" x-text="lookOutputs(look)"></div>
+                </button>
+            </template>
+        </div>
+        <p class="text-muted text-sm" x-show="looks.length === 0" style="margin-top:8px">
+            No looks saved yet. Create looks in the Look Mixer first.
+        </p>
+
+        <!-- Crossfade progress bar -->
+        <div class="crossfade-bar-container" x-show="crossfadeActive">
+            <div class="crossfade-bar" :style="'width:' + (crossfadeProgress * 100) + '%'"></div>
+        </div>
+
+        <!-- ── Cue System ── -->
+        <div class="flex justify-between items-center" style="margin-top:24px;margin-bottom:12px">
+            <h2 class="section-title" style="margin:0">Cue List</h2>
             <button class="btn" @click="openAddCue()">+ Add Cue</button>
         </div>
 
@@ -688,10 +725,13 @@
         <table class="cue-list">
             <thead>
                 <tr>
-                    <th style="width:60px">#</th>
+                    <th style="width:50px">#</th>
                     <th>Name</th>
                     <th>Look</th>
-                    <th style="width:120px">Actions</th>
+                    <th style="width:70px">Target</th>
+                    <th style="width:60px">Fade</th>
+                    <th style="width:80px">Auto</th>
+                    <th style="width:130px">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -701,6 +741,26 @@
                         <td class="cue-number" x-text="cue.number"></td>
                         <td x-text="cue.name"></td>
                         <td class="text-sm text-muted" x-text="lookName(cue.look_id)"></td>
+                        <td class="text-sm text-muted" x-text="cueTargetLabel(cue)"></td>
+                        <td>
+                            <input type="number" class="form-input form-input-sm"
+                                   :value="cue.fade_time || 0" min="0" max="30" step="0.5"
+                                   @change="updateCueField(idx, 'fade_time', parseFloat($event.target.value))"
+                                   style="width:50px">
+                        </td>
+                        <td>
+                            <template x-if="cue.auto_follow">
+                                <span class="auto-follow-badge"
+                                      @click="updateCueField(idx, 'auto_follow', false)"
+                                      x-text="(cue.follow_delay || 0) + 's'"
+                                      title="Auto-follow enabled. Click to disable."></span>
+                            </template>
+                            <template x-if="!cue.auto_follow">
+                                <button class="btn btn-sm"
+                                        @click="updateCueField(idx, 'auto_follow', true); updateCueField(idx, 'follow_delay', 5)"
+                                        title="Enable auto-follow">--</button>
+                            </template>
+                        </td>
                         <td>
                             <div class="btn-group">
                                 <button class="btn btn-sm" @click="goToCue(cue.number)">Go</button>
@@ -730,6 +790,53 @@
                             <option :value="l.id" x-text="l.name"></option>
                         </template>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Fade Time (s)</label>
+                    <input type="number" class="form-input" x-model.number="addFadeTime"
+                           min="0" max="30" step="0.5">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Target Devices</label>
+                    <select class="form-select" x-model="addTargetMode">
+                        <option value="all">All devices</option>
+                        <option value="group">Device group</option>
+                        <option value="devices">Individual devices</option>
+                    </select>
+                </div>
+                <div class="form-group" x-show="addTargetMode === 'group'">
+                    <label class="form-label">Group</label>
+                    <select class="form-select" x-model="addGroupId">
+                        <template x-for="g in deviceGroups" :key="g.id">
+                            <option :value="g.id" x-text="g.name"></option>
+                        </template>
+                    </select>
+                    <p class="text-muted text-sm" x-show="deviceGroups.length === 0">No groups defined.</p>
+                </div>
+                <div class="form-group" x-show="addTargetMode === 'devices'">
+                    <label class="form-label">Devices</label>
+                    <div class="device-checklist">
+                        <template x-for="d in devices" :key="d.ip">
+                            <label class="device-check-item">
+                                <input type="checkbox" :checked="addDeviceIps.includes(d.ip)"
+                                       @change="toggleDeviceIp(d.ip)">
+                                <span x-text="d.name"></span>
+                                <span class="text-muted text-sm" x-text="d.ip"></span>
+                            </label>
+                        </template>
+                    </div>
+                    <p class="text-muted text-sm" x-show="devices.length === 0">No devices found.</p>
+                </div>
+                <div class="form-group">
+                    <label class="flex items-center gap-2" style="cursor:pointer">
+                        <input type="checkbox" x-model="addAutoFollow">
+                        <span class="form-label" style="margin:0">Auto-follow</span>
+                    </label>
+                </div>
+                <div class="form-group" x-show="addAutoFollow">
+                    <label class="form-label">Follow Delay (s)</label>
+                    <input type="number" class="form-input" x-model.number="addFollowDelay"
+                           min="0" max="120" step="0.5">
                 </div>
                 <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet.</p>
                 <div class="modal-actions">

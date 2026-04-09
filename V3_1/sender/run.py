@@ -18,6 +18,7 @@ from artnet import FpsListener
 from state import ControllerState, animation_loop
 from controller import CueList
 from mixer import load_look, compute_look_frame
+from effects import blend_pixels
 from server import create_server
 
 
@@ -54,13 +55,24 @@ def _kill_existing():
 
 
 def _mixer_controller_loop(state, cue_list):
-    """Background thread: when controller is playing, compute look frames."""
+    """Background thread: render look frames for mixer preview and controller.
+
+    Handles:
+      - Mixer preview (highest priority)
+      - Controller playback with per-pixel crossfade between looks
+      - Blackout fade
+      - Auto-follow cue advancement
+    """
     import time
-    # Caches persist across frames for performance and stateful effects
-    _look_cache = {}      # look_id -> look dict
-    _clip_cache = {}      # clip_id -> clip dict
-    _state_cache = {}     # segment_id -> effect state list
+    # Caches persist across frames for performance and stateful effects.
+    # Separate state caches for current/prev looks to avoid collision.
+    _look_cache = {}          # look_id -> look dict
+    _clip_cache = {}          # clip_id -> clip dict
+    _state_cache_cur = {}     # segment_id -> effect state (current look)
+    _state_cache_prev = {}    # segment_id -> effect state (prev look during xfade)
     _current_look_id = None
+    _prev_look_id = None
+    _prev_elapsed_base = 0.0  # elapsed offset for outgoing look continuity
 
     while state.running:
         # Mixer preview takes priority over controller
@@ -69,35 +81,96 @@ def _mixer_controller_loop(state, cue_list):
             pixels = compute_look_frame(preview_look, preview_elapsed,
                                         fps=state.fps,
                                         clip_cache=_clip_cache,
-                                        state_cache=_state_cache)
+                                        state_cache=_state_cache_cur)
             state.set_override_pixels(pixels)
             time.sleep(1.0 / max(1, state.fps))
             continue
 
-        look_id = cue_list.get_current_look_id()
-        if look_id and cue_list.playing:
-            # Reload look if it changed
+        # Check auto-follow timer
+        cue_list.check_auto_follow(device_groups=state.get_device_groups())
+
+        # Get crossfade state from controller
+        xf = cue_list.get_crossfade_state()
+        look_id = xf["current_look_id"]
+        prev_id = xf["prev_look_id"]
+        xf_progress = xf["crossfade_progress"]
+        is_blackout = xf["blackout"]
+        bo_progress = xf["blackout_progress"]
+        device_ips = set(xf["device_ips"]) if xf["device_ips"] else None
+
+        if look_id:
+            # Track look changes and reset caches
             if look_id != _current_look_id:
                 _current_look_id = look_id
                 _look_cache.pop(look_id, None)
-                _state_cache.clear()
+                _state_cache_cur.clear()
+            if prev_id != _prev_look_id:
+                _prev_look_id = prev_id
+                if prev_id:
+                    _look_cache.pop(prev_id, None)
+                _state_cache_prev.clear()
+
+            # Load looks
             if look_id not in _look_cache:
                 look = load_look(look_id)
                 if look:
                     _look_cache[look_id] = look
-            look = _look_cache.get(look_id)
-            if look:
-                elapsed = cue_list.get_elapsed()
-                pixels = compute_look_frame(look, elapsed, fps=state.fps,
-                                            clip_cache=_clip_cache,
-                                            state_cache=_state_cache)
-                state.set_override_pixels(pixels)
+            if prev_id and prev_id not in _look_cache:
+                look = load_look(prev_id)
+                if look:
+                    _look_cache[prev_id] = look
+
+            cur_look = _look_cache.get(look_id)
+            if cur_look:
+                elapsed = xf["elapsed"]
+                cur_pixels = compute_look_frame(cur_look, elapsed,
+                                                fps=state.fps,
+                                                clip_cache=_clip_cache,
+                                                state_cache=_state_cache_cur)
+
+                # Crossfade blending
+                if prev_id and xf_progress < 1.0:
+                    prev_look = _look_cache.get(prev_id)
+                    if prev_look:
+                        prev_pixels = compute_look_frame(prev_look, elapsed,
+                                                         fps=state.fps,
+                                                         clip_cache=_clip_cache,
+                                                         state_cache=_state_cache_prev)
+                        # Blend: prev -> cur by xf_progress
+                        blended = []
+                        for oi in range(max(len(cur_pixels), len(prev_pixels))):
+                            cp = cur_pixels[oi] if oi < len(cur_pixels) else []
+                            pp = prev_pixels[oi] if oi < len(prev_pixels) else []
+                            if cp and pp and len(cp) == len(pp):
+                                blended.append(blend_pixels(pp, cp, xf_progress))
+                            elif cp:
+                                # Fade from black to cur
+                                black = [(0, 0, 0)] * len(cp)
+                                blended.append(blend_pixels(black, cp, xf_progress))
+                            else:
+                                blended.append(cp)
+                        cur_pixels = blended
+
+                # Blackout overlay
+                if is_blackout:
+                    blacked = []
+                    for output_pixels in cur_pixels:
+                        if output_pixels:
+                            black = [(0, 0, 0)] * len(output_pixels)
+                            blacked.append(blend_pixels(output_pixels, black, bo_progress))
+                        else:
+                            blacked.append(output_pixels)
+                    cur_pixels = blacked
+
+                state.set_override_pixels(cur_pixels, device_ips=device_ips)
             else:
                 state.set_override_pixels(None)
         elif state.playback_source in (state.SOURCE_DESIGNER, state.SOURCE_IDLE):
             if _current_look_id is not None:
                 _current_look_id = None
-                _state_cache.clear()
+                _prev_look_id = None
+                _state_cache_cur.clear()
+                _state_cache_prev.clear()
             state.set_override_pixels(None)
         time.sleep(1.0 / max(1, state.fps))
 

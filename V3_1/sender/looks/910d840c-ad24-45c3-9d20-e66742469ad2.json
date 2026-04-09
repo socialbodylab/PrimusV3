@@ -1,0 +1,43 @@
+{
+  "name": "Sunset Glow",
+  "description": "Warm sunset tones with gradient strip and radial sunset grid",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "793e4816-0504-4c7b-9d71-4a9682591afa",
+          "clip_name": "Sunset Gradient",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "4838d46d-a8eb-43d4-a938-4f8659fbe366",
+          "clip_name": "Radial Sunset",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "910d840c-ad24-45c3-9d20-e66742469ad2",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}

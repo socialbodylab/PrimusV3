@@ -190,7 +190,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response(self.cue_list.get_json())
 
         elif path == "/api/cues/go":
-            cue = self.cue_list.go()
+            self.controller_state.set_playback_source("controller")
+            groups = self.controller_state.get_device_groups()
+            cue = self.cue_list.go(device_groups=groups)
             self._json_response({"cue": cue})
 
         elif path == "/api/cues/stop":
@@ -199,8 +201,27 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/cues/goto":
             number = data.get("number", 1)
-            cue = self.cue_list.go_to_cue(number)
+            self.controller_state.set_playback_source("controller")
+            groups = self.controller_state.get_device_groups()
+            cue = self.cue_list.go_to_cue(number, device_groups=groups)
             self._json_response({"cue": cue})
+
+        # -- Controller routes (control panel) --
+        elif path == "/api/controller/activate":
+            look_id = data.get("look_id")
+            fade_time = float(data.get("fade_time", 0))
+            if not look_id:
+                self._respond(400, "application/json",
+                              b'{"error":"look_id required"}')
+            else:
+                self.controller_state.set_playback_source("controller")
+                ok = self.cue_list.activate_look(look_id, fade_time)
+                self._json_response({"ok": ok})
+
+        elif path == "/api/controller/blackout":
+            fade_time = float(data.get("fade_time", 0))
+            self.cue_list.blackout(fade_time)
+            self._ok()
 
         elif path == "/api/mixer/preview":
             # Start previewing a look on connected devices
@@ -218,7 +239,7 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/set_playback_source":
             source = data.get("source", "idle")
-            if source in ("designer", "idle"):
+            if source in ("designer", "idle", "controller"):
                 self.controller_state.set_playback_source(source)
                 self._ok()
             else:

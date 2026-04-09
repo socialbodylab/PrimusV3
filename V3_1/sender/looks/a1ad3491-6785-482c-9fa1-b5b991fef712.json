@@ -1,0 +1,43 @@
+{
+  "name": "Rainbow Dreams",
+  "description": "Full spectrum rainbow on both strip and grid",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "b9fd597a-9808-4d91-b327-78643a5ea70f",
+          "clip_name": "Rainbow Scroll",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "3e000759-9675-47ea-a9e3-2ab34a28d97a",
+          "clip_name": "Grid Rainbow Wash",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "a1ad3491-6785-482c-9fa1-b5b991fef712",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}

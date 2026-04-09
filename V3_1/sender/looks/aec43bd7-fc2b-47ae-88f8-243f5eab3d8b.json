@@ -1,0 +1,43 @@
+{
+  "name": "Ocean Deep",
+  "description": "Cool ocean blues with gradient strip and slow pulsing grid",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "277fb545-3241-4e45-9473-83537f2148f6",
+          "clip_name": "Ocean Gradient",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "1ba66fd0-ee17-4ac2-9c47-acf71f67104c",
+          "clip_name": "Slow Grid Pulse",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "aec43bd7-fc2b-47ae-88f8-243f5eab3d8b",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}

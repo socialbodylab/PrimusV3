@@ -1,0 +1,43 @@
+{
+  "name": "Neon Party",
+  "description": "Vibrant neon colors with constrainbow strip and neon spiral grid",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "84726c4e-ede4-4833-9faa-d1f60ea32590",
+          "clip_name": "Purple Rain",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "b58aa1b9-5431-4421-b7bf-0f59e5f27ed6",
+          "clip_name": "Spiral Neon",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "617ae163-6ac3-426a-860e-c01621e60004",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}
