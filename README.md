@@ -32,27 +32,33 @@ Key features:
 
 ### Workflow: Clips → Looks → Cues
 
-Content is built up in three layers. Clips are the smallest unit — a single effect with colors, speed, and playback settings, designed for one output type. Looks combine multiple clips on a timeline across outputs, defining what every port displays simultaneously. Cues sequence looks for live performance, with crossfade timing, auto-follow, and per-device targeting.
+Each receiver node has 2 outputs (A0 and A1), and each output can be independently set to any of the 3 light types: short strip (30px), long strip (72px), or grid (8×8). A clip targets one output type, and a look assigns clips to both outputs — so a single look can mix different light types (e.g. A0: short strip, A1: grid).
+
+Content is built up in three layers:
+
+- **Clips** — The smallest unit. A single effect (colors, speed, playback) designed for one output type. Created in the Designer.
+- **Looks** — A timeline arrangement of clips across both outputs, defining what every port displays simultaneously. Built in the Mixer.
+- **Cues** — Sequence looks for live performance with crossfade timing, auto-follow, and per-device/group targeting. Run from the Controller.
 
 ```mermaid
 flowchart LR
     subgraph Designer
-        C1[Clip A\nsolid · red]
-        C2[Clip B\nchase · blue]
-        C3[Clip C\nspiral · rainbow]
+        C1[Clip A\nshort strip · solid red]
+        C2[Clip B\nshort strip · chase blue]
+        C3[Clip C\ngrid · spiral rainbow]
     end
     subgraph Mixer
-        L1[Look 1]
-        L2[Look 2]
+        L1["Look 1\nA0: short strip · A1: grid"]
+        L2["Look 2\nA0: short strip · A1: grid"]
     end
     subgraph Controller
         Q1[Cue 1 → Look 1\nfade 2s · all devices]
         Q2[Cue 2 → Look 2\nfade 0s · group 'Dancers']
     end
     C1 --> L1
-    C2 --> L1
-    C3 --> L2
+    C3 --> L1
     C2 --> L2
+    C3 --> L2
     L1 --> Q1
     L2 --> Q2
     Q1 -.->|GO| Q2
