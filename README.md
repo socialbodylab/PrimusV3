@@ -64,10 +64,6 @@ flowchart LR
     Q1 -.->|GO| Q2
 ```
 
-### V3.0 (Archived)
-
-Single-file Python sender (`led_controller.py`, ~1800 lines) with the HTTP server, Art-Net engine, effects engine, and full HTML/CSS/JS web UI embedded as string literals. Functional for direct effect control but no clip/look workflow. Kept in `V3_0/` for reference.
-
 ## Quick Start
 
 ### Sender (V3.1)
@@ -82,14 +78,6 @@ Opens a web UI at the printed URL (auto-selects an available port). No external 
 python3 V3_1/sender/run.py --port 8080        # specify port
 python3 V3_1/sender/run.py --no-browser        # don't auto-open browser
 ```
-
-### Sender (V3.0)
-
-```bash
-python3 V3_0/sender/led_controller.py
-```
-
-Opens a web UI at [http://localhost:8080](http://localhost:8080).
 
 ### Firmware
 
@@ -216,3 +204,11 @@ LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "ring"]
 ## License
 
 Private — not for redistribution.
+
+## V3.0 (Archived)
+
+Single-file Python sender (`led_controller.py`, ~1800 lines) with the HTTP server, Art-Net engine, effects engine, and full HTML/CSS/JS web UI embedded as string literals. Functional for direct effect control but no clip/look workflow. Kept in `V3_0/` for reference.
+
+```bash
+python3 V3_0/sender/led_controller.py
+```

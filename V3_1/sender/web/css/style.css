@@ -545,6 +545,25 @@ input[type="color"] {
     pointer-events: none;
 }
 
+.timeline-drop-indicator {
+    position: absolute;
+    width: 2px;
+    height: 60px;
+    background: #4fc3f7;
+    z-index: 9;
+    pointer-events: none;
+    box-shadow: 0 0 6px #4fc3f7;
+}
+
+.timeline-track.drag-over {
+    background-color: rgba(79, 195, 247, 0.08);
+}
+
+.timeline-track.drag-type-mismatch {
+    background-color: rgba(255, 80, 80, 0.15);
+    transition: background-color 0.3s;
+}
+
 .tick-major, .tick-minor {
     position: absolute;
     bottom: 0;
@@ -579,7 +598,7 @@ input[type="color"] {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
-    cursor: default;
+    cursor: grab;
     overflow: hidden;
     min-width: 80px;
     transition: border-color 0.15s;

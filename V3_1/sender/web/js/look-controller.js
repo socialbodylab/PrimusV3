@@ -177,7 +177,13 @@ document.addEventListener("alpine:init", () => {
                 cue.device_ips = [...this.addDeviceIps];
             }
             this.cues.push(cue);
-            await this.saveCues();
+            try {
+                await this.saveCues();
+            } catch (e) {
+                this.cues.pop();
+                console.error("Failed to save cue:", e);
+                return;
+            }
             this.addModal = false;
         },
 

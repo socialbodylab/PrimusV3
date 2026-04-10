@@ -480,8 +480,12 @@
                 <!-- Tracks -->
                 <template x-for="(track, ti) in look?.tracks || []" :key="ti">
                     <div class="timeline-track"
+                         :class="{ 'drag-over': _dropIndicator?.trackIdx === ti }"
                          :style="'--pps:' + pixelsPerSecond + 'px'"
-                         @click="clickTimeline($event)">
+                         @click="clickTimeline($event)"
+                         @dragover="onTrackDragOver($event, ti)"
+                         @dragleave="onTrackDragLeave($event, ti)"
+                         @drop="onTrackDrop($event, ti)">
                     <template x-for="(seg, si) in track.segments" :key="seg.id || si">
                         <div class="timeline-segment"
                              :class="{ 'segment-active': playTime >= seg.start_time && playTime < seg.start_time + seg.duration }"
@@ -502,6 +506,11 @@
                 </div>
             </template>
 
+                <!-- Drop indicator -->
+                <div class="timeline-drop-indicator"
+                     x-show="_dropIndicator"
+                     :style="'left:' + (_dropIndicator?.time || 0) * pixelsPerSecond + 'px;top:' + ((_dropIndicator?.trackIdx || 0) * 40 + 20) + 'px'"></div>
+
                 <!-- Playhead -->
                 <div class="timeline-playhead"
                      :style="'left:' + playheadLeft() + 'px'"></div>
@@ -517,6 +526,8 @@
                     <div class="flex gap-2 mt-2" style="flex-wrap:wrap">
                         <template x-for="clip in clipsForTrack(ti)" :key="clip.id">
                             <div class="clip-palette-btn"
+                                    draggable="true"
+                                    @dragstart="onClipDragStart($event, clip, ti)"
                                     @click="addSegment(ti, clip)"
                                     @mouseenter="startClipPreview(clip, $el)"
                                     @mouseleave="stopClipPreview()">

@@ -30,6 +30,7 @@ document.addEventListener("alpine:init", () => {
         editOverlapAfter: 0,
         _drag: null,
         previewing: false,
+        _dropIndicator: null,  // { trackIdx, time } while dragging clip over timeline
 
         // ── Designer state ──
         clipSaveModal: false,
@@ -510,7 +511,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         _snap(value, points) {
-            const threshold = 5 / this.pixelsPerSecond;
+            const threshold = Math.max(0.05, Math.min(0.5, 5 / this.pixelsPerSecond));
             let best = value;
             let bestDist = threshold;
             for (const p of points) {
@@ -553,8 +554,8 @@ document.addEventListener("alpine:init", () => {
         segmentStyle(seg) {
             const left = seg.start_time * this.pixelsPerSecond;
             const width = Math.max(seg.duration * this.pixelsPerSecond, 20);
-            const sc = seg.start_color || [80, 80, 200];
-            const ec = seg.end_color || [200, 80, 80];
+            const sc = seg.start_color ?? [80, 80, 200];
+            const ec = seg.end_color ?? [200, 80, 80];
             return `left:${left}px;width:${width}px;`
                 + `background:linear-gradient(90deg, rgb(${sc}), rgb(${ec}))`;
         },
@@ -630,6 +631,12 @@ document.addEventListener("alpine:init", () => {
                     if (elapsed >= dur) this.stop();
                 }
             }, 33);
+            if (this.previewing) {
+                const payload = { ...this.look };
+                const filter = Alpine.store("app").mixerPreviewDevices;
+                if (filter) payload.device_filter = filter;
+                api("POST", "/api/mixer/preview", payload);
+            }
         },
 
         stop() {
@@ -637,6 +644,9 @@ document.addEventListener("alpine:init", () => {
             if (this._playInterval) {
                 clearInterval(this._playInterval);
                 this._playInterval = null;
+            }
+            if (this.previewing) {
+                api("POST", "/api/mixer/stop_preview");
             }
         },
 
@@ -649,6 +659,105 @@ document.addEventListener("alpine:init", () => {
             const m = Math.floor(t / 60);
             const s = (t % 60).toFixed(1);
             return m > 0 ? m + ":" + s.padStart(4, "0") : s + "s";
+        },
+
+        // ══════════════════════════════════════════════════
+        //  CLIP-TO-TIMELINE DRAG & DROP
+        // ══════════════════════════════════════════════════
+
+        onClipDragStart(event, clip, trackIdx) {
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/json', JSON.stringify({
+                clip_id: clip.id,
+                clip_name: clip.name,
+                start_color: clip.start_color,
+                end_color: clip.end_color,
+                duration: clip.duration || 5.0,
+                output_type: clip.output_type,
+                trackIdx,
+            }));
+        },
+
+        onTrackDragOver(event, trackIdx) {
+            // Accept drops only if dragging a clip
+            const types = event.dataTransfer.types;
+            if (!types.includes('application/json')) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+
+            // Calculate time position for drop indicator
+            const container = event.currentTarget.closest('.timeline-container');
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            const x = event.clientX - rect.left + container.scrollLeft;
+            const t = Math.max(0, x / this.pixelsPerSecond);
+            this._dropIndicator = { trackIdx, time: t };
+        },
+
+        onTrackDragLeave(event, trackIdx) {
+            // Only clear if actually leaving the track (not entering a child)
+            if (!event.currentTarget.contains(event.relatedTarget)) {
+                if (this._dropIndicator?.trackIdx === trackIdx) {
+                    this._dropIndicator = null;
+                }
+            }
+        },
+
+        onTrackDrop(event, trackIdx) {
+            event.preventDefault();
+            this._dropIndicator = null;
+            let data;
+            try {
+                data = JSON.parse(event.dataTransfer.getData('application/json'));
+            } catch { return; }
+            if (!data?.clip_id) return;
+
+            // Reject if clip output type doesn't match the track
+            const trackType = this.look?.outputs[trackIdx]?.type;
+            if (trackType && data.output_type && data.output_type !== trackType) {
+                const track = event.currentTarget;
+                track.classList.add('drag-type-mismatch');
+                setTimeout(() => track.classList.remove('drag-type-mismatch'), 600);
+                return;
+            }
+
+            // Calculate drop time from mouse position
+            const container = event.currentTarget.closest('.timeline-container');
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            const x = event.clientX - rect.left + container.scrollLeft;
+            const dur = this.look?.total_duration || 10;
+            let dropTime = Math.max(0, x / this.pixelsPerSecond);
+
+            // Snap to existing segment edges
+            const snaps = this._getSnapPoints(trackIdx, -1);
+            dropTime = this._snap(dropTime, snaps);
+
+            const segDuration = data.duration || 5.0;
+            // Clamp so segment doesn't exceed total_duration
+            dropTime = Math.min(dropTime, dur - Math.min(segDuration, dur));
+
+            const track = this.look?.tracks[trackIdx];
+            if (!track) return;
+
+            track.segments.push({
+                id: crypto.randomUUID(),
+                clip_id: data.clip_id,
+                clip_name: data.clip_name,
+                start_color: data.start_color,
+                end_color: data.end_color,
+                start_time: Math.max(0, dropTime),
+                duration: segDuration,
+                fade_in: 0.5,
+                fade_out: 0.5,
+                speed_override: null,
+            });
+
+            // Extend total duration if segment overflows
+            const newEnd = dropTime + segDuration;
+            if (newEnd > this.look.total_duration) {
+                this.look.total_duration = Math.ceil(newEnd);
+            }
         },
 
         clipsForTrack(trackIdx) {
@@ -668,9 +777,15 @@ document.addEventListener("alpine:init", () => {
             if (!this.saveName.trim()) return;
             this.look.name = this.saveName.trim();
             this.look.description = this.saveDesc.trim();
-            const saved = await api("POST", "/api/looks/save", this.look);
-            this.look.id = saved.id;
-            this.saveModal = false;
+            try {
+                const saved = await api("POST", "/api/looks/save", this.look);
+                if (saved?.id) {
+                    this.look.id = saved.id;
+                    this.saveModal = false;
+                }
+            } catch (e) {
+                console.error("Save failed:", e);
+            }
         },
 
         async openLoad() {

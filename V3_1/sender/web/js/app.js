@@ -9,7 +9,10 @@ function api(method, path, body) {
         opts.headers["Content-Type"] = "application/json";
         opts.body = JSON.stringify(body);
     }
-    return fetch(path, opts).then(r => r.json());
+    return fetch(path, opts).then(r => {
+        if (!r.ok) throw new Error(`API ${r.status}: ${r.statusText}`);
+        return r.json();
+    });
 }
 
 // ── Color utilities ─────────────────────────────────────
@@ -17,7 +20,9 @@ function rgbToHex(c) {
     return "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
 }
 function hexToRgb(hex) {
-    const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    let h = hex.replace(/^#/, '');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    const m = h.match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
     return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
 }
 
@@ -38,7 +43,12 @@ document.addEventListener("alpine:init", () => {
 
         init() {
             this.fetchState();
-            this.polling = setInterval(() => this.fetchState(), 66);
+            this.polling = setInterval(() => this.fetchState(), 100);
+            document.addEventListener('visibilitychange', () => {
+                clearInterval(this.polling);
+                const interval = document.hidden ? 1000 : 100;
+                this.polling = setInterval(() => this.fetchState(), interval);
+            });
         },
 
         async fetchState() {
@@ -62,30 +72,33 @@ document.addEventListener("alpine:init", () => {
                     const [cols, rows] = grid;
                     canvas.width = cols;
                     canvas.height = rows;
-                    ctx.clearRect(0, 0, cols, rows);
+                    const img = ctx.createImageData(cols, rows);
+                    const d = img.data;
                     for (let i = 0; i < pixels.length; i++) {
-                        const x = i % cols, y = Math.floor(i / cols);
                         const p = pixels[i] || [0,0,0];
-                        ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
-                        ctx.fillRect(x, y, 1, 1);
+                        const off = i * 4;
+                        d[off] = p[0]; d[off+1] = p[1]; d[off+2] = p[2]; d[off+3] = 255;
                     }
+                    ctx.putImageData(img, 0, 0);
                 } else if (pixels.length > 0) {
                     canvas.width = pixels.length;
                     canvas.height = 1;
-                    ctx.clearRect(0, 0, pixels.length, 1);
+                    const img = ctx.createImageData(pixels.length, 1);
+                    const d = img.data;
                     for (let i = 0; i < pixels.length; i++) {
                         const p = pixels[i] || [0,0,0];
-                        ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
-                        ctx.fillRect(i, 0, 1, 1);
+                        const off = i * 4;
+                        d[off] = p[0]; d[off+1] = p[1]; d[off+2] = p[2]; d[off+3] = 255;
                     }
+                    ctx.putImageData(img, 0, 0);
                 }
             }
         },
 
-        setMode(m) {
+        async setMode(m) {
             if (this.mode === 'mixer' && m !== 'mixer') {
-                api("POST", "/api/mixer/stop_preview");
-                api("POST", "/api/set_playback_source", { source: "idle" });
+                await api("POST", "/api/mixer/stop_preview");
+                await api("POST", "/api/set_playback_source", { source: "idle" });
             }
             this.mode = m;
         },

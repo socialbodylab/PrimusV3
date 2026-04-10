@@ -128,7 +128,7 @@ class CueList:
     def set_cues(self, cues):
         """Replace the entire cue list."""
         with self.lock:
-            self.cues = cues
+            self.cues = list(cues)
             self.current_index = -1
             self.playing = False
             self._auto_follow_time = 0.0
@@ -170,10 +170,14 @@ class CueList:
             next_idx = self.current_index + 1
             if next_idx >= len(self.cues):
                 next_idx = 0  # wrap around
-            cue = self.cues[next_idx]
+            cue = dict(self.cues[next_idx])
             look_id = cue.get("look_id")
-            if look_id and load_look(look_id) is None:
-                return None  # look was deleted
+
+        # Validate look exists outside lock (disk I/O)
+        if look_id and load_look(look_id) is None:
+            return None  # look was deleted
+
+        with self.lock:
             fade_time = cue.get("fade_time", 0.0)
             self._start_transition(look_id, fade_time)
             self._active_device_ips = self._resolve_device_ips(cue, device_groups)
@@ -181,31 +185,44 @@ class CueList:
             self.playing = True
             self.play_start_time = time.monotonic()
             self._setup_auto_follow(cue)
-            return dict(cue)
+            return cue
 
     def stop(self):
         """Stop playback."""
         with self.lock:
             self.playing = False
             self._auto_follow_time = 0.0
+            self._prev_look_id = None
+            self._transition_start = 0.0
+            self._transition_duration = 0.0
 
     def go_to_cue(self, number, device_groups=None):
         """Jump to a specific cue number. Returns the cue or None."""
         with self.lock:
+            match = None
+            match_idx = -1
             for i, cue in enumerate(self.cues):
                 if cue.get("number") == number:
-                    look_id = cue.get("look_id")
-                    if look_id and load_look(look_id) is None:
-                        return None  # look was deleted
-                    fade_time = cue.get("fade_time", 0.0)
-                    self._start_transition(look_id, fade_time)
-                    self._active_device_ips = self._resolve_device_ips(cue, device_groups)
-                    self.current_index = i
-                    self.playing = True
-                    self.play_start_time = time.monotonic()
-                    self._setup_auto_follow(cue)
-                    return dict(cue)
-        return None
+                    match = dict(cue)
+                    match_idx = i
+                    break
+            if match is None:
+                return None
+            look_id = match.get("look_id")
+
+        # Validate look exists outside lock (disk I/O)
+        if look_id and load_look(look_id) is None:
+            return None  # look was deleted
+
+        with self.lock:
+            fade_time = match.get("fade_time", 0.0)
+            self._start_transition(look_id, fade_time)
+            self._active_device_ips = self._resolve_device_ips(match, device_groups)
+            self.current_index = match_idx
+            self.playing = True
+            self.play_start_time = time.monotonic()
+            self._setup_auto_follow(match)
+            return match
 
     def get_elapsed(self):
         """Seconds elapsed since current cue started."""

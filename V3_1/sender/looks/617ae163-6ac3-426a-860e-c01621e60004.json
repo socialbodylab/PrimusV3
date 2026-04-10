@@ -2,21 +2,58 @@
   "name": "Neon Party",
   "description": "Vibrant neon colors with constrainbow strip and neon spiral grid",
   "outputs": [
-    {"port": "A0", "type": "short_strip"},
-    {"port": "A1", "type": "grid"}
+    {
+      "port": "A0",
+      "type": "short_strip"
+    },
+    {
+      "port": "A1",
+      "type": "grid"
+    }
   ],
   "tracks": [
     {
       "port": "A0",
       "segments": [
         {
-          "id": "seg1",
+          "id": "3d058831-9fe9-4db2-b8db-ac1ae36c0c6a",
           "clip_id": "84726c4e-ede4-4833-9faa-d1f60ea32590",
           "clip_name": "Purple Rain",
+          "start_color": [
+            100,
+            0,
+            200
+          ],
+          "end_color": [
+            200,
+            0,
+            255
+          ],
           "start_time": 0,
-          "duration": 5.0,
+          "duration": 1.8624999999999998,
           "fade_in": 0.5,
-          "fade_out": 0.5
+          "fade_out": 0.5,
+          "speed_override": null
+        },
+        {
+          "id": "42ae0524-cb07-4b9e-ad53-2e421952435a",
+          "clip_id": "b90ba47f-bdc7-43a5-97c1-e4a93a04ab95",
+          "clip_name": "Chase Center Out",
+          "start_color": [
+            0,
+            0,
+            0
+          ],
+          "end_color": [
+            255,
+            255,
+            0
+          ],
+          "start_time": 1.8624999999999998,
+          "duration": 3.1375,
+          "fade_in": 0.5,
+          "fade_out": 0.5,
+          "speed_override": null
         }
       ]
     },
@@ -28,16 +65,17 @@
           "clip_id": "b58aa1b9-5431-4421-b7bf-0f59e5f27ed6",
           "clip_name": "Spiral Neon",
           "start_time": 0,
-          "duration": 5.0,
+          "duration": 5,
           "fade_in": 0.5,
-          "fade_out": 0.5
+          "fade_out": 0.5,
+          "speed_override": 2
         }
       ]
     }
   ],
   "playback": "loop",
-  "total_duration": 5.0,
+  "total_duration": 5,
   "id": "617ae163-6ac3-426a-860e-c01621e60004",
   "created": "2026-04-09T16:51:26.870221+00:00",
-  "modified": "2026-04-09T16:51:26.870221+00:00"
+  "modified": "2026-04-09T18:48:53.510406+00:00"
 }

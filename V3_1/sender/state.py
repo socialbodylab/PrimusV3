@@ -325,6 +325,7 @@ class ControllerState:
     # ------------------------------------------------------------------
 
     def update(self, data):
+        config_targets = []  # devices needing output config update (sent outside lock)
         with self.lock:
             if "fps" in data:
                 self.fps = max(1, min(120, int(data["fps"])))
@@ -358,7 +359,7 @@ class ControllerState:
                         _save_output_types([o["type"] for o in self.active_look["outputs"]])
                         for dev in self.devices:
                             if dev["sender"].connected:
-                                self._send_output_config(dev)
+                                config_targets.append(dev)
                 if "effect" in data:
                     lo["effect"] = str(data["effect"])
                     lo["led_state"] = []
@@ -379,6 +380,10 @@ class ControllerState:
                     val = str(data["chase_origin"])
                     if val in ("start", "center", "end"):
                         lo["chase_origin"] = val
+
+        # Send output config outside lock to avoid blocking animation
+        for dev in config_targets:
+            self._send_output_config(dev)
 
     # ------------------------------------------------------------------
     #  Output config
@@ -611,7 +616,7 @@ class ControllerState:
                 # Use mixer/controller pre-computed pixels
                 for i, lo in enumerate(self.active_look["outputs"]):
                     if i < len(self._override_pixels) and self._override_pixels[i]:
-                        lo["pixels"] = [list(p) for p in self._override_pixels[i]]
+                        lo["pixels"] = self._override_pixels[i]
                     else:
                         lo["pixels"] = []
             elif self.playback_source == self.SOURCE_DESIGNER:
@@ -644,7 +649,7 @@ class ControllerState:
 
             # Send to connected devices
             dev_filter = self._mixer_preview_device_filter
-            ctrl_ips = self._controller_device_ips
+            ctrl_ips = self._controller_device_ips if self.playback_source == self.SOURCE_CONTROLLER else None
             for di, dev in enumerate(self.devices):
                 if not dev["sender"].connected:
                     continue
@@ -658,7 +663,7 @@ class ControllerState:
                     lo = self.active_look["outputs"][oi]
                     if lo["type"] == "none" or not lo["pixels"]:
                         continue
-                    send_pixels = [tuple(p) for p in lo["pixels"]]
+                    send_pixels = list(lo["pixels"])
 
                     grid = lo.get("grid")
                     if grid:

@@ -86,6 +86,24 @@ def _mixer_controller_loop(state, cue_list):
             time.sleep(1.0 / max(1, state.fps))
             continue
 
+        # Controller only runs when source is "controller"
+        # Note: reading playback_source without lock is safe on CPython
+        # due to the GIL — str reads are atomic. The lock is only needed
+        # for compound state updates.
+        if state.playback_source != state.SOURCE_CONTROLLER:
+            # Always clear override pixels so tick() can use the designer
+            # branch.  Without this, a race between stop_mixer_preview()
+            # and the loop above can leave one stale frame in
+            # _override_pixels permanently.
+            state.set_override_pixels(None)
+            if _current_look_id is not None:
+                _current_look_id = None
+                _prev_look_id = None
+                _state_cache_cur.clear()
+                _state_cache_prev.clear()
+            time.sleep(1.0 / max(1, state.fps))
+            continue
+
         # Check auto-follow timer
         cue_list.check_auto_follow(device_groups=state.get_device_groups())
 
@@ -165,12 +183,7 @@ def _mixer_controller_loop(state, cue_list):
                 state.set_override_pixels(cur_pixels, device_ips=device_ips)
             else:
                 state.set_override_pixels(None)
-        elif state.playback_source in (state.SOURCE_DESIGNER, state.SOURCE_IDLE):
-            if _current_look_id is not None:
-                _current_look_id = None
-                _prev_look_id = None
-                _state_cache_cur.clear()
-                _state_cache_prev.clear()
+        else:
             state.set_override_pixels(None)
         time.sleep(1.0 / max(1, state.fps))
 

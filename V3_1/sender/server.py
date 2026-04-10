@@ -4,6 +4,7 @@ server.py — HTTP server serving static files and JSON API.
 
 import json
 import os
+import re
 import mimetypes
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -14,6 +15,12 @@ from artnet import discover_artnet_nodes
 
 
 _WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+_SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+
+def _safe_id(value):
+    """Return True if value is a safe resource identifier (no path traversal)."""
+    return bool(value) and bool(_SAFE_ID_RE.match(value))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -42,6 +49,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/clips/"):
             clip_id = path.split("/api/clips/")[1]
+            if not _safe_id(clip_id):
+                self._respond(400, "application/json", b'{"error":"invalid id"}')
+                return
             clip = clips.load_clip(clip_id)
             if clip:
                 self._json_response(clip)
@@ -54,6 +64,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/looks/"):
             look_id = path.split("/api/looks/")[1]
+            if not _safe_id(look_id):
+                self._respond(400, "application/json", b'{"error":"invalid id"}')
+                return
             look = mixer.load_look(look_id)
             if look:
                 self._json_response(look)
@@ -75,6 +88,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         data = self._read_json()
+        if data is None:
+            self._respond(400, "application/json", b'{"error":"invalid JSON"}')
+            return
         path = self.path
 
         if path == "/api/update":
@@ -85,13 +101,17 @@ class Handler(BaseHTTPRequestHandler):
             di = data.get("device", 0)
             if 0 <= di < len(self.controller_state.devices):
                 self.controller_state.connect(di)
-            self._ok()
+                self._ok()
+            else:
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
         elif path == "/api/disconnect":
             di = data.get("device", 0)
             if 0 <= di < len(self.controller_state.devices):
                 self.controller_state.disconnect(di)
-            self._ok()
+                self._ok()
+            else:
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
         elif path == "/api/connect_all":
             self.controller_state.connect_all()
@@ -157,7 +177,10 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
-            t = float(data.get("t", 0))
+            try:
+                t = float(data.get("t", 0))
+            except (TypeError, ValueError):
+                t = 0.0
             clip = clips.load_clip(clip_id) if clip_id else None
             if not clip:
                 self._respond(404, "application/json", b'{"error":"not found"}')
@@ -209,7 +232,10 @@ class Handler(BaseHTTPRequestHandler):
         # -- Controller routes (control panel) --
         elif path == "/api/controller/activate":
             look_id = data.get("look_id")
-            fade_time = float(data.get("fade_time", 0))
+            try:
+                fade_time = float(data.get("fade_time", 0))
+            except (TypeError, ValueError):
+                fade_time = 0.0
             if not look_id:
                 self._respond(400, "application/json",
                               b'{"error":"look_id required"}')
@@ -219,7 +245,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response({"ok": ok})
 
         elif path == "/api/controller/blackout":
-            fade_time = float(data.get("fade_time", 0))
+            try:
+                fade_time = float(data.get("fade_time", 0))
+            except (TypeError, ValueError):
+                fade_time = 0.0
             self.cue_list.blackout(fade_time)
             self._ok()
 
@@ -261,14 +290,23 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path
         if path.startswith("/api/clips/"):
             clip_id = path.split("/api/clips/")[1]
+            if not _safe_id(clip_id):
+                self._respond(400, "application/json", b'{"error":"invalid id"}')
+                return
             clips.delete_clip(clip_id)
             self._ok()
         elif path.startswith("/api/looks/"):
             look_id = path.split("/api/looks/")[1]
+            if not _safe_id(look_id):
+                self._respond(400, "application/json", b'{"error":"invalid id"}')
+                return
             mixer.delete_look(look_id)
             self._ok()
         elif path.startswith("/api/device_groups/"):
             gid = path.split("/api/device_groups/")[1]
+            if not _safe_id(gid):
+                self._respond(400, "application/json", b'{"error":"invalid id"}')
+                return
             self.controller_state.delete_device_group(gid)
             self._ok()
         else:
@@ -281,7 +319,10 @@ class Handler(BaseHTTPRequestHandler):
     def _read_json(self):
         length = int(self.headers.get("Content-Length", 0))
         if length:
-            return json.loads(self.rfile.read(length))
+            try:
+                return json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, ValueError):
+                return None
         return {}
 
     def _query_params(self):

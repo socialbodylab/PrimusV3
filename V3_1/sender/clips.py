@@ -83,6 +83,7 @@ def load_clip(clip_id):
 def delete_clip(clip_id):
     """Delete a clip file. Returns True if deleted."""
     path = os.path.join(_clips_dir(), f"{clip_id}.json")
+    _preview_states.pop(clip_id, None)
     try:
         os.remove(path)
         return True

@@ -125,7 +125,7 @@ class FpsListener:
         with self.lock:
             entry = self.data.get(ip)
             if entry and (time.monotonic() - entry["ts"]) < 5.0:
-                return entry
+                return dict(entry)
         return None
 
     def stop(self):
@@ -187,58 +187,60 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
     Returns list of dicts: {ip, short_name, long_name, num_ports, universes}
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.settimeout(0.25)
-    sock.bind(("", ARTNET_PORT))
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(0.25)
+        sock.bind(("", ARTNET_PORT))
 
-    poll = bytearray()
-    poll += ARTNET_HEADER
-    poll += struct.pack("<H", ARTNET_OPCODE_POLL)
-    poll += struct.pack(">H", ARTNET_VERSION)
-    poll += bytes([0x00, 0x00])
+        poll = bytearray()
+        poll += ARTNET_HEADER
+        poll += struct.pack("<H", ARTNET_OPCODE_POLL)
+        poll += struct.pack(">H", ARTNET_VERSION)
+        poll += bytes([0x00, 0x00])
 
-    targets = {"255.255.255.255"}
-    targets.update(_get_all_broadcast_addresses())
-    for ip in (known_ips or []):
-        targets.add(ip)
-    for dest in targets:
-        try:
-            sock.sendto(bytes(poll), (dest, ARTNET_PORT))
-        except OSError:
-            pass
+        targets = {"255.255.255.255"}
+        targets.update(_get_all_broadcast_addresses())
+        for ip in (known_ips or []):
+            targets.add(ip)
+        for dest in targets:
+            try:
+                sock.sendto(bytes(poll), (dest, ARTNET_PORT))
+            except OSError:
+                pass
 
-    nodes = {}
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            raw, addr = sock.recvfrom(600)
-        except socket.timeout:
-            continue
-        if len(raw) < 44 or raw[:8] != ARTNET_HEADER:
-            continue
-        opcode = struct.unpack("<H", raw[8:10])[0]
-        if opcode != ARTNET_OPCODE_POLLREPLY:
-            continue
+        nodes = {}
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw, addr = sock.recvfrom(600)
+            except socket.timeout:
+                continue
+            if len(raw) < 44 or raw[:8] != ARTNET_HEADER:
+                continue
+            opcode = struct.unpack("<H", raw[8:10])[0]
+            if opcode != ARTNET_OPCODE_POLLREPLY:
+                continue
 
-        ip = "{}.{}.{}.{}".format(raw[10], raw[11], raw[12], raw[13])
-        short_name = raw[26:44].split(b'\x00')[0].decode("ascii", errors="replace")
-        long_name = raw[44:108].split(b'\x00')[0].decode("ascii", errors="replace")
-        num_ports = raw[173] if len(raw) > 173 else 0
-        universes = []
-        for i in range(min(num_ports, 4)):
-            if len(raw) > 190 + i:
-                universes.append(raw[190 + i])
+            ip = "{}.{}.{}.{}".format(raw[10], raw[11], raw[12], raw[13])
+            short_name = raw[26:44].split(b'\x00')[0].decode("ascii", errors="replace")
+            long_name = raw[44:108].split(b'\x00')[0].decode("ascii", errors="replace")
+            num_ports = raw[173] if len(raw) > 173 else 0
+            universes = []
+            for i in range(min(num_ports, 4)):
+                if len(raw) > 190 + i:
+                    universes.append(raw[190 + i])
 
-        nodes[ip] = {
-            "ip": ip,
-            "short_name": short_name,
-            "long_name": long_name,
-            "num_ports": num_ports,
-            "universes": universes,
-        }
+            nodes[ip] = {
+                "ip": ip,
+                "short_name": short_name,
+                "long_name": long_name,
+                "num_ports": num_ports,
+                "universes": universes,
+            }
 
-    sock.close()
+    finally:
+        sock.close()
     return list(nodes.values())
 
 
@@ -290,8 +292,10 @@ def send_art_address(ip, short_name):
     pkt[104] = 0x7F
     pkt[106] = 0x00
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
-    sock.close()
+    try:
+        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    finally:
+        sock.close()
 
 
 # ======================================================================
@@ -312,5 +316,7 @@ def send_output_config(ip, output_types, type_to_id_map):
     for i, t in enumerate(output_types):
         pkt[13 + i] = type_to_id_map.get(t, 0)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
-    sock.close()
+    try:
+        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    finally:
+        sock.close()
