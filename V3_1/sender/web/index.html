@@ -65,6 +65,9 @@
                                 x-text="dev.connected ? 'Off' : 'On'"></button>
                         <button class="btn btn-sm" x-show="dev.connected"
                                 @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
+                        <button class="btn btn-sm"
+                                :class="{ 'btn-primary': $store.conn.ipConfigDevice === di }"
+                                @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)">IP</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
                     </div>
                 </div>
@@ -73,6 +76,28 @@
                     <span class="device-fps"
                           x-show="dev.connected"
                           x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
+                </div>
+                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
+                    <div class="form-group compact">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigIp" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigGateway" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
+                    </div>
+                    <div class="btn-group" style="margin-top:4px">
+                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(di)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(di)">Revert to DHCP</button>
+                    </div>
+                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change.</div>
                 </div>
                 <div class="device-outputs">
                     <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
@@ -426,18 +451,38 @@
             </div>
         </div>
 
+        <!-- Live Output Preview -->
+        <div class="mixer-preview" x-show="look">
+            <div class="mixer-preview-header">
+                <span class="section-title" style="margin:0;font-size:12px">Timeline Preview</span>
+                <span class="text-sm text-muted" x-text="playing ? 'playing' : formatTime(playTime)"></span>
+            </div>
+            <div class="mixer-preview-outputs">
+                <template x-for="(out, oi) in look?.outputs || []" :key="'mp-' + oi">
+                    <div class="mixer-preview-slot" x-show="out.type !== 'none'">
+                        <div class="mixer-preview-label">
+                            <span class="text-sm" x-text="out.port"></span>
+                            <span class="text-sm text-muted" x-text="out.type"></span>
+                        </div>
+                        <canvas class="preview-canvas"
+                                :id="'mixer_preview_' + oi"
+                                :style="out.type === 'grid' ? 'width:128px;height:128px' : 'width:100%;height:24px'"></canvas>
+                    </div>
+                </template>
+            </div>
+        </div>
+
         <!-- Transport -->
         <div class="transport" x-show="look">
+            <button class="btn" :class="{ 'btn-danger': previewing, 'btn-primary': !previewing }"
+                    @click="togglePreview()"
+                    x-text="previewing ? 'Live' : 'Preview'"></button>
             <button class="btn" @click="playing ? stop() : play()"
                     x-text="playing ? 'Pause' : 'Play'"></button>
             <button class="btn" @click="reset()">Reset</button>
             <span class="transport-time" x-text="formatTime(playTime)"></span>
             <span class="transport-status-black" x-show="transportStatus() === 'BLACK'">BLACK</span>
             <div style="flex:1"></div>
-            <button class="btn btn-primary" @click="previewOnDevices()"
-                    x-show="!previewing">Preview on Devices</button>
-            <button class="btn btn-danger" @click="stopPreview()"
-                    x-show="previewing">Stop Preview</button>
             <div class="zoom-control">
                 <label class="form-label" style="margin:0">Zoom</label>
                 <input type="range" class="form-range" min="40" max="200" step="10"
@@ -513,7 +558,8 @@
 
                 <!-- Playhead -->
                 <div class="timeline-playhead"
-                     :style="'left:' + playheadLeft() + 'px'"></div>
+                     :style="'left:' + playheadLeft() + 'px'"
+                     @mousedown.stop="startPlayheadDrag($event)"></div>
             </div>
         </div>
 

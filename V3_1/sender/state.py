@@ -11,7 +11,7 @@ from effects import (
     EFFECTS, fx_none, compute_anim_factor,
     apply_serpentine, apply_grid_rotation,
 )
-from artnet import ArtNetSender, send_output_config, send_art_address
+from artnet import ArtNetSender, send_output_config, send_art_address, send_ip_config
 
 
 # ======================================================================
@@ -230,7 +230,9 @@ class ControllerState:
         self._controller_device_ips = None  # set of IP strings or None (all)
         # Mixer live preview state
         self._mixer_preview_look = None
-        self._mixer_preview_start = 0.0
+        self._mixer_preview_play_time = 0.0   # base playback time offset
+        self._mixer_preview_start_mono = 0.0  # monotonic time when play started
+        self._mixer_preview_playing = False    # whether clock is advancing
         self._mixer_preview_device_filter = None
 
     def restore_devices(self):
@@ -487,6 +489,22 @@ class ControllerState:
                 return True
         return False
 
+    def set_device_ip(self, di, static_ip, gateway, subnet):
+        with self.lock:
+            if 0 <= di < len(self.devices):
+                dev = self.devices[di]
+                send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
+                return True
+        return False
+
+    def revert_device_dhcp(self, di):
+        with self.lock:
+            if 0 <= di < len(self.devices):
+                dev = self.devices[di]
+                send_ip_config(dev["ip"], 0)
+                return True
+        return False
+
     def connect_all(self):
         with self.lock:
             for dev in self.devices:
@@ -567,18 +585,43 @@ class ControllerState:
             self._override_pixels = pixels_per_output
             self._controller_device_ips = device_ips
 
-    def start_mixer_preview(self, look, device_filter=None):
-        """Start previewing a look from the mixer on connected devices."""
+    def start_mixer_preview(self, look, device_filter=None,
+                            play_time=0.0, playing=False):
+        """Start previewing a look from the mixer on connected devices.
+        play_time: offset in seconds from start of look.
+        playing: whether the clock should advance.
+        """
         with self.lock:
             self._mixer_preview_look = look
-            self._mixer_preview_start = time.monotonic()
+            self._mixer_preview_play_time = play_time
+            self._mixer_preview_start_mono = time.monotonic()
+            self._mixer_preview_playing = playing
             self._mixer_preview_device_filter = device_filter
             self.playback_source = self.SOURCE_MIXER
+
+    def update_mixer_preview(self, play_time=None, playing=None):
+        """Update time / playing state without resending the full look."""
+        with self.lock:
+            if self._mixer_preview_look is None:
+                return
+            if play_time is not None:
+                self._mixer_preview_play_time = play_time
+                self._mixer_preview_start_mono = time.monotonic()
+            if playing is not None:
+                if playing and not self._mixer_preview_playing:
+                    # Resuming: anchor monotonic clock at current play_time
+                    self._mixer_preview_start_mono = time.monotonic()
+                elif not playing and self._mixer_preview_playing:
+                    # Pausing: freeze play_time at current computed value
+                    self._mixer_preview_play_time += (
+                        time.monotonic() - self._mixer_preview_start_mono)
+                self._mixer_preview_playing = playing
 
     def stop_mixer_preview(self):
         """Stop mixer preview, return to idle (no output)."""
         with self.lock:
             self._mixer_preview_look = None
+            self._mixer_preview_playing = False
             self._override_pixels = None
             self._mixer_preview_device_filter = None
             self.playback_source = self.SOURCE_IDLE
@@ -593,10 +636,15 @@ class ControllerState:
                 self._override_pixels = None
 
     def get_mixer_preview(self):
-        """Return (look, elapsed) if mixer preview is active, else (None, 0)."""
+        """Return (look, computed_time) if mixer preview is active, else (None, 0)."""
         with self.lock:
             if self._mixer_preview_look:
-                return self._mixer_preview_look, time.monotonic() - self._mixer_preview_start
+                if self._mixer_preview_playing:
+                    t = self._mixer_preview_play_time + (
+                        time.monotonic() - self._mixer_preview_start_mono)
+                else:
+                    t = self._mixer_preview_play_time
+                return self._mixer_preview_look, t
             return None, 0.0
 
     # ------------------------------------------------------------------

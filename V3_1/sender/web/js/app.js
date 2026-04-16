@@ -62,11 +62,11 @@ document.addEventListener("alpine:init", () => {
             const outputs = this.state?.look?.outputs;
             if (!outputs) return;
             for (let oi = 0; oi < outputs.length; oi++) {
-                const canvas = document.getElementById("preview_" + oi);
-                if (!canvas) continue;
                 const out = outputs[oi];
                 const pixels = out.pixels || [];
                 const grid = out.grid;
+                const canvas = document.getElementById("preview_" + oi);
+                if (!canvas) continue;
                 const ctx = canvas.getContext("2d");
                 if (grid) {
                     const [cols, rows] = grid;
@@ -127,6 +127,10 @@ document.addEventListener("alpine:init", () => {
         editGroup: null,
         editGroupName: "",
         editGroupIps: [],
+        ipConfigDevice: -1,
+        ipConfigIp: "",
+        ipConfigGateway: "",
+        ipConfigSubnet: "255.255.255.0",
 
         get devices() {
             return Alpine.store("app").state?.devices || [];
@@ -191,6 +195,33 @@ document.addEventListener("alpine:init", () => {
 
         async renameDevice(di, name) {
             await api("POST", "/api/rename_node", { device: di, name });
+        },
+
+        // -- Static IP config --
+        openIpConfig(di) {
+            this.ipConfigDevice = di;
+            const dev = this.devices[di];
+            this.ipConfigIp = dev?.ip || "";
+            this.ipConfigGateway = dev?.ip ? dev.ip.replace(/\.\d+$/, ".1") : "";
+            this.ipConfigSubnet = "255.255.255.0";
+        },
+
+        closeIpConfig() {
+            this.ipConfigDevice = -1;
+        },
+
+        async setStaticIp(di) {
+            const ip = this.ipConfigIp.trim();
+            const gw = this.ipConfigGateway.trim();
+            const sn = this.ipConfigSubnet.trim();
+            if (!ip || !gw || !sn) return;
+            await api("POST", "/api/set_device_ip", { device: di, ip: ip, gateway: gw, subnet: sn });
+            this.ipConfigDevice = -1;
+        },
+
+        async revertDhcp(di) {
+            await api("POST", "/api/revert_device_dhcp", { device: di });
+            this.ipConfigDevice = -1;
         },
 
         // -- Device groups --

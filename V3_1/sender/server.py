@@ -12,6 +12,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import clips
 import mixer
 from artnet import discover_artnet_nodes
+from state import OUTPUT_TYPES
 
 
 _WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -175,6 +176,20 @@ class Handler(BaseHTTPRequestHandler):
                 args=(di,), daemon=True).start()
             self._ok()
 
+        elif path == "/api/set_device_ip":
+            di = data.get("device", -1)
+            static_ip = str(data.get("ip", ""))
+            gateway = str(data.get("gateway", ""))
+            subnet = str(data.get("subnet", ""))
+            if static_ip and gateway and subnet:
+                self.controller_state.set_device_ip(di, static_ip, gateway, subnet)
+            self._ok()
+
+        elif path == "/api/revert_device_dhcp":
+            di = data.get("device", -1)
+            self.controller_state.revert_device_dhcp(di)
+            self._ok()
+
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
             try:
@@ -252,15 +267,52 @@ class Handler(BaseHTTPRequestHandler):
             self.cue_list.blackout(fade_time)
             self._ok()
 
+        elif path == "/api/mixer/frame":
+            # Compute a single look frame at time t (for UI preview only)
+            look = data.get("look")
+            try:
+                t = float(data.get("t", 0))
+            except (TypeError, ValueError):
+                t = 0.0
+            if not look or not look.get("tracks"):
+                self._respond(400, "application/json",
+                              b'{"error":"invalid look"}')
+            else:
+                frame = mixer.compute_look_frame(look, t)
+                outputs_data = []
+                look_outputs = look.get("outputs", [])
+                for i, pixels in enumerate(frame):
+                    otype = look_outputs[i].get("type", "none") if i < len(look_outputs) else "none"
+                    typedef = OUTPUT_TYPES.get(otype, {"pixels": 0, "layout": "none"})
+                    grid = list(typedef.get("grid_size")) if typedef.get("layout") == "grid" and typedef.get("grid_size") else None
+                    outputs_data.append({
+                        "pixels": [list(p) for p in pixels],
+                        "grid": grid,
+                        "type": otype,
+                    })
+                self._json_response({"outputs": outputs_data})
+
         elif path == "/api/mixer/preview":
             # Start previewing a look on connected devices
             look = data
             if look and look.get("tracks"):
                 device_filter = look.pop("device_filter", None)
-                self.controller_state.start_mixer_preview(look, device_filter)
+                play_time = float(look.pop("play_time", 0.0))
+                playing = bool(look.pop("playing", False))
+                self.controller_state.start_mixer_preview(
+                    look, device_filter, play_time, playing)
                 self._ok()
             else:
                 self._respond(400, "application/json", b'{"error":"invalid look"}')
+
+        elif path == "/api/mixer/update":
+            play_time = data.get("play_time")
+            playing = data.get("playing")
+            if play_time is not None:
+                play_time = float(play_time)
+            self.controller_state.update_mixer_preview(
+                play_time=play_time, playing=playing)
+            self._ok()
 
         elif path == "/api/mixer/stop_preview":
             self.controller_state.stop_mixer_preview()

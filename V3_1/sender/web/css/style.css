@@ -202,6 +202,29 @@ body {
     margin-top: 4px;
 }
 
+.device-ip-config {
+    margin-top: 6px;
+    padding: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.device-ip-config .form-group.compact {
+    margin-bottom: 4px;
+}
+
+.device-ip-config .form-label {
+    font-size: 11px;
+    margin-bottom: 1px;
+}
+
+.device-ip-config .form-input-sm {
+    padding: 3px 6px;
+    font-size: 12px;
+    font-family: monospace;
+}
+
 .output-badge {
     font-size: 11px;
     padding: 2px 6px;
@@ -539,10 +562,33 @@ input[type="color"] {
 .timeline-playhead {
     position: absolute;
     top: 0; bottom: 0;
+    width: 12px;
+    margin-left: -6px;
+    z-index: 10;
+    cursor: col-resize;
+    pointer-events: auto;
+}
+
+.timeline-playhead::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 12px;
+    height: 10px;
+    background: var(--accent);
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.timeline-playhead::after {
+    content: '';
+    position: absolute;
+    top: 10px; bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
     width: 2px;
     background: var(--accent);
-    z-index: 10;
-    pointer-events: none;
 }
 
 .timeline-drop-indicator {
@@ -822,6 +868,41 @@ input[type="color"] {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     image-rendering: pixelated;
+}
+
+/* ── MIXER LIVE PREVIEW ────────────────────────────────── */
+
+.mixer-preview {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.mixer-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.mixer-preview-outputs {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.mixer-preview-slot {
+    flex: 1;
+    min-width: 140px;
+}
+
+.mixer-preview-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
 }
 
 /* ── OUTPUT CONTROLS ───────────────────────────────────── */

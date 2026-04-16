@@ -13,12 +13,12 @@ V3.1 is the active version under `V3_1/`. The original V3.0 single-file sender (
 ### V3.1 Sender (`V3_1/sender/`)
 - `run.py` — Entry point. Starts HTTP server, Art-Net listener, and animation loop.
 - `state.py` — Core state management, animation loop (`tick()`), device tracking, playback source switching.
-- `server.py` — HTTP server (port 8080). Serves static web UI and 27 JSON API endpoints.
+- `server.py` — HTTP server (port 8080). Serves static web UI and 38 JSON API endpoints.
 - `effects.py` — 10 built-in effects computed per frame into pixel buffers.
 - `clips.py` — Clip CRUD, preview computation. Clips stored as JSON in `V3_1/sender/clips/`.
 - `mixer.py` — Look Mixer logic, crossfade between looks.
 - `controller.py` — Cue Controller for sequential look playback with transitions.
-- `artnet.py` — Art-Net protocol: ArtPoll, ArtPollReply, ArtDmx, ArtAddress, ArtOutputConfig.
+- `artnet.py` — Art-Net protocol: ArtPoll, ArtPollReply, ArtDmx, ArtAddress, ArtOutputConfig, ArtIPConfig.
 - `web/` — Static web UI files (Alpine.js SPA):
   - `web/index.html` — Single-page app shell
   - `web/js/` — Alpine.js components (look-mixer.js, etc.)
@@ -57,6 +57,7 @@ The sender and receiver must agree on:
 - **Output type IDs**: `LOOK_OUTPUT_TYPES` list (Python) indices = `OutputType` enum (C++) values
 - **Pixel counts**: `OUTPUT_TYPES` dict (Python, in state.py) = `OUTPUT_TYPE_TABLE` (C++)
 - **Custom opcode 0x8100**: ArtOutputConfig for runtime output type changes
+- **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration
 - **FPS telemetry**: 7-byte `PFP` packets on UDP 6455
 
 ## How to build and run
@@ -74,18 +75,19 @@ The sender and receiver must agree on:
 - RGB color order, 3 bytes per pixel.
 - Custom Art-Net opcodes use 0x8000+ range.
 - Device names stored in ESP32 NVS via ArtAddress opcode.
+- Static IP configuration stored in ESP32 NVS via custom ArtIPConfig opcode (0x8200). Defaults to DHCP.
 
 ## Effects
 
 none, solid, pulse, linear, constrainbow, rainbow, knight_rider, chase, radial (grid), spiral (grid)
 
-## V3.1 API endpoints (27 total)
+## V3.1 API endpoints (38 total)
 
 **GET**: `/` (web UI), `/api/state`, `/api/clips`, `/api/clips/<id>`, `/api/looks`, `/api/looks/<id>`, `/api/cues`
-**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_playback_source`
+**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_playback_source`
 **POST (clips)**: `/api/clip/preview`, `/api/clips/save`, `/api/clips/save_single`
-**POST (looks/mixer)**: `/api/looks/save`, `/api/mixer/preview`, `/api/device_groups/save`
-**POST (cues)**: `/api/cues` (save), `/api/cues/go`
+**POST (looks/mixer)**: `/api/looks/save`, `/api/mixer/frame`, `/api/mixer/preview`, `/api/mixer/update`, `/api/mixer/stop_preview`, `/api/device_groups`
+**POST (cues/controller)**: `/api/cues` (save), `/api/cues/go`, `/api/cues/stop`, `/api/cues/goto`, `/api/controller/activate`, `/api/controller/blackout`
 **DELETE**: `/api/clips/<id>`, `/api/looks/<id>`, `/api/device_groups/<id>`
 
 ## Hardware

@@ -156,6 +156,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_POLLREPLY 0x2100
 #define ARTNET_OPCODE_ADDRESS  0x6000
 #define ARTNET_OPCODE_OUTPUT_CONFIG 0x8100  // Vendor-defined: set output types
+#define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
 #define ARTNET_PROTOCOL_VER    14
 
 // Device identity — reported in ArtPollReply

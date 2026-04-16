@@ -18,6 +18,7 @@ ARTNET_OPCODE_POLL = 0x2000
 ARTNET_OPCODE_POLLREPLY = 0x2100
 ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
+ARTNET_OPCODE_IP_CONFIG = 0x8200
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
 
@@ -315,6 +316,34 @@ def send_output_config(ip, output_types, type_to_id_map):
     pkt[12] = num
     for i, t in enumerate(output_types):
         pkt[13 + i] = type_to_id_map.get(t, 0)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    finally:
+        sock.close()
+
+
+# ======================================================================
+#  ART-NET IP CONFIG — ArtIPConfig (opcode 0x8200)
+# ======================================================================
+
+def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None):
+    """Send ArtIPConfig packet.
+    mode: 0 = DHCP, 1 = static.
+    static_ip/gateway/subnet: dotted-quad strings (required when mode=1).
+    """
+    pkt = bytearray(25)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_IP_CONFIG)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = mode
+    if mode == 1 and static_ip and gateway and subnet:
+        for i, octet in enumerate(static_ip.split(".")):
+            pkt[13 + i] = int(octet)
+        for i, octet in enumerate(gateway.split(".")):
+            pkt[17 + i] = int(octet)
+        for i, octet in enumerate(subnet.split(".")):
+            pkt[21 + i] = int(octet)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))

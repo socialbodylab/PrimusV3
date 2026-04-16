@@ -12,9 +12,10 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **Discovery** (ArtPoll / ArtPollReply) | UDP / Art-Net | 6454 | Bidirectional |
 | **Device naming** (ArtAddress) | UDP / Art-Net | 6454 | Sender → Node |
 | **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
+| **IP config** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
 | **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
 
-All communication is standard Art-Net 4 over IPv4 UDP, plus two custom opcodes. No TCP, no HTTP, no proprietary framing — any software that speaks Art-Net can drive these nodes directly.
+All communication is standard Art-Net 4 over IPv4 UDP, plus three custom opcodes. No TCP, no HTTP, no proprietary framing — any software that speaks Art-Net can drive these nodes directly.
 
 ---
 
@@ -175,7 +176,45 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 
 ---
 
-## 6. Effects Engine
+## 6. Static IP Configuration — ArtIPConfig (custom opcode 0x8200)
+
+PrimusV3 nodes support remote IP configuration via a custom Art-Net opcode. Nodes default to DHCP but can be assigned a static IP address that persists across reboots (stored in ESP32 NVS). The node reboots automatically after any IP configuration change.
+
+### ArtIPConfig Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x8200` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | Mode | `0` = DHCP, `1` = Static IP |
+| 13–16 | 4 | IP Address | Static IP (4 bytes, only when Mode=1) |
+| 17–20 | 4 | Gateway | Gateway address (4 bytes, only when Mode=1) |
+| 21–24 | 4 | Subnet Mask | Subnet mask (4 bytes, only when Mode=1) |
+
+**Total: 25 bytes.**
+
+### Mode 0 — Revert to DHCP
+
+Clears the static IP, gateway, and subnet from NVS. The node reboots and obtains an IP via DHCP.
+
+### Mode 1 — Set Static IP
+
+Stores the IP, gateway, and subnet in NVS. The node reboots and uses the static configuration. The IP/gateway/subnet fields are each 4 bytes in network byte order (e.g. `192.168.1.100` = `0xC0 0xA8 0x01 0x64`).
+
+### NVS Keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `staticIP` | 4 bytes | Static IP address |
+| `gateway` | 4 bytes | Gateway address |
+| `subnet` | 4 bytes | Subnet mask |
+
+If no NVS keys are present at boot, the node uses DHCP (default behavior).
+
+---
+
+## 7. Effects Engine
 
 The sender provides a built-in effects engine (V3.1: `effects.py`, V3.0: embedded in `led_controller.py`) with the following effects:
 
@@ -205,7 +244,7 @@ Each Look has output slots matching physical outputs. Each slot has its own type
 
 ---
 
-## 7. HTTP Control API (V3.1 Sender)
+## 8. HTTP Control API (V3.1 Sender)
 
 The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server auto-selects a port (printed at startup).
 
@@ -236,6 +275,8 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | `POST /api/remove_device` | `{device: N}` | Remove device by index |
 | `POST /api/rename_node` | `{device: N, name: "..."}` | Rename device — sends ArtAddress to firmware, updates TFT |
 | `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically |
+| `POST /api/set_device_ip` | `{device: N, ip: "...", gateway: "...", subnet: "..."}` | Set static IP on device — sends ArtIPConfig, device reboots |
+| `POST /api/revert_device_dhcp` | `{device: N}` | Revert device to DHCP — sends ArtIPConfig mode 0, device reboots |
 | `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
 | `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
 
@@ -252,7 +293,9 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | Route | Body | Description |
 |---|---|---|
 | `POST /api/looks/save` | Look dict | Save or update a look (timeline with tracks, segments, metadata) |
-| `POST /api/mixer/preview` | Look dict (+ optional `device_filter`) | Start previewing a look on connected devices |
+| `POST /api/mixer/frame` | `{look: {...}, t: 0.0}` | Compute one preview frame for a full look at time `t`. Returns `{outputs: [{pixels, grid, type}, ...]}`. Stateless — no hardware output |
+| `POST /api/mixer/preview` | Look dict (+ optional `device_filter`, `play_time`, `playing`) | Start previewing a look on connected devices |
+| `POST /api/mixer/update` | `{play_time, playing}` | Lightweight update of mixer preview time/playing state without resending full look |
 | `POST /api/mixer/stop_preview` | `{}` | Stop mixer preview, return to idle |
 
 ### POST Endpoints — Cue Controller
@@ -263,6 +306,8 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | `POST /api/cues/go` | `{}` | Advance to next cue (fire) |
 | `POST /api/cues/stop` | `{}` | Stop cue playback |
 | `POST /api/cues/goto` | `{number: N}` | Jump to a specific cue number |
+| `POST /api/controller/activate` | `{look_id, fade_time}` | Activate a look directly with optional fade time |
+| `POST /api/controller/blackout` | `{fade_time}` | Fade to black with optional fade time |
 
 ### DELETE Endpoints
 
@@ -274,7 +319,7 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 
 ---
 
-## 8. TFT Display
+## 9. TFT Display
 
 The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Screen modes are cycled with button D0:
 
@@ -289,7 +334,7 @@ The device name shown on the TFT is the custom name (set via ArtAddress/Rename) 
 
 ---
 
-## 9. Integration Strategies by Tool
+## 10. Integration Strategies by Tool
 
 ### TouchDesigner
 
@@ -352,7 +397,7 @@ PrimusV3 speaks **Art-Net only** (not sACN). Use OLA (Open Lighting Architecture
 
 ---
 
-## 10. Quick-Start Checklist
+## 11. Quick-Start Checklist
 
 1. **Verify network.** Sender and node must be on the same subnet (default: 192.168.1.x/24, WiFi SSID: NETGEAR44).
 2. **Discover.** Send ArtPoll to broadcast:6454. Expect ArtPollReply within ~100 ms.
@@ -362,7 +407,7 @@ PrimusV3 speaks **Art-Net only** (not sACN). Use OLA (Open Lighting Architecture
 
 ---
 
-## 11. Adding a New Output Type
+## 12. Adding a New Output Type
 
 ### On the Arduino side (config.h)
 
