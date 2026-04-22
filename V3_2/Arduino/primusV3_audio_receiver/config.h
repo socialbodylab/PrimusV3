@@ -158,6 +158,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_ADDRESS        0x6000
 #define ARTNET_OPCODE_OUTPUT_CONFIG  0x8100  // Vendor: set output types
 #define ARTNET_OPCODE_AUDIO_CMD      0x8200  // Vendor: audio play/stop/loop/pause
+#define ARTNET_OPCODE_FTP_CMD        0x8201  // Vendor: FTP server control (0=stop, 1=start)
 #define ARTNET_PROTOCOL_VER          14
 
 #define DEVICE_SHORT_NAME  "PrimusV3-Audio"

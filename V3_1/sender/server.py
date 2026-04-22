@@ -279,6 +279,28 @@ class Handler(BaseHTTPRequestHandler):
             group = self.controller_state.save_device_group(data)
             self._json_response(group)
 
+        elif path == "/api/audio/cmd":
+            di = data.get("device", -1)
+            cmd = str(data.get("cmd", "stop"))
+            filename = str(data.get("filename", ""))
+            try:
+                volume = max(0, min(100, int(data.get("volume", 100))))
+            except (TypeError, ValueError):
+                volume = 100
+            ok = self.controller_state.send_audio_command(di, cmd, filename, volume)
+            if ok:
+                self._ok()
+            else:
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+
+        elif path == "/api/audio/files":
+            di = data.get("device", -1)
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            else:
+                files = self.controller_state.get_audio_files(di)
+                self._json_response({"files": files})
+
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
 

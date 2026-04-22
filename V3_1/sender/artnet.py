@@ -1,5 +1,5 @@
 """
-artnet.py — Art-Net transport, discovery, naming, output config, and FPS telemetry.
+artnet.py — Art-Net transport, discovery, naming, output config, FPS telemetry, and audio control.
 """
 
 import re
@@ -18,7 +18,20 @@ ARTNET_OPCODE_POLL = 0x2000
 ARTNET_OPCODE_POLLREPLY = 0x2100
 ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
+ARTNET_OPCODE_AUDIO_CMD     = 0x8200
+ARTNET_OPCODE_FTP_CMD       = 0x8201
 ARTNET_VERSION = 14
+
+# Audio command values for send_audio_cmd()
+AUDIO_CMD_STOP   = 0
+AUDIO_CMD_PLAY   = 1
+AUDIO_CMD_LOOP   = 2
+AUDIO_CMD_PAUSE  = 3
+AUDIO_CMD_VOLUME = 4
+
+FTP_PORT = 21
+FTP_USER = "primus"
+FTP_PASSWORD = "primus"
 ARTNET_PORT = 6454
 
 FPS_LISTEN_PORT = 6455
@@ -320,3 +333,78 @@ def send_output_config(ip, output_types, type_to_id_map):
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
     finally:
         sock.close()
+
+
+# ======================================================================
+#  AUDIO COMMAND — ArtAudioCmd (opcode 0x8200)  [V3.2 audio nodes only]
+# ======================================================================
+
+def send_audio_cmd(ip, cmd, filename="", volume=100):
+    """Send ArtAudioCmd packet to a V3.2 audio node.
+
+    cmd:      AUDIO_CMD_STOP / AUDIO_CMD_PLAY / AUDIO_CMD_LOOP / AUDIO_CMD_PAUSE
+    filename: WAV filename on the SD card (e.g. "cue01.wav"), max 32 chars.
+              Ignored for STOP and PAUSE.
+    volume:   0–100.
+    """
+    name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
+    pkt = bytearray(14 + len(name_bytes))
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_AUDIO_CMD)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = cmd & 0xFF
+    pkt[13] = max(0, min(100, volume)) & 0xFF
+    pkt[14:14 + len(name_bytes)] = name_bytes
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    finally:
+        sock.close()
+
+
+# ======================================================================
+#  FTP CONTROL — ArtFtpCmd (opcode 0x8201)  [V3.2 audio nodes only]
+# ======================================================================
+
+def send_ftp_cmd(ip, start):
+    """Send ArtFtpCmd packet to start or stop the FTP server on a V3.2 audio node.
+
+    start: True to start the FTP server, False to stop it.
+    """
+    pkt = bytearray(13)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_FTP_CMD)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = 1 if start else 0
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    finally:
+        sock.close()
+
+
+def list_audio_files(ip, timeout=5.0):
+    """Return a sorted list of WAV filenames on a V3.2 audio node's SD card.
+
+    Starts the FTP server via Art-Net, connects with ftplib, retrieves the
+    file list, then stops the FTP server.  Returns [] on any error.
+    """
+    import ftplib
+
+    send_ftp_cmd(ip, start=True)
+    time.sleep(0.5)  # give the ESP32 time to start the TCP server
+
+    files = []
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(ip, FTP_PORT, timeout=timeout)
+        ftp.login(FTP_USER, FTP_PASSWORD)
+        all_files = ftp.nlst()
+        files = sorted(f for f in all_files if f.lower().endswith(".wav"))
+        ftp.quit()
+    except Exception as e:
+        print(f"[audio] FTP list failed for {ip}: {e}")
+    finally:
+        send_ftp_cmd(ip, start=False)
+
+    return files

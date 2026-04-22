@@ -32,10 +32,11 @@ document.addEventListener("alpine:init", () => {
     // --- App store: mode, polling ---
     Alpine.store("app", {
         mode: "mixer",
-        modes: ["mixer", "controller"],
+        modes: ["mixer", "controller", "audio"],
         modeLabels: {
             mixer: "Look Mixer",
             controller: "Look Controller",
+            audio: "Audio",
         },
         state: null,
         polling: null,

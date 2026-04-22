@@ -152,11 +152,20 @@ Rewrite in Node.js and bundle with `pkg` or `nexe`.
 
 ## ESP32 Firmware Distribution
 
-The Arduino firmware is self-contained on the hardware. For end-user flashing without `arduino-cli`:
+There are two firmware variants to distribute:
 
-1. **Pre-build `.bin` files** using the existing `upload.sh --compile` workflow
+| Variant | Path | Use Case |
+|---------|------|----------|
+| `primusV3_receiver` | `V3_1/Arduino/` | LED-only nodes (V3.0 / V3.1) |
+| `primusV3_audio_receiver` | `V3_2/Arduino/` | LED + audio nodes (V3.2) |
+
+The audio receiver also has a compile-time board switch (`AUDIO_BOARD` in `config.h`), so two `.bin` files are needed for V3.2: one for Music Maker FeatherWing and one for Audio BFF.
+
+For end-user flashing without `arduino-cli`:
+
+1. **Pre-build `.bin` files** using the existing `upload.sh --compile` workflow for each variant
 2. **Distribute via [ESP Web Flasher](https://esp.huhn.me/)** — a browser-based tool that flashes ESP32s over USB with zero installs
-3. Users: plug in USB → open web page → click Flash → done
+3. Users: plug in USB → open web page → select the correct `.bin` → click Flash → done
 
 This eliminates the Arduino CLI dependency entirely for end users.
 

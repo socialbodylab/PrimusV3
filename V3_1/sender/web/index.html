@@ -9,6 +9,7 @@
 <script src="/js/app.js"></script>
 <script src="/js/look-mixer.js"></script>
 <script src="/js/look-controller.js"></script>
+<script src="/js/audio-panel.js"></script>
 </head>
 <body>
 
@@ -78,6 +79,7 @@
                     <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
                         <span class="output-badge" x-text="o.name + ': ' + o.type"></span>
                     </template>
+                    <span class="audio-badge" x-show="dev.is_audio" title="V3.2 Audio Node">♪</span>
                 </div>
                 <label class="device-preview-check" x-show="$store.app.mode === 'mixer'">
                     <input type="checkbox"
@@ -857,6 +859,98 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- ──── AUDIO PANEL ──── -->
+    <div class="panel" x-show="$store.app.mode === 'audio'" x-data="audioPanel">
+
+        <div class="section-title">Audio Nodes</div>
+
+        <!-- Empty state -->
+        <template x-if="audioDevices.length === 0">
+            <div class="empty-state">
+                <div>No audio nodes detected.</div>
+                <div class="text-muted text-sm" style="margin-top:6px">Audio nodes run V3.2 firmware and identify as "PrimusV3-Audio" during discovery.</div>
+            </div>
+        </template>
+
+        <!-- One card per audio-capable device -->
+        <template x-for="dev in audioDevices" :key="dev.di">
+            <div class="audio-node-card">
+
+                <!-- Header -->
+                <div class="audio-node-header">
+                    <span class="audio-node-name">
+                        <span class="audio-badge">♪</span>
+                        <span x-text="dev.name"></span>
+                    </span>
+                    <span class="device-ip" x-text="dev.ip"></span>
+                </div>
+
+                <!-- Transport + volume -->
+                <div class="audio-transport">
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-danger" @click="stop(dev.di)">&#9632; Stop</button>
+                        <button class="btn btn-sm" @click="pause(dev.di)">&#8214; Pause</button>
+                    </div>
+                    <div class="audio-vol-row">
+                        <span class="text-muted" style="font-size:11px;white-space:nowrap">Vol</span>
+                        <input type="range" class="audio-vol-slider" min="0" max="100"
+                               :value="getVolume(dev.di)"
+                               @input="onVolumeInput(dev.di, $event.target.value)">
+                        <span class="text-muted" style="font-size:11px;width:26px;text-align:right"
+                              x-text="getVolume(dev.di)"></span>
+                    </div>
+                </div>
+
+                <!-- Now playing -->
+                <div class="audio-now-playing" x-show="playing[dev.di]">
+                    <span x-text="playing[dev.di]?.cmd === 'loop' ? '↺' : '▶'"></span>
+                    <span x-text="playing[dev.di]?.file"></span>
+                </div>
+
+                <!-- File list -->
+                <div class="audio-files-section">
+                    <template x-if="fileCache[dev.di] === undefined">
+                        <button class="btn btn-sm" style="width:100%"
+                                :disabled="loadingFiles[dev.di]"
+                                @click="loadFiles(dev.di)"
+                                x-text="loadingFiles[dev.di] ? 'Loading…' : 'Load Files'">
+                        </button>
+                    </template>
+                    <template x-if="fileCache[dev.di] !== undefined">
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-muted" style="font-size:11px"
+                                      x-text="fileCache[dev.di].length + ' file' + (fileCache[dev.di].length !== 1 ? 's' : '')"></span>
+                                <button class="btn btn-sm" @click="refreshFiles(dev.di)"
+                                        :disabled="loadingFiles[dev.di]">↺ Refresh</button>
+                            </div>
+                            <template x-if="fileCache[dev.di].length === 0">
+                                <div class="text-muted text-sm" style="padding:8px 0">No WAV files on SD card.</div>
+                            </template>
+                            <template x-for="file in fileCache[dev.di]" :key="file">
+                                <div class="audio-file-row" :class="{ playing: isPlaying(dev.di, file) }">
+                                    <span class="audio-file-icon"
+                                          x-text="isLooping(dev.di, file) ? '↺' : (isPlaying(dev.di, file) ? '▶' : '')"></span>
+                                    <span class="audio-file-name" x-text="file"></span>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm"
+                                                :class="{ 'btn-primary': isPlaying(dev.di, file) && !isLooping(dev.di, file) }"
+                                                @click="play(dev.di, file, 'play')" title="Play once">▶</button>
+                                        <button class="btn btn-sm"
+                                                :class="{ 'btn-primary': isLooping(dev.di, file) }"
+                                                @click="play(dev.di, file, 'loop')" title="Loop">↺</button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+
+            </div>
+        </template>
+
     </div>
 
 </div>

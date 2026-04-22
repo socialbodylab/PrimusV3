@@ -12,9 +12,12 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **Discovery** (ArtPoll / ArtPollReply) | UDP / Art-Net | 6454 | Bidirectional |
 | **Device naming** (ArtAddress) | UDP / Art-Net | 6454 | Sender → Node |
 | **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
+| **Audio command** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
+| **FTP control** (custom 0x8201) | UDP / Art-Net | 6454 | Sender → Node |
 | **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
+| **FTP file transfer** | TCP | 21 | Bidirectional |
 
-All communication is standard Art-Net 4 over IPv4 UDP, plus two custom opcodes. No TCP, no HTTP, no proprietary framing — any software that speaks Art-Net can drive these nodes directly.
+LED data, discovery, and control use standard Art-Net 4 over IPv4 UDP. Four custom opcodes extend the protocol for output configuration, audio playback, and FTP management. FTP (TCP port 21) is used for SD card file management on audio nodes and is not part of the Art-Net protocol. Any software that speaks Art-Net can drive the LED outputs directly.
 
 ---
 
@@ -175,7 +178,87 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 
 ---
 
-## 6. Effects Engine
+## 6. Audio Playback — ArtAudioCmd (custom opcode 0x8200)
+
+V3.2 audio nodes support WAV file playback triggered over Art-Net. Audio files are stored on an SD card and managed via FTP (see §7). This opcode is only implemented in the `primusV3_audio_receiver` firmware.
+
+### ArtAudioCmd Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x8200` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | Command | See table below |
+| 13 | 1 | Volume | 0–100 |
+| 14–N | ≤33 | Filename | Null-terminated, max 32 chars (e.g. `cue01.wav`) |
+
+**Minimum size: 15 bytes** (header + opcode + version + cmd + volume + at least one filename byte).
+
+### Command Values
+
+| Value | Command | Description |
+|-------|---------|-------------|
+| 0 | Stop | Stop playback immediately |
+| 1 | Play | Play file once |
+| 2 | Loop | Play file on repeat |
+| 3 | Pause | Pause playback |
+| 4 | Volume | Set volume without interrupting playback (filename ignored) |
+
+### Notes
+
+- If the FTP server is currently running, the node stops it automatically before starting playback to free the SD bus.
+- Filenames are relative to the SD root (e.g. `cue01.wav`, not `/cue01.wav`).
+- Volume 0 = silent, 100 = maximum. The firmware maps this to the hardware codec's native range.
+- Stop, Pause, and Volume commands ignore the filename field.
+- Command 4 (Volume) calls the codec's hardware volume register directly — the file keeps playing uninterrupted. The sender UI uses this for live slider updates, throttled to one packet per 50 ms.
+
+---
+
+## 7. FTP Server Control — ArtFtpCmd (custom opcode 0x8201)
+
+V3.2 audio nodes include an FTP server (TCP port 21) for managing WAV files on the SD card. The server is off by default and must be explicitly started — either via this opcode or the D1 button on the node's FTP screen. This opcode is only implemented in the `primusV3_audio_receiver` firmware.
+
+### ArtFtpCmd Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x8201` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | Command | 0 = stop FTP, 1 = start FTP |
+
+**Total: 13 bytes.**
+
+### Typical Sender Workflow
+
+```python
+from ftplib import FTP
+
+# 1. Send ArtFtpCmd cmd=1 to start the FTP server
+send_artnet_packet(node_ip, opcode=0x8201, data=bytes([1]))
+
+# 2. Connect via FTP and list WAV files
+ftp = FTP(node_ip)
+ftp.login('primus', 'primus')
+files = [f for f in ftp.nlst() if f.lower().endswith('.wav')]
+ftp.quit()
+
+# 3. Send ArtFtpCmd cmd=0 to stop the FTP server when done
+send_artnet_packet(node_ip, opcode=0x8201, data=bytes([0]))
+```
+
+Default FTP credentials: user `primus`, password `primus` (configured in `config.h`).
+
+### Notes
+
+- The FTP server will refuse to start if audio is actively playing (`sdBusy` is set).
+- Starting audio playback while FTP is running will stop the FTP server first.
+- FTP uses TCP port 21 (control) and passive mode for data transfers.
+
+---
+
+## 8. Effects Engine
 
 The sender provides a built-in effects engine (V3.1: `effects.py`, V3.0: embedded in `led_controller.py`) with the following effects:
 
@@ -205,7 +288,7 @@ Each Look has output slots matching physical outputs. Each slot has its own type
 
 ---
 
-## 7. HTTP Control API (V3.1 Sender)
+## 9. HTTP Control API (V3.1 Sender)
 
 The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server auto-selects a port (printed at startup).
 
@@ -238,6 +321,8 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically |
 | `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
 | `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
+| `POST /api/audio/cmd` | `{device: N, cmd, filename, volume}` | Send audio command to a V3.2 node. `cmd`: `"play"` `"loop"` `"stop"` `"pause"` `"volume"` |
+| `POST /api/audio/files` | `{device: N}` | List WAV files on a V3.2 node's SD card. Starts FTP, queries, stops FTP. Returns `{files: [...]}` (~1–2 s) |
 
 ### POST Endpoints — Clips
 
@@ -274,9 +359,11 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 
 ---
 
-## 8. TFT Display
+## 10. TFT Display
 
 The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Screen modes are cycled with button D0:
+
+### V3.1 Receiver (primusV3_receiver)
 
 | Screen | Content |
 |--------|---------|
@@ -285,11 +372,23 @@ The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Scr
 | **Error** | Error message and details |
 | **Test Mode** | Test pattern name (entered via D1 button) |
 
-The device name shown on the TFT is the custom name (set via ArtAddress/Rename) or the default firmware name "PrimusV3".
+### V3.2 Audio Receiver (primusV3_audio_receiver)
+
+Two additional screens are added. All screens cycle with D0:
+
+| Screen | Content |
+|--------|---------|
+| **Home** (default) | Large device name, WiFi status + RSSI, IP address, SSID, live FPS |
+| **Status** | Per-output type/pixel count/universe, RECV/IDLE status, FPS, heap |
+| **Error** | Error message and details |
+| **Audio** | Currently playing file, volume, playing/stopped status |
+| **FTP** | FTP server on/off, device IP, SD file count. D1 toggles the FTP server while on this screen |
+
+The device name shown on the TFT is the custom name (set via ArtAddress/Rename) or the default firmware name.
 
 ---
 
-## 9. Integration Strategies by Tool
+## 11. Integration Strategies by Tool
 
 ### TouchDesigner
 
@@ -352,7 +451,7 @@ PrimusV3 speaks **Art-Net only** (not sACN). Use OLA (Open Lighting Architecture
 
 ---
 
-## 10. Quick-Start Checklist
+## 12. Quick-Start Checklist
 
 1. **Verify network.** Sender and node must be on the same subnet (default: 192.168.1.x/24, WiFi SSID: NETGEAR44).
 2. **Discover.** Send ArtPoll to broadcast:6454. Expect ArtPollReply within ~100 ms.
@@ -362,7 +461,7 @@ PrimusV3 speaks **Art-Net only** (not sACN). Use OLA (Open Lighting Architecture
 
 ---
 
-## 11. Adding a New Output Type
+## 13. Adding a New Output Type
 
 ### On the Arduino side (config.h)
 

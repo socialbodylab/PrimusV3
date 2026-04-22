@@ -11,7 +11,11 @@ from effects import (
     EFFECTS, fx_none, compute_anim_factor,
     apply_serpentine, apply_grid_rotation,
 )
-from artnet import ArtNetSender, send_output_config, send_art_address
+from artnet import (
+    ArtNetSender, send_output_config, send_art_address,
+    send_audio_cmd, send_ftp_cmd, list_audio_files,
+    AUDIO_CMD_STOP, AUDIO_CMD_PLAY, AUDIO_CMD_LOOP, AUDIO_CMD_PAUSE, AUDIO_CMD_VOLUME,
+)
 
 
 # ======================================================================
@@ -303,6 +307,7 @@ class ControllerState:
                     "ip": dev["ip"],
                     "base_universe": dev["base_universe"],
                     "connected": dev["connected"],
+                    "is_audio": dev.get("is_audio", False),
                     "receiver_fps": rx["fps"] if rx else None,
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
                     "outputs": [],
@@ -439,11 +444,16 @@ class ControllerState:
                 OUTPUT_TYPES)
             base_u = node_info["universes"][0] if node_info.get("universes") else 0
 
+            short_name = node_info.get("short_name", "")
+            long_name  = node_info.get("long_name", "")
+            is_audio = "Audio" in short_name or "Audio" in long_name
+
             dev = {
-                "name": node_info.get("short_name", "Node"),
+                "name": short_name or "Node",
                 "ip": node_info["ip"],
                 "base_universe": base_u,
                 "connected": False,
+                "is_audio": is_audio,
                 "sender": ArtNetSender(node_info["ip"]),
                 "outputs": [],
             }
@@ -688,6 +698,43 @@ class ControllerState:
             if sid not in seen:
                 seen.add(sid)
                 sender.advance_sequence()
+
+    # ------------------------------------------------------------------
+    #  Audio (V3.2 nodes only)
+    # ------------------------------------------------------------------
+
+    _AUDIO_CMDS = {
+        "play":   AUDIO_CMD_PLAY,
+        "loop":   AUDIO_CMD_LOOP,
+        "stop":   AUDIO_CMD_STOP,
+        "pause":  AUDIO_CMD_PAUSE,
+        "volume": AUDIO_CMD_VOLUME,
+    }
+
+    def send_audio_command(self, di, cmd, filename="", volume=100):
+        """Send an audio command to a V3.2 device.
+        cmd: "play" | "loop" | "stop" | "pause"
+        Returns True on success, False if device index invalid.
+        """
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return False
+            ip = self.devices[di]["ip"]
+        code = self._AUDIO_CMDS.get(cmd, AUDIO_CMD_STOP)
+        send_audio_cmd(ip, code, filename=filename, volume=volume)
+        return True
+
+    def get_audio_files(self, di):
+        """Return sorted list of WAV filenames on a V3.2 device's SD card.
+        Starts FTP, queries, stops FTP.  Returns [] on error or wrong index.
+        """
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return []
+            ip = self.devices[di]["ip"]
+        return list_audio_files(ip)
+
+    # ------------------------------------------------------------------
 
     def shutdown(self):
         self.running = False

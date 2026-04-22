@@ -37,9 +37,6 @@
 // =====================================================================
 extern bool sdBusy;
 
-// Forward declaration — defined in audio.h
-void audioStop();
-
 // =====================================================================
 //  State
 // =====================================================================
@@ -59,10 +56,9 @@ void ftpStart() {
   if (_ftpRunning) return;
 
   if (sdBusy) {
-    Serial.println("[FTP] Stopping audio to free SD bus");
-    audioStop();
+    Serial.println("[FTP] SD busy (audio playing) — FTP start refused");
+    return;
   }
-  sdBusy = true;
 
   _ftpServer.begin(FTP_USER, FTP_PASSWORD);
   _ftpRunning = true;
@@ -76,7 +72,6 @@ void ftpStart() {
 void ftpStop() {
   if (!_ftpRunning) return;
   _ftpRunning = false;
-  sdBusy = false;
   Serial.println("[FTP] Server stopped");
 }
 

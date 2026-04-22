@@ -107,6 +107,12 @@ void audioPause() {
   Serial.println("[Audio] Paused");
 }
 
+void audioSetVolume(uint8_t volume) {
+  _audioVolume = volume;
+  uint8_t vs1053vol = (uint8_t)((100 - volume) * 100 / 100);
+  _musicMaker.setVolume(vs1053vol, vs1053vol);
+}
+
 void audioLoop(const char* filename, uint8_t volume) {
   _audioLooping = true;
   audioPlay(filename, volume);
@@ -223,6 +229,11 @@ void audioPause() {
   // ESP8266Audio does not have a native pause — stop is the closest
   if (_audioGen && _audioGen->isRunning()) _audioGen->stop();
   Serial.println("[Audio] Paused (stopped)");
+}
+
+void audioSetVolume(uint8_t volume) {
+  _audioVolume = volume;
+  if (_audioOut) _audioOut->SetGain(volume / 100.0f);
 }
 
 void audioLoop(const char* filename, uint8_t volume) {

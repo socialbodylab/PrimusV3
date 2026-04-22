@@ -344,6 +344,30 @@ void handleArtOutputConfig(uint8_t* data, uint16_t len) {
 //  ArtAudioCmd (opcode 0x8200)
 // =====================================================================
 
+// =====================================================================
+//  ArtFtpCmd (opcode 0x8201)
+// =====================================================================
+
+void handleArtFtpCmd(uint8_t* data, uint16_t len) {
+  if (len < 13) return;
+  uint8_t cmd = data[12];
+  Serial.print("[ArtFTP] cmd=");
+  Serial.println(cmd);
+
+  if (cmd == 1) {
+    ftpStart();
+  } else {
+    ftpStop();
+  }
+
+  if (infoScreenIndex == 4)
+    displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
+}
+
+// =====================================================================
+//  ArtAudioCmd (opcode 0x8200)
+// =====================================================================
+
 void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (len < 15) return;
 
@@ -361,11 +385,20 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   Serial.print(" file=");
   Serial.println(filename);
 
+  // Stop FTP before any audio operation so they don't share the SD bus
+  if (ftpIsRunning()) {
+    Serial.println("[ArtAudio] Stopping FTP to free SD bus");
+    ftpStop();
+    if (infoScreenIndex == 4)
+      displayFtpStatus(false, WiFi.localIP(), sdFileCount());
+  }
+
   switch (cmd) {
-    case 1:  audioPlay(filename, volume); break;
-    case 2:  audioLoop(filename, volume); break;
-    case 3:  audioPause();                break;
-    default: audioStop();                 break;
+    case 1:  audioPlay(filename, volume);  break;
+    case 2:  audioLoop(filename, volume);  break;
+    case 3:  audioPause();                 break;
+    case 4:  audioSetVolume(volume);       break;
+    default: audioStop();                  break;
   }
 
   // Refresh audio screen if it's currently displayed
@@ -401,6 +434,11 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
 
   if (opcode == ARTNET_OPCODE_AUDIO_CMD) {
     handleArtAudioCmd(data, len);
+    return;
+  }
+
+  if (opcode == ARTNET_OPCODE_FTP_CMD) {
+    handleArtFtpCmd(data, len);
     return;
   }
 
