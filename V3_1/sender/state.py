@@ -234,6 +234,7 @@ class ControllerState:
         self._mixer_preview_start_mono = 0.0  # monotonic time when play started
         self._mixer_preview_playing = False    # whether clock is advancing
         self._mixer_preview_device_filter = None
+        self._mixer_update_last_seq = 0       # sequence number for update ordering
 
     def restore_devices(self):
         """Restore saved devices on startup (call after FPS listener is ready)."""
@@ -597,13 +598,22 @@ class ControllerState:
             self._mixer_preview_start_mono = time.monotonic()
             self._mixer_preview_playing = playing
             self._mixer_preview_device_filter = device_filter
+            self._mixer_update_last_seq = 0
             self.playback_source = self.SOURCE_MIXER
 
-    def update_mixer_preview(self, play_time=None, playing=None):
-        """Update time / playing state without resending the full look."""
+    def update_mixer_preview(self, play_time=None, playing=None, seq=None):
+        """Update time / playing state without resending the full look.
+        seq: monotonically increasing sequence number from the client. If
+        provided and lower than the last processed sequence, the update is
+        ignored (stale out-of-order request from browser connection pool).
+        """
         with self.lock:
             if self._mixer_preview_look is None:
                 return
+            if seq is not None:
+                if seq < self._mixer_update_last_seq:
+                    return  # Stale request, ignore
+                self._mixer_update_last_seq = seq
             if play_time is not None:
                 self._mixer_preview_play_time = play_time
                 self._mixer_preview_start_mono = time.monotonic()

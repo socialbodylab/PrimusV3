@@ -44,6 +44,7 @@ document.addEventListener("alpine:init", () => {
         _mixerPreviewPending: false,
         _lastMixerFrameTime: null,
         _mixerFrameDirty: true,
+        _mixerUpdateSeq: 0,
 
         // ── Library state ──
         libSearch: "",
@@ -476,11 +477,13 @@ document.addEventListener("alpine:init", () => {
                 this.look.total_duration = Math.ceil(newEnd);
             }
             this._mixerFrameDirty = true;
+            if (this.previewing) this._sendPreview();
         },
 
         removeSegment(trackIdx, segIdx) {
             this.look.tracks[trackIdx]?.segments.splice(segIdx, 1);
             this._mixerFrameDirty = true;
+            if (this.previewing) this._sendPreview();
         },
 
         openEditSegment(trackIdx, segIdx) {
@@ -528,6 +531,7 @@ document.addEventListener("alpine:init", () => {
             seg.speed_override = this.editData.speed_override;
             this._mixerFrameDirty = true;
             this.editModal = false;
+            if (this.previewing) this._sendPreview();
         },
 
         duplicateSegment() {
@@ -554,6 +558,7 @@ document.addEventListener("alpine:init", () => {
             }
             this._mixerFrameDirty = true;
             this.editModal = false;
+            if (this.previewing) this._sendPreview();
         },
 
         startDrag(event, trackIdx, segIdx, mode) {
@@ -571,6 +576,7 @@ document.addEventListener("alpine:init", () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
                 this._drag = null;
+                if (this.previewing) this._sendPreview();
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
@@ -697,6 +703,9 @@ document.addEventListener("alpine:init", () => {
 
         _sendPreview() {
             if (!this.previewing || !this.look) return;
+            // Reset sequence counter — start_mixer_preview on the server resets
+            // its own counter, so subsequent update calls start fresh.
+            this._mixerUpdateSeq = 0;
             const payload = { ...this.look };
             payload.play_time = this.playTime;
             payload.playing = this.playing;
@@ -707,9 +716,11 @@ document.addEventListener("alpine:init", () => {
 
         _updateMixerTime(playTime, playing) {
             if (!this.previewing) return;
+            const seq = ++this._mixerUpdateSeq;
             const body = {};
             if (playTime !== undefined) body.play_time = playTime;
             if (playing !== undefined) body.playing = playing;
+            body.seq = seq;
             api("POST", "/api/mixer/update", body);
         },
 
@@ -923,6 +934,7 @@ document.addEventListener("alpine:init", () => {
                 this.look.total_duration = Math.ceil(newEnd);
             }
             this._mixerFrameDirty = true;
+            if (this.previewing) this._sendPreview();
         },
 
         clipsForTrack(trackIdx) {

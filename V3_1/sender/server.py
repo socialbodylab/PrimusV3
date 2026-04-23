@@ -308,10 +308,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/mixer/update":
             play_time = data.get("play_time")
             playing = data.get("playing")
+            seq = data.get("seq")
             if play_time is not None:
                 play_time = float(play_time)
+            if seq is not None:
+                try:
+                    seq = int(seq)
+                except (TypeError, ValueError):
+                    seq = None
             self.controller_state.update_mixer_preview(
-                play_time=play_time, playing=playing)
+                play_time=play_time, playing=playing, seq=seq)
             self._ok()
 
         elif path == "/api/mixer/stop_preview":

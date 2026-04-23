@@ -30,8 +30,8 @@
 OutputConfig outputs[NUM_OUTPUTS];
 
 int8_t pxl8Pins[8] = {
-  PIN_PORT_0, PIN_PORT_1, PIN_PORT_2,
-  -1, -1, -1, -1, -1
+  -1, -1, -1, -1, -1, -1,
+  PIN_PORT_6, PIN_PORT_7
 };
 
 Adafruit_NeoPXL8* leds = nullptr;

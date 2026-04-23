@@ -71,8 +71,8 @@ inline LayoutType   typeLayout(OutputType t)      { return OUTPUT_TYPE_TABLE[t].
 // =====================================================================
 //  Per-Output Configuration
 // =====================================================================
-#define NUM_OUTPUTS 3
-#define MAX_OUTPUTS 3   // hardware max (NeoPXL8 ports 0-2)
+#define NUM_OUTPUTS 2
+#define MAX_OUTPUTS 2   // two outputs via FeatherWing fixed outputs 6 and 7
 
 struct OutputConfig {
   OutputType  type;
@@ -92,23 +92,17 @@ inline void deriveFromType(OutputConfig& cfg) {
 // Change these to match what's physically plugged in.
 // Set unused outputs to OUTPUT_OFF.
 inline void loadDefaultConfig(OutputConfig outputs[NUM_OUTPUTS]) {
-  // Output 0 — Short strip, 68 RGB LEDs
+  // Output 0 — FeatherWing output 6 (A4 / GPIO14, fixed trace)
   outputs[0].type     = OUTPUT_SHORT_STRIP;
-  outputs[0].pxl8Port = 0;
+  outputs[0].pxl8Port = 6;
   outputs[0].universe = 0;
   deriveFromType(outputs[0]);
 
-  // Output 1 — Long strip, 72 RGB LEDs
+  // Output 1 — FeatherWing output 7 (A3 / GPIO15, fixed trace)
   outputs[1].type     = OUTPUT_LONG_STRIP;
-  outputs[1].pxl8Port = 1;
+  outputs[1].pxl8Port = 7;
   outputs[1].universe = 1;
   deriveFromType(outputs[1]);
-
-  // Output 2 — Grid 8x8, 64 RGB LEDs
-  outputs[2].type     = OUTPUT_GRID;
-  outputs[2].pxl8Port = 2;
-  outputs[2].universe = 2;
-  deriveFromType(outputs[2]);
 }
 
 // Count how many outputs are actually active
@@ -126,10 +120,12 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // Maximum pixels on any single port — NeoPXL8 allocates this for all 8 ports
 #define MAX_LEDS_PER_PORT 72
 
-// Pin mapping: ESP32-S3 GPIO → NeoPXL8 input port
-#define PIN_PORT_0  18   // A0 / GPIO18
-#define PIN_PORT_1  17   // A1 / GPIO17
-#define PIN_PORT_2  16   // A2 / GPIO16
+// Pin mapping: ESP32-S3 GPIO → NeoPXL8 strand index
+// Using FeatherWing (M0) outputs 6 and 7 — hardwired PCB traces, no solder bridges.
+// A4 (GPIO14) and A3 (GPIO15) have no conflicts with any other peripheral.
+// Connect LED strips to the physical output 6 and 7 connectors on the FeatherWing.
+#define PIN_PORT_6  14   // A4 / GPIO14 — FeatherWing output 6 (fixed trace)
+#define PIN_PORT_7  15   // A3 / GPIO15 — FeatherWing output 7 (fixed trace)
 
 // =====================================================================
 //  Buttons — ESP32-S3 Reverse TFT Feather

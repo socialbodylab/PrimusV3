@@ -34,7 +34,7 @@ enum ScreenMode {
 #define NUM_INFO_SCREENS 3
 ScreenMode currentScreen = SCREEN_STARTUP;
 
-const uint16_t portColors[MAX_OUTPUTS] = { ST77XX_RED, ST77XX_GREEN, ST77XX_BLUE };
+const uint16_t portColors[MAX_OUTPUTS] = { ST77XX_RED, ST77XX_GREEN };
 
 // =====================================================================
 //  Device name shown in headers (set from .ino after NVS load)
