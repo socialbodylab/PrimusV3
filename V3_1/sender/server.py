@@ -333,26 +333,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._leave_controller_runtime(preserve_selection=True)
                 device_filter = look.pop("device_filter", None)
                 play_time = float(look.pop("play_time", 0.0))
+                transport_time = float(look.pop("transport_time", play_time))
                 playing = bool(look.pop("playing", False))
                 self.controller_state.start_mixer_preview(
-                    look, device_filter, play_time, playing)
+                    look, device_filter, play_time, playing, transport_time)
                 self._ok()
             else:
                 self._respond(400, "application/json", b'{"error":"invalid look"}')
 
         elif path == "/api/mixer/update":
             play_time = data.get("play_time")
+            transport_time = data.get("transport_time")
             playing = data.get("playing")
             seq = data.get("seq")
             if play_time is not None:
                 play_time = float(play_time)
+            if transport_time is not None:
+                transport_time = float(transport_time)
             if seq is not None:
                 try:
                     seq = int(seq)
                 except (TypeError, ValueError):
                     seq = None
             self.controller_state.update_mixer_preview(
-                play_time=play_time, playing=playing, seq=seq)
+                play_time=play_time, playing=playing,
+                transport_time=transport_time, seq=seq)
             self._ok()
 
         elif path == "/api/mixer/stop_preview":

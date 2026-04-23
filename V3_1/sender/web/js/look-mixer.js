@@ -15,6 +15,7 @@ document.addEventListener("alpine:init", () => {
         clips: [],
         playing: false,
         playTime: 0,
+        transportTime: 0,
         _playInterval: null,
         saveModal: false,
         saveName: "",
@@ -494,6 +495,7 @@ document.addEventListener("alpine:init", () => {
                 speed: 1.0,
             };
             this.playTime = 0;
+            this.transportTime = 0;
             this._mixerFrameDirty = true;
         },
 
@@ -692,11 +694,12 @@ document.addEventListener("alpine:init", () => {
             const t = x / this.pixelsPerSecond;
             const dur = this.look?.total_duration || 10;
             this.playTime = Math.max(0, Math.min(t, dur));
+            this.transportTime = this.playTime;
             if (this.playing) {
                 this.stop();
                 this.play();
             } else {
-                this._updateMixerTime(this.playTime, false);
+                this._updateMixerTime(this.playTime, false, this.transportTime);
             }
         },
 
@@ -720,7 +723,8 @@ document.addEventListener("alpine:init", () => {
                 const x = e.clientX - rect.left + this._playheadDrag.container.scrollLeft;
                 const dur = this.look?.total_duration || 10;
                 this.playTime = Math.max(0, Math.min(x / this.pixelsPerSecond, dur));
-                this._updateMixerTime(this.playTime, false);
+                this.transportTime = this.playTime;
+                this._updateMixerTime(this.playTime, false, this.transportTime);
             };
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
@@ -758,17 +762,19 @@ document.addEventListener("alpine:init", () => {
             this._mixerUpdateSeq = 0;
             const payload = { ...this.look };
             payload.play_time = this.playTime;
+            payload.transport_time = this.transportTime;
             payload.playing = this.playing;
             const filter = Alpine.store("app").mixerPreviewDevices;
             if (filter) payload.device_filter = filter;
             api("POST", "/api/mixer/preview", payload);
         },
 
-        _updateMixerTime(playTime, playing) {
+        _updateMixerTime(playTime, playing, transportTime) {
             if (!this.previewing) return;
             const seq = ++this._mixerUpdateSeq;
             const body = {};
             if (playTime !== undefined) body.play_time = playTime;
+            if (transportTime !== undefined) body.transport_time = transportTime;
             if (playing !== undefined) body.playing = playing;
             body.seq = seq;
             api("POST", "/api/mixer/update", body);
@@ -839,11 +845,12 @@ document.addEventListener("alpine:init", () => {
         play() {
             if (this.playing) return;
             this.playing = true;
-            const start = performance.now() - this.playTime * 1000 / (this.look?.speed || 1);
+            const start = performance.now() - this.transportTime * 1000 / (this.look?.speed || 1);
             this._playInterval = setInterval(() => {
                 const globalSpeed = this.look?.speed || 1;
                 const elapsed = (performance.now() - start) / 1000 * globalSpeed;
                 const dur = this.look?.total_duration || 10;
+                this.transportTime = elapsed;
                 if (this.look?.playback === "loop") {
                     this.playTime = elapsed % dur;
                 } else if (this.look?.playback === "boomerang") {
@@ -854,7 +861,7 @@ document.addEventListener("alpine:init", () => {
                     if (elapsed >= dur) this.stop();
                 }
             }, 33);
-            this._updateMixerTime(this.playTime, true);
+            this._updateMixerTime(this.playTime, true, this.transportTime);
         },
 
         stop() {
@@ -864,7 +871,7 @@ document.addEventListener("alpine:init", () => {
                 clearInterval(this._playInterval);
                 this._playInterval = null;
             }
-            this._updateMixerTime(this.playTime, false);
+            this._updateMixerTime(this.playTime, false, this.transportTime);
         },
 
         reset() {
@@ -877,7 +884,8 @@ document.addEventListener("alpine:init", () => {
                 }
             }
             this.playTime = 0;
-            this._updateMixerTime(0, false);
+            this.transportTime = 0;
+            this._updateMixerTime(0, false, 0);
         },
 
         formatTime(t) {
@@ -1036,6 +1044,7 @@ document.addEventListener("alpine:init", () => {
                 }
                 this.look = look;
                 this.playTime = 0;
+                this.transportTime = 0;
                 this._mixerFrameDirty = true;
             }
         },

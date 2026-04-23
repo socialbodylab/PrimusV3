@@ -270,7 +270,8 @@ class ControllerState:
         self._controller_device_ips = None  # set of IP strings or None (all)
         # Mixer live preview state
         self._mixer_preview_look = None
-        self._mixer_preview_play_time = 0.0   # base playback time offset
+        self._mixer_preview_play_time = 0.0   # current wrapped timeline time
+        self._mixer_preview_transport_time = 0.0  # unwrapped timeline time
         self._mixer_preview_start_mono = 0.0  # monotonic time when play started
         self._mixer_preview_playing = False    # whether clock is advancing
         self._mixer_preview_device_filter = None
@@ -779,6 +780,7 @@ class ControllerState:
         """Reset mixer preview bookkeeping without changing playback source."""
         self._mixer_preview_look = None
         self._mixer_preview_play_time = 0.0
+        self._mixer_preview_transport_time = 0.0
         self._mixer_preview_start_mono = 0.0
         self._mixer_preview_playing = False
         self._mixer_preview_device_filter = None
@@ -799,21 +801,27 @@ class ControllerState:
         self.playback_source = source
 
     def start_mixer_preview(self, look, device_filter=None,
-                            play_time=0.0, playing=False):
+                            play_time=0.0, playing=False,
+                            transport_time=None):
         """Start previewing a look from the mixer on connected devices.
-        play_time: offset in seconds from start of look.
+        play_time: wrapped playhead time shown in the timeline.
+        transport_time: unwrapped timeline time for live playback.
         playing: whether the clock should advance.
         """
         with self.lock:
             self._clear_mixer_preview_unlocked()
             self._mixer_preview_look = look
             self._mixer_preview_play_time = play_time
+            self._mixer_preview_transport_time = (
+                play_time if transport_time is None else transport_time
+            )
             self._mixer_preview_start_mono = time.monotonic()
             self._mixer_preview_playing = playing
             self._mixer_preview_device_filter = device_filter
             self._set_playback_source_unlocked(self.SOURCE_MIXER)
 
-    def update_mixer_preview(self, play_time=None, playing=None, seq=None):
+    def update_mixer_preview(self, play_time=None, playing=None,
+                             transport_time=None, seq=None):
         """Update time / playing state without resending the full look.
         seq: monotonically increasing sequence number from the client. If
         provided and lower than the last processed sequence, the update is
@@ -828,14 +836,18 @@ class ControllerState:
                 self._mixer_update_last_seq = seq
             if play_time is not None:
                 self._mixer_preview_play_time = play_time
+            if transport_time is not None:
+                self._mixer_preview_transport_time = transport_time
+            if play_time is not None or transport_time is not None:
                 self._mixer_preview_start_mono = time.monotonic()
             if playing is not None:
                 if playing and not self._mixer_preview_playing:
-                    # Resuming: anchor monotonic clock at current play_time
+                    # Resuming: anchor monotonic clock at the current transport time.
                     self._mixer_preview_start_mono = time.monotonic()
-                elif not playing and self._mixer_preview_playing:
-                    # Pausing: freeze play_time at current computed value
-                    self._mixer_preview_play_time += (
+                elif (not playing and self._mixer_preview_playing
+                      and transport_time is None):
+                    # Pausing: freeze transport time at the current value.
+                    self._mixer_preview_transport_time += (
                         time.monotonic() - self._mixer_preview_start_mono)
                 self._mixer_preview_playing = playing
 
@@ -862,10 +874,10 @@ class ControllerState:
         with self.lock:
             if self._mixer_preview_look:
                 if self._mixer_preview_playing:
-                    t = self._mixer_preview_play_time + (
+                    t = self._mixer_preview_transport_time + (
                         time.monotonic() - self._mixer_preview_start_mono)
                 else:
-                    t = self._mixer_preview_play_time
+                    t = self._mixer_preview_transport_time
                 return self._mixer_preview_look, t
             return None, 0.0
 

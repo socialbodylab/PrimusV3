@@ -1,1 +1,1 @@
-{"output_types": ["short_strip", "long_strip"], "devices": [{"ip": "192.168.1.6", "name": "Primus1"}]}
+{"output_types": ["short_strip", "grid"], "devices": [{"ip": "192.168.1.6", "name": "Primus1"}]}
