@@ -21,6 +21,8 @@ ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
 ARTNET_OPCODE_IP_CONFIG = 0x8200
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
+NODE_CAPS_PREFIX = "PV3CAP1"
+NODE_CAPS_FEATURE_PREFIX = "F:"
 
 FPS_LISTEN_PORT = 6455
 FPS_MAGIC = b"PFP"
@@ -185,7 +187,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
     """Send ArtPoll and collect ArtPollReply responses.
 
     known_ips: list of IP strings to unicast to in addition to broadcast.
-    Returns list of dicts: {ip, short_name, long_name, num_ports, universes}
+    Returns list of dicts: {ip, short_name, long_name, node_report, num_ports, universes}
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -226,6 +228,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
             ip = "{}.{}.{}.{}".format(raw[10], raw[11], raw[12], raw[13])
             short_name = raw[26:44].split(b'\x00')[0].decode("ascii", errors="replace")
             long_name = raw[44:108].split(b'\x00')[0].decode("ascii", errors="replace")
+            node_report = raw[108:172].split(b'\x00')[0].decode("ascii", errors="replace")
             num_ports = raw[173] if len(raw) > 173 else 0
             universes = []
             for i in range(min(num_ports, 4)):
@@ -236,6 +239,8 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
                 "ip": ip,
                 "short_name": short_name,
                 "long_name": long_name,
+                "node_report": node_report,
+                "capabilities": parse_node_capabilities(node_report, short_name, long_name),
                 "num_ports": num_ports,
                 "universes": universes,
             }
@@ -259,8 +264,102 @@ def _match_output_type(display_name, output_types):
     return None
 
 
-def parse_node_outputs(long_name, universes, output_types):
-    """Parse ArtPollReply long_name to extract output configuration."""
+def _node_capability_parts(node_report):
+    if not node_report:
+        return []
+
+    parts = [part.strip() for part in node_report.split("|") if part.strip()]
+    try:
+        caps_start = parts.index(NODE_CAPS_PREFIX)
+    except ValueError:
+        return []
+    return parts[caps_start + 1:]
+
+
+def parse_node_capabilities(node_report, short_name="", long_name=""):
+    caps = {
+        "profile": "generic",
+        "known": False,
+        "rename": False,
+        "hello": False,
+        "ip_config": False,
+        "output_config": False,
+    }
+    name_blob = f"{short_name} {long_name}".lower()
+    parts = _node_capability_parts(node_report)
+
+    if parts:
+        caps["profile"] = "pv3cap1"
+        saw_feature_token = False
+        for part in parts:
+            if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
+                continue
+            saw_feature_token = True
+            features = part[len(NODE_CAPS_FEATURE_PREFIX):]
+            caps["rename"] = "R" in features
+            caps["hello"] = "H" in features
+            caps["ip_config"] = "I" in features
+            caps["output_config"] = "O" in features
+        if saw_feature_token:
+            caps["known"] = True
+            return caps
+        if "primusv3" in name_blob:
+            caps.update({
+                "profile": "pv3cap1-legacy",
+                "rename": True,
+                "hello": True,
+                "ip_config": True,
+                "output_config": True,
+            })
+            return caps
+        return caps
+
+    if "primusv3" in name_blob:
+        caps.update({
+            "profile": "primus-legacy",
+            "rename": True,
+            "hello": True,
+            "ip_config": True,
+            "output_config": True,
+        })
+    return caps
+
+
+def _parse_capability_outputs(node_report, type_keys):
+    if not node_report or not type_keys:
+        return []
+
+    parts = _node_capability_parts(node_report)
+
+    outputs = []
+    for part in parts:
+        match = re.fullmatch(r"(\d+):(\d+):(\d+)", part)
+        if not match:
+            continue
+        port_index, type_id, universe = (int(value) for value in match.groups())
+        if 0 <= type_id < len(type_keys):
+            type_key = type_keys[type_id]
+            if type_key != "none":
+                outputs.append({
+                    "name": f"A{port_index}",
+                    "type": type_key,
+                    "universe": universe,
+                })
+
+    outputs.sort(key=lambda output: int(output["name"][1:]))
+    return outputs
+
+
+def parse_node_outputs(long_name, universes, output_types, node_report="", type_keys=None):
+    """Parse ArtPollReply output configuration.
+
+    Preferred source is a versioned capability tag in Node Report. Legacy
+    firmware falls back to parsing the human-readable Long Name.
+    """
+    outputs = _parse_capability_outputs(node_report, type_keys or list(output_types.keys()))
+    if outputs:
+        return outputs
+
     outputs = []
     parts = long_name.split("|")
     if len(parts) >= 2:

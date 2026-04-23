@@ -158,6 +158,27 @@ class CueList:
             self._blackout_fade_start = time.monotonic()
             self._blackout_fade_duration = fade_time
 
+    def release_output(self, preserve_selection=True):
+        """Clear live controller ownership and runtime state.
+
+        preserve_selection=True keeps the cue list position so GO can continue
+        from the same point later, while clearing the live look/transition state.
+        """
+        with self.lock:
+            self.playing = False
+            self.play_start_time = 0.0
+            self._active_look_id = None
+            self._active_device_ips = None
+            self._prev_look_id = None
+            self._transition_start = 0.0
+            self._transition_duration = 0.0
+            self._auto_follow_time = 0.0
+            self._blackout = False
+            self._blackout_fade_start = 0.0
+            self._blackout_fade_duration = 0.0
+            if not preserve_selection:
+                self.current_index = -1
+
     # ------------------------------------------------------------------
     #  Transport
     # ------------------------------------------------------------------
@@ -189,12 +210,7 @@ class CueList:
 
     def stop(self):
         """Stop playback."""
-        with self.lock:
-            self.playing = False
-            self._auto_follow_time = 0.0
-            self._prev_look_id = None
-            self._transition_start = 0.0
-            self._transition_duration = 0.0
+        self.release_output(preserve_selection=True)
 
     def go_to_cue(self, number, device_groups=None):
         """Jump to a specific cue number. Returns the cue or None."""

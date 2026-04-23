@@ -2,7 +2,7 @@
 
 ## What is this project?
 
-PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Python sender drives ESP32-S3 receiver nodes over Art-Net (UDP 6454). The sender has a built-in web UI, clip/look workflow, and effects engine. The receivers drive NeoPixels via NeoPXL8 on 3 physical outputs.
+PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Python sender drives ESP32-S3 receiver nodes over Art-Net (UDP 6454). The sender has a built-in web UI, clip/look workflow, and effects engine. The current V3.1 receivers drive NeoPixels via NeoPXL8 FeatherWing outputs 6 and 7 on 2 physical outputs.
 
 ## Active version: V3.1
 
@@ -18,7 +18,7 @@ V3.1 is the active version under `V3_1/`. The original V3.0 single-file sender (
 - `clips.py` — Clip CRUD, preview computation. Clips stored as JSON in `V3_1/sender/clips/`.
 - `mixer.py` — Look Mixer logic, crossfade between looks.
 - `controller.py` — Cue Controller for sequential look playback with transitions.
-- `artnet.py` — Art-Net protocol: ArtPoll, ArtPollReply, ArtDmx, ArtAddress, ArtOutputConfig, ArtIPConfig.
+- `artnet.py` — Art-Net protocol: ArtPoll, ArtPollReply, ArtDmx, ArtAddress, ArtOutputConfig, ArtIPConfig, and capability-tag parsing from ArtPollReply Node Report.
 - `web/` — Static web UI files (Alpine.js SPA):
   - `web/index.html` — Single-page app shell
   - `web/js/` — Alpine.js components (look-mixer.js, etc.)
@@ -47,7 +47,7 @@ V3.1 is the active version under `V3_1/`. The original V3.0 single-file sender (
 ## V3.1 Concepts
 
 - **Clip**: A saved effect configuration (effect, colors, speed, playback mode) for a specific output type. Stored as JSON.
-- **Look**: A set of 3 output slots, each with a clip assignment. Defines what all devices display simultaneously.
+- **Look**: A set of 2 active output slots, each with a clip assignment. Defines what all devices display simultaneously.
 - **Playback sources**: `designer` (live editing), `mixer` (crossfade between looks), `controller` (cue-driven sequential playback), `idle` (black/off).
 - **Output types**: `short_strip` (30px), `long_strip` (72px), `grid` (8x8=64px).
 
@@ -58,19 +58,22 @@ The sender and receiver must agree on:
 - **Pixel counts**: `OUTPUT_TYPES` dict (Python, in state.py) = `OUTPUT_TYPE_TABLE` (C++)
 - **Custom opcode 0x8100**: ArtOutputConfig for runtime output type changes
 - **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration
+- **Discovery capability tag**: `PV3CAP1|...|F:RIOH` in ArtPollReply Node Report
+- **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config
 - **FPS telemetry**: 7-byte `PFP` packets on UDP 6455
 
 ## How to build and run
 
 **V3.1 Sender**: `python3 V3_1/sender/run.py` — opens web UI at http://localhost:8080
-**V3.0 Sender**: `python3 sender/led_controller.py` — opens web UI at http://localhost:8080
-**Firmware**: `cd Arduino && ./upload.sh` — auto-detects ESP32-S3 port, compiles, uploads
+**V3.0 Sender**: `python3 V3_0/sender/led_controller.py` — opens web UI at http://localhost:8080
+**Firmware**: `cd V3_1/Arduino && ./upload.sh` — auto-detects ESP32-S3 port, compiles, uploads
 
 ## Conventions
 
 - No external Python dependencies. Stdlib only.
 - Table-driven output types on both sides. Never hardcode pixel counts.
 - V3.1 web UI is static files under `V3_1/sender/web/` (Alpine.js, no build step).
+- Device-control UI is capability-aware: rename, hello, IP config, and output config are enabled from discovery capabilities, with legacy Primus fallback for older firmware.
 - Grid layout is always serpentine (even rows L->R, odd rows R->L).
 - RGB color order, 3 bytes per pixel.
 - Custom Art-Net opcodes use 0x8000+ range.
@@ -93,7 +96,7 @@ none, solid, pulse, linear, constrainbow, rainbow, knight_rider, chase, radial (
 ## Hardware
 
 - ESP32-S3 Reverse TFT Feather (Adafruit)
-- NeoPXL8 level-shifted outputs on GPIO 16/17/18 (ports A2/A1/A0)
+- NeoPXL8 FeatherWing fixed outputs 6 and 7 on GPIO14/GPIO15 (A4/A3)
 - 240x135 ST7789 TFT display
 - D0 button: cycle screens, D1 button: toggle test mode
-- Max 72 LEDs per port, 3 ports = 216 LEDs max per node
+- Max 72 LEDs per port, 2 active ports = 144 LEDs max per node

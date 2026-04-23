@@ -63,10 +63,11 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
 #define NUM_OUTPUT_TYPES (sizeof(OUTPUT_TYPE_TABLE) / sizeof(OUTPUT_TYPE_TABLE[0]))
 
 // Convenience accessors
-inline const char*  typeName(OutputType t)       { return OUTPUT_TYPE_TABLE[t].name; }
-inline uint16_t     typePixels(OutputType t)      { return OUTPUT_TYPE_TABLE[t].pixels; }
-inline uint8_t      typeBpp(OutputType t)         { return OUTPUT_TYPE_TABLE[t].bytesPerPixel; }
-inline LayoutType   typeLayout(OutputType t)      { return OUTPUT_TYPE_TABLE[t].layout; }
+inline bool         isValidOutputType(OutputType t) { return (uint8_t)t < NUM_OUTPUT_TYPES; }
+inline const char*  typeName(OutputType t)       { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].name : "Off"; }
+inline uint16_t     typePixels(OutputType t)      { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].pixels : 0; }
+inline uint8_t      typeBpp(OutputType t)         { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].bytesPerPixel : 0; }
+inline LayoutType   typeLayout(OutputType t)      { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].layout : LAYOUT_NONE; }
 
 // =====================================================================
 //  Per-Output Configuration
@@ -158,6 +159,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // Device identity — reported in ArtPollReply
 #define DEVICE_SHORT_NAME  "PrimusV3"          // max 17 chars + null
 #define DEVICE_LONG_NAME   "PrimusV3 LED Node"  // max 63 chars + null
+#define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
 #define FIRMWARE_VERSION_L 0
 #define OEM_CODE           0xFFFF                // generic / unregistered

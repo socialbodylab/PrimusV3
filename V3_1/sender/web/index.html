@@ -24,10 +24,25 @@
         </template>
     </div>
     <div class="navbar-status" x-data>
+        <div class="playback-chip"
+             :class="$store.app.playbackClass()"
+             :title="$store.app.playback.detail">
+            <span class="playback-chip-label">Output</span>
+            <span class="playback-chip-value" x-text="$store.app.playback.label"></span>
+            <span class="playback-chip-meta" x-text="$store.app.playback.summary"></span>
+        </div>
         <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
-        <span x-text="$store.conn.devices.filter(d=>d.connected).length + '/' + $store.conn.devices.length + ' devices'"></span>
+        <span x-text="$store.app.connectedDeviceSummary"></span>
     </div>
 </nav>
+
+<div class="notice-banner" x-data x-show="$store.app.notice" x-cloak>
+    <div class="notice-pill"
+         :class="'notice-' + ($store.app.notice?.level || 'info')">
+        <span class="notice-text" x-text="$store.app.notice?.message"></span>
+        <button class="notice-close" @click="$store.app.clearNotice()">&times;</button>
+    </div>
+</div>
 
 <!-- ==================== MAIN ==================== -->
 <div class="main-content" x-data>
@@ -48,7 +63,7 @@
                     <template x-if="$store.conn.renamingDevice !== di">
                         <span class="device-name" x-text="dev.name"
                               @dblclick="$store.conn.startRename(di)"
-                              title="Double-click to rename"></span>
+                              :title="$store.conn.renameHint(dev)"></span>
                     </template>
                     <template x-if="$store.conn.renamingDevice === di">
                         <input class="device-rename-input" type="text" maxlength="17"
@@ -64,9 +79,13 @@
                                 @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
                                 x-text="dev.connected ? 'Off' : 'On'"></button>
                         <button class="btn btn-sm" x-show="dev.connected"
+                            :disabled="!$store.conn.canHelloDevice(dev)"
+                            :title="$store.conn.helloHint(dev)"
                                 @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
                         <button class="btn btn-sm"
                                 :class="{ 'btn-primary': $store.conn.ipConfigDevice === di }"
+                                :disabled="!$store.conn.canConfigureIp(dev)"
+                                :title="$store.conn.ipConfigHint(dev)"
                                 @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)">IP</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
                     </div>
@@ -76,6 +95,18 @@
                     <span class="device-fps"
                           x-show="dev.connected"
                           x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
+                </div>
+                <div class="device-capability-row">
+                    <span class="device-capability-status"
+                          :class="$store.conn.capabilityStatusClass(dev)"
+                          x-text="$store.conn.capabilityStatusLabel(dev)"></span>
+                    <div class="device-capability-pills">
+                        <template x-for="item in $store.conn.capabilityItems(dev)" :key="item.key">
+                            <span class="capability-pill"
+                                  :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
+                                  x-text="item.label"></span>
+                        </template>
+                    </div>
                 </div>
                 <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
                     <div class="form-group compact">
@@ -179,6 +210,11 @@
             <span x-text="$store.conn.discovering ? 'Scanning...' : 'Discover Devices'"></span>
         </button>
 
+        <div class="sidebar-note" x-show="$store.app.mode === 'mixer'">
+            <span class="sidebar-note-label">Preview target</span>
+            <span class="sidebar-note-value" x-text="$store.app.mixerPreviewTarget.label"></span>
+        </div>
+
         <div class="mt-2" style="display:flex;gap:4px">
             <input type="text" class="input" placeholder="IP address"
                    x-model="$store.conn.manualIp"
@@ -196,6 +232,18 @@
                     <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
                         <div class="device-name" x-text="node.short_name || node.ip"></div>
                         <div class="device-ip" x-text="node.ip"></div>
+                        <div class="device-capability-row">
+                            <span class="device-capability-status"
+                                  :class="$store.conn.capabilityStatusClass(node)"
+                                  x-text="$store.conn.capabilityStatusLabel(node)"></span>
+                            <div class="device-capability-pills">
+                                <template x-for="item in $store.conn.capabilityItems(node)" :key="item.key">
+                                    <span class="capability-pill"
+                                          :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
+                                          x-text="item.label"></span>
+                                </template>
+                            </div>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -216,6 +264,18 @@
                 <button class="btn btn-primary" @click="openSave()">Save</button>
             </div>
             <div class="btn-group" x-show="subMode === 'designer'">
+            </div>
+        </div>
+
+        <div class="panel-owner-status" :class="mixerPanelStateClass()">
+            <div class="panel-owner-copy">
+                <div class="panel-owner-eyebrow">Output ownership</div>
+                <div class="panel-owner-title" x-text="mixerPanelTitle()"></div>
+                <div class="panel-owner-detail" x-text="mixerPanelDetail()"></div>
+            </div>
+            <div class="panel-owner-summary">
+                <span class="panel-owner-source" x-text="$store.app.playback.label"></span>
+                <span class="panel-owner-target" x-text="$store.app.playback.target_label"></span>
             </div>
         </div>
 
@@ -425,6 +485,8 @@
 
         <!-- ═══ TIMELINE SUB-MODE ═══ -->
         <div x-show="subMode === 'timeline'">
+        <template x-if="look">
+        <div>
 
         <!-- Look settings -->
         <div class="flex gap-4 mb-4" x-show="look">
@@ -578,7 +640,7 @@
                                     @mouseenter="startClipPreview(clip, $el)"
                                     @mouseleave="stopClipPreview()">
                                 <div class="clip-palette-thumb"
-                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'}"></div>
+                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'"></div>
                                 <canvas class="clip-palette-preview-canvas"
                                         x-show="_clipPreviewId === clip.id"
                                         :style="clip.output_type === 'grid' ? 'width:100%;aspect-ratio:1' : 'width:100%;height:16px'">
@@ -709,6 +771,8 @@
                 </div>
             </div>
         </div>
+        </div>
+        </template>
         </div><!-- end timeline sub-mode -->
     </div>
 
@@ -723,6 +787,18 @@
                 <input type="range" class="fade-slider"
                        x-model.number="defaultFadeTime" min="0" max="5" step="0.25">
                 <span class="text-muted text-sm" style="min-width:28px;text-align:right" x-text="defaultFadeTime + 's'"></span>
+            </div>
+        </div>
+
+        <div class="panel-owner-status" :class="controllerPanelStateClass()">
+            <div class="panel-owner-copy">
+                <div class="panel-owner-eyebrow">Output ownership</div>
+                <div class="panel-owner-title" x-text="controllerPanelTitle()"></div>
+                <div class="panel-owner-detail" x-text="controllerPanelDetail()"></div>
+            </div>
+            <div class="panel-owner-summary">
+                <span class="panel-owner-source" x-text="$store.app.playback.label"></span>
+                <span class="panel-owner-target" x-text="$store.app.playback.target_label"></span>
             </div>
         </div>
 
@@ -884,6 +960,7 @@
                     </div>
                     <p class="text-muted text-sm" x-show="devices.length === 0">No devices found.</p>
                 </div>
+                <div class="target-summary" x-text="addTargetSummary()"></div>
                 <div class="form-group">
                     <label class="flex items-center gap-2" style="cursor:pointer">
                         <input type="checkbox" x-model="addAutoFollow">

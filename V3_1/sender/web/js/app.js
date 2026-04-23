@@ -9,9 +9,20 @@ function api(method, path, body) {
         opts.headers["Content-Type"] = "application/json";
         opts.body = JSON.stringify(body);
     }
-    return fetch(path, opts).then(r => {
-        if (!r.ok) throw new Error(`API ${r.status}: ${r.statusText}`);
-        return r.json();
+    return fetch(path, opts).then(async r => {
+        const text = await r.text();
+        let parsed = null;
+        if (text) {
+            try {
+                parsed = JSON.parse(text);
+            } catch {
+                parsed = null;
+            }
+        }
+        if (!r.ok) {
+            throw new Error(parsed?.error || `API ${r.status}: ${r.statusText}`);
+        }
+        return parsed;
     });
 }
 
@@ -40,6 +51,71 @@ document.addEventListener("alpine:init", () => {
         state: null,
         polling: null,
         mixerPreviewDevices: null,
+        notice: null,
+        _noticeTimer: null,
+
+        get playback() {
+            return this.state?.playback || {
+                source: "idle",
+                label: "Idle",
+                activity: "No output",
+                target_label: "No output",
+                summary: "No output",
+                detail: "No live source currently owns output.",
+            };
+        },
+
+        get connectedDeviceSummary() {
+            const devices = this.state?.devices || [];
+            const connected = devices.filter(d => d.connected).length;
+            return connected + "/" + devices.length + " devices";
+        },
+
+        get mixerPreviewTarget() {
+            const devices = this.state?.devices || [];
+            const total = devices.length;
+            const connectedTotal = devices.filter(d => d.connected).length;
+            if (!total) {
+                return {
+                    scope: 'none',
+                    selectedCount: 0,
+                    connectedCount: 0,
+                    label: 'No devices available',
+                };
+            }
+            if (!this.mixerPreviewDevices) {
+                return {
+                    scope: 'all',
+                    selectedCount: total,
+                    connectedCount: connectedTotal,
+                    label: connectedTotal === total
+                        ? 'All devices'
+                        : 'All devices (' + connectedTotal + '/' + total + ' connected)',
+                };
+            }
+            const selected = this.mixerPreviewDevices
+                .filter(i => i >= 0 && i < total);
+            const connected = selected.filter(i => devices[i]?.connected).length;
+            if (!selected.length) {
+                return {
+                    scope: 'none',
+                    selectedCount: 0,
+                    connectedCount: 0,
+                    label: 'No preview targets selected',
+                };
+            }
+            const base = selected.length === 1
+                ? '1 selected device'
+                : selected.length + ' selected devices';
+            return {
+                scope: 'selected',
+                selectedCount: selected.length,
+                connectedCount: connected,
+                label: connected === selected.length
+                    ? base
+                    : base + ' (' + connected + '/' + selected.length + ' connected)',
+            };
+        },
 
         init() {
             this.fetchState();
@@ -56,6 +132,33 @@ document.addEventListener("alpine:init", () => {
                 this.state = await api("GET", "/api/state");
                 this._drawPreviews();
             } catch (e) { /* ignore */ }
+        },
+
+        showNotice(message, level = 'info', timeout = 3200) {
+            if (this._noticeTimer) {
+                clearTimeout(this._noticeTimer);
+                this._noticeTimer = null;
+            }
+            this.notice = { message, level };
+            if (timeout > 0) {
+                this._noticeTimer = setTimeout(() => {
+                    this.notice = null;
+                    this._noticeTimer = null;
+                }, timeout);
+            }
+        },
+
+        clearNotice() {
+            if (this._noticeTimer) {
+                clearTimeout(this._noticeTimer);
+                this._noticeTimer = null;
+            }
+            this.notice = null;
+        },
+
+        showApiError(action, error) {
+            const detail = error?.message ? ': ' + error.message : '';
+            this.showNotice(action + detail, 'error', 5000);
         },
 
         _drawPreviews() {
@@ -103,6 +206,19 @@ document.addEventListener("alpine:init", () => {
             this.mode = m;
         },
 
+        playbackClass() {
+            switch (this.playback.source) {
+            case 'designer':
+                return 'playback-chip-designer';
+            case 'mixer':
+                return 'playback-chip-mixer';
+            case 'controller':
+                return 'playback-chip-controller';
+            default:
+                return 'playback-chip-idle';
+            }
+        },
+
         toggleMixerDevice(di) {
             if (!this.mixerPreviewDevices) {
                 const count = (this.state?.devices || []).length;
@@ -113,6 +229,7 @@ document.addEventListener("alpine:init", () => {
             } else {
                 this.mixerPreviewDevices = [...this.mixerPreviewDevices, di];
             }
+            this.showNotice('Mixer preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
         },
     });
 
@@ -144,6 +261,62 @@ document.addEventListener("alpine:init", () => {
             return this.devices.some(d => d.connected);
         },
 
+        canRenameDevice(dev) {
+            return !!dev?.capabilities?.rename;
+        },
+
+        canHelloDevice(dev) {
+            return !!dev?.capabilities?.hello;
+        },
+
+        canConfigureIp(dev) {
+            return !!dev?.capabilities?.ip_config;
+        },
+
+        capabilityItems(entity) {
+            const caps = entity?.capabilities || {};
+            return [
+                { key: 'rename', label: 'Rename', supported: !!caps.rename },
+                { key: 'hello', label: 'Hello', supported: !!caps.hello },
+                { key: 'ip_config', label: 'IP', supported: !!caps.ip_config },
+                { key: 'output_config', label: 'Outputs', supported: !!caps.output_config },
+            ];
+        },
+
+        capabilityStatusLabel(entity) {
+            const caps = entity?.capabilities || {};
+            const supportedCount = this.capabilityItems(entity).filter(item => item.supported).length;
+            if (caps.known) return 'Advertised';
+            if (supportedCount > 0) return 'Legacy fallback';
+            return 'Not advertised';
+        },
+
+        capabilityStatusClass(entity) {
+            const caps = entity?.capabilities || {};
+            const supportedCount = this.capabilityItems(entity).filter(item => item.supported).length;
+            if (caps.known) return 'device-capability-status-advertised';
+            if (supportedCount > 0) return 'device-capability-status-legacy';
+            return 'device-capability-status-missing';
+        },
+
+        renameHint(dev) {
+            return this.canRenameDevice(dev)
+                ? 'Double-click to rename'
+                : 'Remote rename is not advertised for this node';
+        },
+
+        helloHint(dev) {
+            return this.canHelloDevice(dev)
+                ? 'Send identify flash'
+                : 'Identify flash is not advertised for this node';
+        },
+
+        ipConfigHint(dev) {
+            return this.canConfigureIp(dev)
+                ? 'Configure static or DHCP IP settings'
+                : 'Remote IP configuration is not advertised for this node';
+        },
+
         async connect(di) { await api("POST", "/api/connect", { device: di }); },
         async disconnect(di) { await api("POST", "/api/disconnect", { device: di }); },
         async connectAll() { await api("POST", "/api/connect_all"); },
@@ -153,21 +326,51 @@ document.addEventListener("alpine:init", () => {
             this.discovering = true;
             try {
                 this.discovered = await api("POST", "/api/discover");
+                const count = this.discovered.length;
+                Alpine.store("app").showNotice(
+                    count
+                        ? 'Discovery found ' + count + ' device' + (count === 1 ? '' : 's') + '.'
+                        : 'Discovery finished with no new devices found.',
+                    count ? 'success' : 'info'
+                );
+            } catch (e) {
+                Alpine.store("app").showApiError('Discovery failed', e);
             } finally {
                 this.discovering = false;
             }
         },
 
         async addDiscovered(node) {
-            await api("POST", "/api/add_discovered", node);
-            this.discovered = this.discovered.filter(n => n.ip !== node.ip);
+            try {
+                const result = await api("POST", "/api/add_discovered", node);
+                this.discovered = this.discovered.filter(n => n.ip !== node.ip);
+                const added = result?.status === 'added';
+                Alpine.store("app").showNotice(
+                    added
+                        ? 'Added ' + (node.short_name || node.ip) + '.'
+                        : (node.short_name || node.ip) + ' is already in the device list.',
+                    added ? 'success' : 'info'
+                );
+            } catch (e) {
+                Alpine.store("app").showApiError('Could not add discovered device', e);
+            }
         },
 
         async addManualIp() {
             const ip = this.manualIp.trim();
             if (!ip) return;
-            await api("POST", "/api/add_manual", { ip });
-            this.manualIp = "";
+            try {
+                const result = await api("POST", "/api/add_manual", { ip });
+                Alpine.store("app").showNotice(
+                    result?.status === 'added'
+                        ? 'Added device at ' + ip + '.'
+                        : 'Device ' + ip + ' is already in the list.',
+                    result?.status === 'added' ? 'success' : 'info'
+                );
+                this.manualIp = "";
+            } catch (e) {
+                Alpine.store("app").showApiError('Could not add manual device', e);
+            }
         },
 
         async removeDevice(di) {
@@ -175,14 +378,26 @@ document.addEventListener("alpine:init", () => {
         },
 
         startRename(di) {
+            const dev = this.devices[di];
+            if (!this.canRenameDevice(dev)) {
+                Alpine.store("app").showNotice(this.renameHint(dev), 'info');
+                return;
+            }
             this.renamingDevice = di;
-            this.renameValue = this.devices[di]?.name || "";
+            this.renameValue = dev?.name || "";
         },
 
         async finishRename(di) {
             const name = this.renameValue.trim();
-            if (name && name !== this.devices[di]?.name) {
-                await api("POST", "/api/rename_node", { device: di, name });
+            const oldName = this.devices[di]?.name || 'device';
+            if (name && name !== oldName) {
+                try {
+                    await api("POST", "/api/rename_node", { device: di, name });
+                    Alpine.store("app").showNotice('Renamed ' + oldName + ' to ' + name + '.', 'success');
+                } catch (e) {
+                    Alpine.store("app").showApiError('Rename failed', e);
+                    return;
+                }
             }
             this.renamingDevice = -1;
             this.renameValue = "";
@@ -194,13 +409,22 @@ document.addEventListener("alpine:init", () => {
         },
 
         async renameDevice(di, name) {
-            await api("POST", "/api/rename_node", { device: di, name });
+            try {
+                await api("POST", "/api/rename_node", { device: di, name });
+                Alpine.store("app").showNotice('Renamed device to ' + name + '.', 'success');
+            } catch (e) {
+                Alpine.store("app").showApiError('Rename failed', e);
+            }
         },
 
         // -- Static IP config --
         openIpConfig(di) {
-            this.ipConfigDevice = di;
             const dev = this.devices[di];
+            if (!this.canConfigureIp(dev)) {
+                Alpine.store("app").showNotice(this.ipConfigHint(dev), 'info');
+                return;
+            }
+            this.ipConfigDevice = di;
             this.ipConfigIp = dev?.ip || "";
             this.ipConfigGateway = dev?.ip ? dev.ip.replace(/\.\d+$/, ".1") : "";
             this.ipConfigSubnet = "255.255.255.0";
@@ -214,14 +438,29 @@ document.addEventListener("alpine:init", () => {
             const ip = this.ipConfigIp.trim();
             const gw = this.ipConfigGateway.trim();
             const sn = this.ipConfigSubnet.trim();
-            if (!ip || !gw || !sn) return;
-            await api("POST", "/api/set_device_ip", { device: di, ip: ip, gateway: gw, subnet: sn });
-            this.ipConfigDevice = -1;
+            const name = this.devices[di]?.name || 'device';
+            if (!ip || !gw || !sn) {
+                Alpine.store("app").showNotice('Enter IP, gateway, and subnet before applying a static IP.', 'warn');
+                return;
+            }
+            try {
+                await api("POST", "/api/set_device_ip", { device: di, ip: ip, gateway: gw, subnet: sn });
+                Alpine.store("app").showNotice(name + ' is rebooting with static IP ' + ip + '.', 'warn', 4500);
+                this.ipConfigDevice = -1;
+            } catch (e) {
+                Alpine.store("app").showApiError('Static IP update failed', e);
+            }
         },
 
         async revertDhcp(di) {
-            await api("POST", "/api/revert_device_dhcp", { device: di });
-            this.ipConfigDevice = -1;
+            const name = this.devices[di]?.name || 'device';
+            try {
+                await api("POST", "/api/revert_device_dhcp", { device: di });
+                Alpine.store("app").showNotice(name + ' is rebooting and returning to DHCP.', 'warn', 4500);
+                this.ipConfigDevice = -1;
+            } catch (e) {
+                Alpine.store("app").showApiError('DHCP revert failed', e);
+            }
         },
 
         // -- Device groups --

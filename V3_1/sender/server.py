@@ -12,7 +12,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import clips
 import mixer
 from artnet import discover_artnet_nodes
-from state import OUTPUT_TYPES
+from state import OUTPUT_TYPES, ControllerState
 
 
 _WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -27,6 +27,14 @@ def _safe_id(value):
 class Handler(BaseHTTPRequestHandler):
     controller_state = None
     cue_list = None
+
+    def _leave_controller_runtime(self, preserve_selection=True):
+        if self.cue_list is not None:
+            self.cue_list.release_output(preserve_selection=preserve_selection)
+
+    def _json_error(self, code, message):
+        body = json.dumps({"error": message}, separators=(",", ":")).encode()
+        self._respond(code, "application/json", body)
 
     # ------------------------------------------------------------------
     #  GET
@@ -165,12 +173,23 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/rename_node":
             di = data.get("device", -1)
             new_name = str(data.get("name", ""))[:17]
-            if new_name:
-                self.controller_state.rename_device(di, new_name)
-            self._ok()
+            if not new_name:
+                self._json_error(400, "name required")
+                return
+            result = self.controller_state.rename_device(di, new_name)
+            if result.get("ok"):
+                self._ok()
+            else:
+                code = 400 if result.get("error") == "invalid device index" else 409
+                self._json_error(code, result.get("error", "rename failed"))
 
         elif path == "/api/hello_device":
             di = data.get("device", -1)
+            status = self.controller_state.device_capability_status(di, "hello")
+            if not status.get("ok"):
+                code = 400 if status.get("error") == "invalid device index" else 409
+                self._json_error(code, status.get("error", "identify failed"))
+                return
             threading.Thread(
                 target=self.controller_state.hello_device,
                 args=(di,), daemon=True).start()
@@ -181,14 +200,24 @@ class Handler(BaseHTTPRequestHandler):
             static_ip = str(data.get("ip", ""))
             gateway = str(data.get("gateway", ""))
             subnet = str(data.get("subnet", ""))
-            if static_ip and gateway and subnet:
-                self.controller_state.set_device_ip(di, static_ip, gateway, subnet)
-            self._ok()
+            if not (static_ip and gateway and subnet):
+                self._json_error(400, "ip, gateway, and subnet required")
+                return
+            result = self.controller_state.set_device_ip(di, static_ip, gateway, subnet)
+            if result.get("ok"):
+                self._ok()
+            else:
+                code = 400 if result.get("error") == "invalid device index" else 409
+                self._json_error(code, result.get("error", "IP update failed"))
 
         elif path == "/api/revert_device_dhcp":
             di = data.get("device", -1)
-            self.controller_state.revert_device_dhcp(di)
-            self._ok()
+            result = self.controller_state.revert_device_dhcp(di)
+            if result.get("ok"):
+                self._ok()
+            else:
+                code = 400 if result.get("error") == "invalid device index" else 409
+                self._json_error(code, result.get("error", "DHCP revert failed"))
 
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
@@ -228,20 +257,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response(self.cue_list.get_json())
 
         elif path == "/api/cues/go":
-            self.controller_state.set_playback_source("controller")
             groups = self.controller_state.get_device_groups()
             cue = self.cue_list.go(device_groups=groups)
+            if cue is not None:
+                self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
             self._json_response({"cue": cue})
 
         elif path == "/api/cues/stop":
-            self.cue_list.stop()
+            self._leave_controller_runtime(preserve_selection=True)
+            self.controller_state.set_playback_source(ControllerState.SOURCE_IDLE)
             self._ok()
 
         elif path == "/api/cues/goto":
             number = data.get("number", 1)
-            self.controller_state.set_playback_source("controller")
             groups = self.controller_state.get_device_groups()
             cue = self.cue_list.go_to_cue(number, device_groups=groups)
+            if cue is not None:
+                self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
             self._json_response({"cue": cue})
 
         # -- Controller routes (control panel) --
@@ -255,8 +287,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(400, "application/json",
                               b'{"error":"look_id required"}')
             else:
-                self.controller_state.set_playback_source("controller")
                 ok = self.cue_list.activate_look(look_id, fade_time)
+                if ok:
+                    self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
                 self._json_response({"ok": ok})
 
         elif path == "/api/controller/blackout":
@@ -265,6 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 fade_time = 0.0
             self.cue_list.blackout(fade_time)
+            self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
             self._ok()
 
         elif path == "/api/mixer/frame":
@@ -296,6 +330,7 @@ class Handler(BaseHTTPRequestHandler):
             # Start previewing a look on connected devices
             look = data
             if look and look.get("tracks"):
+                self._leave_controller_runtime(preserve_selection=True)
                 device_filter = look.pop("device_filter", None)
                 play_time = float(look.pop("play_time", 0.0))
                 playing = bool(look.pop("playing", False))
@@ -326,7 +361,9 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/set_playback_source":
             source = data.get("source", "idle")
-            if source in ("designer", "idle", "controller"):
+            if source in ControllerState.API_PLAYBACK_SOURCES:
+                if source != ControllerState.SOURCE_CONTROLLER:
+                    self._leave_controller_runtime(preserve_selection=True)
                 self.controller_state.set_playback_source(source)
                 self._ok()
             else:

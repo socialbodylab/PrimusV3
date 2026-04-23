@@ -230,7 +230,7 @@ void sendArtPollReply(IPAddress dest) {
   strncpy((char*)&reply[26], nameToUse, 17);
 
   // Long Name (bytes 44-107, max 64 chars)
-  // Build dynamically: "PrimusV3 LED Node | A0:Short Strip A1:Long Strip ..."
+  // Keep this human-readable for generic Art-Net tooling.
   char longBuf[64];
   int pos = snprintf(longBuf, sizeof(longBuf), "%s | ", DEVICE_LONG_NAME);
   for (uint8_t i = 0; i < NUM_OUTPUTS && pos < 60; i++) {
@@ -241,9 +241,20 @@ void sendArtPollReply(IPAddress dest) {
   strncpy((char*)&reply[44], longBuf, 63);
 
   // Node Report (bytes 108-171, max 64 chars)
+  // Append a versioned capability tag so the sender can discover output
+  // types and universe mapping without scraping the Long Name.
   char reportBuf[64];
-  snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] PrimusV3 OK — %.0f fps",
-           (int)packetCount, currentFps);
+  int reportPos = snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] PrimusV3 OK|%s",
+                           (int)packetCount, NODE_CAPS_PREFIX);
+  for (uint8_t i = 0; i < NUM_OUTPUTS && reportPos < (int)sizeof(reportBuf) - 1; i++) {
+    if (outputs[i].type == OUTPUT_OFF) continue;
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|%u:%u:%u", i, (uint8_t)outputs[i].type, outputs[i].universe);
+  }
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|F:RIOH");
+  }
   strncpy((char*)&reply[108], reportBuf, 63);
 
   // NumPorts (bytes 172-173, big-endian)
@@ -491,8 +502,12 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     if (outputs[o].universe != universe) continue;
 
     uint16_t needed = outputs[o].pixelCount * outputs[o].bytesPerPixel;
+    if (needed > MAX_BUFFER_SIZE) needed = MAX_BUFFER_SIZE;
     uint16_t toCopy = (dataLen < needed) ? dataLen : needed;
     memcpy(outputBuffers[o], pixelData, toCopy);
+    if (toCopy < needed) {
+      memset(outputBuffers[o] + toCopy, 0, needed - toCopy);
+    }
     outputDataReady[o] = true;
     outputActive[o]    = true;
     outputLastPacket[o] = now;
@@ -529,9 +544,14 @@ void applyBufferedData() {
     uint8_t  port  = outputs[o].pxl8Port;
     uint16_t count = outputs[o].pixelCount;
     uint8_t  bpp   = outputs[o].bytesPerPixel;
+    if (bpp != 3 && bpp != 4) {
+      outputDataReady[o] = false;
+      continue;
+    }
 
     for (uint16_t p = 0; p < count; p++) {
       uint16_t base = p * bpp;
+      if ((uint16_t)(base + bpp) > MAX_BUFFER_SIZE) break;
       if (bpp == 4) {
         setStripPixel(port, p, Adafruit_NeoPixel::Color(
           outputBuffers[o][base],     outputBuffers[o][base + 1],

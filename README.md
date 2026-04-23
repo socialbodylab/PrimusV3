@@ -9,12 +9,12 @@ WiFi-controlled LED lighting system for live performance costumes. A Python send
 │  Sender      │  ──────────────►  │  Receiver Node   │
 │  (Python)    │    port 6454      │  (ESP32-S3)      │
 │              │  ◄──────────────  │                  │
-│  Web UI      │   FPS telemetry   │  3× NeoPixel out │
+│  Web UI      │   FPS telemetry   │  2× NeoPixel out │
 │              │    port 6455      │  TFT display     │
 └──────────────┘                   └──────────────────┘
 ```
 
-The sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. Each node drives up to 3 NeoPixel outputs through level-shifted NeoPXL8.
+The sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. The current V3.1 receiver firmware drives 2 NeoPixel outputs through the NeoPXL8 FeatherWing fixed outputs 6 and 7.
 
 ## Versions
 
@@ -86,7 +86,7 @@ cd V3_1/Arduino
 ./upload.sh
 ```
 
-Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the board, installs libraries, compiles, and uploads. See `./upload.sh --help` for options.
+Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the board, installs libraries, compiles, and uploads.
 
 ```bash
 ./upload.sh --compile    # compile only, no upload
@@ -97,7 +97,7 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the 
 ## Hardware
 
 - **Board:** [Adafruit ESP32-S3 Reverse TFT Feather](https://www.adafruit.com/product/5691)
-- **LED driver:** NeoPXL8 (level-shifted, 3 outputs on GPIO 16/17/18 → A2/A1/A0)
+- **LED driver:** NeoPXL8 FeatherWing fixed outputs 6 and 7 on GPIO14/GPIO15 (A4/A3)
 - **Display:** Built-in 240×135 ST7789 TFT — shows device name, WiFi status, IP, RSSI, live FPS
 - **Buttons:** D0 cycles display screens, D1 toggles test mode
 
@@ -110,7 +110,7 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the 
 | Long Strip | 72 | Linear |
 | Grid 8×8 | 64 | Serpentine |
 
-Output types are configurable at runtime from the web UI — no reflashing needed. Each node supports up to 3 outputs (one per port), each independently assignable.
+Output types are configurable at runtime from the web UI — no reflashing needed. The current V3.1 receiver exposes 2 independently assignable outputs (A0 and A1).
 
 ## Effects
 
@@ -128,7 +128,7 @@ Output types are configurable at runtime from the web UI — no reflashing neede
 
 ## Network Protocol
 
-Standard Art-Net 4 over UDP, plus two custom extensions:
+Standard Art-Net 4 over UDP, plus custom extensions for output and IP configuration:
 
 | Function | Port | Opcode |
 |----------|------|--------|
@@ -136,7 +136,10 @@ Standard Art-Net 4 over UDP, plus two custom extensions:
 | Discovery (ArtPoll/Reply) | 6454 | 0x2000/0x2100 |
 | Device naming (ArtAddress) | 6454 | 0x6000 |
 | Output config (custom) | 6454 | 0x8100 |
+| Static IP config (custom) | 6454 | 0x8200 |
 | FPS telemetry (custom) | 6455 | — |
+
+Discovery also carries a PrimusV3 capability tag in ArtPollReply Node Report: `PV3CAP1|port:type_id:universe|F:RIOH`. The sender uses that to decide whether a node explicitly advertises rename, hello, IP-config, and output-config support, while still falling back to legacy Primus behavior for older firmware.
 
 Any Art-Net compatible software (TouchDesigner, MadMapper, etc.) can drive these nodes directly. See [API_REFERENCE.md](API_REFERENCE.md) for full protocol docs.
 

@@ -184,7 +184,10 @@ def _mixer_controller_loop(state, cue_list):
             else:
                 state.set_override_pixels(None)
         else:
-            state.set_override_pixels(None)
+            if is_blackout:
+                state.set_override_pixels(state.build_black_frame(), device_ips=device_ips)
+            else:
+                state.set_override_pixels(None)
         time.sleep(1.0 / max(1, state.fps))
 
 

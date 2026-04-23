@@ -56,6 +56,56 @@ document.addEventListener("alpine:init", () => {
             return Alpine.store("app").state?.look_output_types || [];
         },
 
+        get playbackInfo() {
+            return Alpine.store("app").playback;
+        },
+
+        mixerPanelStateClass() {
+            if (this.subMode === 'designer') {
+                return this.playbackInfo.source === 'designer'
+                    ? 'panel-owner-live'
+                    : 'panel-owner-idle';
+            }
+            if (this.previewing && this.playbackInfo.source === 'mixer') {
+                return 'panel-owner-live';
+            }
+            if (this.previewing || this.playbackInfo.source === 'mixer') {
+                return 'panel-owner-warn';
+            }
+            return 'panel-owner-idle';
+        },
+
+        mixerPanelTitle() {
+            if (this.subMode === 'designer') {
+                return this.playbackInfo.source === 'designer'
+                    ? 'Designer owns output'
+                    : 'Designer is editing only';
+            }
+            if (this.previewing && this.playbackInfo.source === 'mixer') {
+                return 'Timeline preview owns output';
+            }
+            if (this.previewing) {
+                return 'Timeline preview is armed';
+            }
+            return 'Timeline is editing only';
+        },
+
+        mixerPanelDetail() {
+            if (this.subMode === 'designer') {
+                if (this.playbackInfo.source === 'designer') {
+                    return 'Designer edits are live on ' + this.playbackInfo.target_label.toLowerCase() + '.';
+                }
+                return 'Designer changes are local while output is owned by ' + this.playbackInfo.label.toLowerCase() + '.';
+            }
+            if (this.previewing && this.playbackInfo.source === 'mixer') {
+                return 'Timeline preview is ' + this.playbackInfo.activity.toLowerCase() + ' on ' + this.playbackInfo.target_label.toLowerCase() + '.';
+            }
+            if (this.previewing) {
+                return 'Preview is enabled, but output is currently owned by ' + this.playbackInfo.label.toLowerCase() + '.';
+            }
+            return 'Enable Preview to put the timeline live. Output is currently owned by ' + this.playbackInfo.label.toLowerCase() + '.';
+        },
+
         // ── Designer getters ──
         get state() { return Alpine.store("app").state; },
         get designerLook() { return this.state?.look; },

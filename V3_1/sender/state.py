@@ -26,6 +26,20 @@ OUTPUT_TYPES = {
 }
 
 LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid"]
+DEFAULT_DEVICE_CAPABILITIES = {
+    "profile": "generic",
+    "known": False,
+    "rename": False,
+    "hello": False,
+    "ip_config": False,
+    "output_config": False,
+}
+CONTROL_CAPABILITY_LABELS = {
+    "rename": "remote rename",
+    "hello": "remote identify flash",
+    "ip_config": "remote IP configuration",
+    "output_config": "remote output configuration",
+}
 
 # ======================================================================
 #  DEFAULTS
@@ -84,6 +98,21 @@ def _load_output_types():
     except (OSError, json.JSONDecodeError, KeyError):
         pass
     return None
+
+
+def _normalize_device_capabilities(capabilities=None):
+    out = dict(DEFAULT_DEVICE_CAPABILITIES)
+    if isinstance(capabilities, dict):
+        for key in out:
+            if key in capabilities:
+                out[key] = capabilities[key]
+    out["profile"] = str(out["profile"] or "generic")
+    out["known"] = bool(out["known"])
+    out["rename"] = bool(out["rename"])
+    out["hello"] = bool(out["hello"])
+    out["ip_config"] = bool(out["ip_config"])
+    out["output_config"] = bool(out["output_config"])
+    return out
 
 
 def _save_devices(devices):
@@ -201,6 +230,17 @@ class ControllerState:
     SOURCE_MIXER = "mixer"
     SOURCE_CONTROLLER = "controller"
     SOURCE_IDLE = "idle"
+    PLAYBACK_SOURCES = (
+        SOURCE_DESIGNER,
+        SOURCE_MIXER,
+        SOURCE_CONTROLLER,
+        SOURCE_IDLE,
+    )
+    API_PLAYBACK_SOURCES = (
+        SOURCE_DESIGNER,
+        SOURCE_IDLE,
+        SOURCE_CONTROLLER,
+    )
 
     def __init__(self, fps_listener):
         self.lock = threading.Lock()
@@ -263,6 +303,110 @@ class ControllerState:
                     "universes": [0, 1],
                 }, auto_save=False)
 
+    def _playback_target_info_unlocked(self):
+        total = len(self.devices)
+        connected_total = sum(1 for dev in self.devices if dev["connected"])
+
+        if self.playback_source == self.SOURCE_MIXER:
+            if self._mixer_preview_device_filter is None:
+                scope = "all"
+                selected = total
+                connected = connected_total
+            else:
+                indices = [
+                    idx for idx in self._mixer_preview_device_filter
+                    if 0 <= idx < total
+                ]
+                scope = "selected"
+                selected = len(indices)
+                connected = sum(1 for idx in indices if self.devices[idx]["connected"])
+        elif self.playback_source == self.SOURCE_CONTROLLER:
+            if self._controller_device_ips is None:
+                scope = "all"
+                selected = total
+                connected = connected_total
+            else:
+                scope = "selected"
+                selected = len(self._controller_device_ips)
+                connected = sum(
+                    1 for dev in self.devices
+                    if dev["connected"] and dev["ip"] in self._controller_device_ips
+                )
+        elif self.playback_source == self.SOURCE_DESIGNER:
+            scope = "all"
+            selected = total
+            connected = connected_total
+        else:
+            scope = "none"
+            selected = 0
+            connected = 0
+
+        if scope == "none":
+            label = "No output"
+        elif selected <= 0:
+            label = "No devices"
+        elif scope == "all":
+            label = "All devices"
+        elif selected == 1:
+            label = "1 selected device"
+        else:
+            label = f"{selected} selected devices"
+
+        if scope != "none" and selected > 0 and connected != selected:
+            label += f" ({connected} connected)"
+
+        return {
+            "scope": scope,
+            "selected_count": selected,
+            "connected_count": connected,
+            "label": label,
+        }
+
+    def _playback_status_unlocked(self):
+        source = self.playback_source
+        target = self._playback_target_info_unlocked()
+
+        if source == self.SOURCE_DESIGNER:
+            label = "Designer"
+            activity = "Live"
+            detail = f"Designer output is live on {target['label'].lower()}."
+        elif source == self.SOURCE_MIXER:
+            label = "Mixer Preview"
+            activity = "Running" if self._mixer_preview_playing else "Paused"
+            detail = f"Mixer preview is {activity.lower()} on {target['label'].lower()}."
+        elif source == self.SOURCE_CONTROLLER:
+            label = "Controller"
+            activity = "Active"
+            detail = f"Controller playback owns output on {target['label'].lower()}."
+        else:
+            label = "Idle"
+            activity = "No output"
+            detail = "No live source currently owns output."
+
+        return {
+            "source": source,
+            "label": label,
+            "activity": activity,
+            "target_label": target["label"],
+            "summary": activity if source == self.SOURCE_IDLE else f"{activity} · {target['label']}",
+            "detail": detail,
+            "scope": target["scope"],
+            "selected_count": target["selected_count"],
+            "connected_count": target["connected_count"],
+            "using_override": self._override_pixels is not None,
+        }
+
+    def build_black_frame(self):
+        """Return an all-black frame matching the active look output sizes."""
+        with self.lock:
+            frame = []
+            for lo in self.active_look["outputs"]:
+                if lo["type"] == "none" or lo["count"] == 0:
+                    frame.append([])
+                else:
+                    frame.append([(0, 0, 0)] * lo["count"])
+            return frame
+
     # ------------------------------------------------------------------
     #  JSON serialization
     # ------------------------------------------------------------------
@@ -298,6 +442,7 @@ class ControllerState:
                 "devices": [],
                 "device_groups": self.device_groups,
                 "playback_source": self.playback_source,
+                "playback": self._playback_status_unlocked(),
             }
             for dev in self.devices:
                 rx = self.fps_listener.get(dev["ip"]) if self.fps_listener else None
@@ -308,6 +453,7 @@ class ControllerState:
                     "connected": dev["connected"],
                     "receiver_fps": rx["fps"] if rx else None,
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
+                    "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
                     "outputs": [],
                 }
                 for o in dev["outputs"]:
@@ -393,6 +539,10 @@ class ControllerState:
     # ------------------------------------------------------------------
 
     def _send_output_config(self, dev):
+        caps = _normalize_device_capabilities(dev.get("capabilities"))
+        if not caps.get("output_config"):
+            return False
+
         types = [lo["type"] for lo in self.active_look["outputs"]]
         type_to_id = {name: i for i, name in enumerate(LOOK_OUTPUT_TYPES)}
         send_output_config(dev["ip"], types, type_to_id)
@@ -407,6 +557,7 @@ class ControllerState:
                         typedef.get("grid_size")
                         if typedef["layout"] == "grid" else None
                     )
+        return True
 
     # ------------------------------------------------------------------
     #  Device management
@@ -439,8 +590,14 @@ class ControllerState:
             output_cfgs = parse_node_outputs(
                 node_info.get("long_name", ""),
                 node_info.get("universes", []),
-                OUTPUT_TYPES)
-            base_u = node_info["universes"][0] if node_info.get("universes") else 0
+                OUTPUT_TYPES,
+                node_report=node_info.get("node_report", ""),
+                type_keys=LOOK_OUTPUT_TYPES)
+            base_u = (
+                output_cfgs[0].get("universe", 0)
+                if output_cfgs else
+                (node_info["universes"][0] if node_info.get("universes") else 0)
+            )
 
             dev = {
                 "name": node_info.get("short_name", "Node"),
@@ -448,13 +605,17 @@ class ControllerState:
                 "base_universe": base_u,
                 "connected": False,
                 "sender": ArtNetSender(node_info["ip"]),
+                "capabilities": _normalize_device_capabilities(node_info.get("capabilities")),
                 "outputs": [],
             }
             for idx, o_cfg in enumerate(output_cfgs):
                 resolved = resolve_output(o_cfg)
-                universe = (node_info["universes"][idx]
-                            if idx < len(node_info.get("universes", []))
-                            else base_u + idx)
+                universe = o_cfg.get(
+                    "universe",
+                    node_info["universes"][idx]
+                    if idx < len(node_info.get("universes", []))
+                    else base_u + idx,
+                )
                 is_grid = resolved["layout"] == "grid"
                 dev["outputs"].append({
                     **resolved,
@@ -480,31 +641,52 @@ class ControllerState:
                 return True
         return False
 
+    def _device_capability_status_unlocked(self, di, capability):
+        if not (0 <= di < len(self.devices)):
+            return {"ok": False, "error": "invalid device index"}
+
+        dev = self.devices[di]
+        caps = _normalize_device_capabilities(dev.get("capabilities"))
+        if caps.get(capability):
+            return {"ok": True, "device": dev["name"]}
+
+        label = CONTROL_CAPABILITY_LABELS.get(capability, capability.replace("_", " "))
+        if caps.get("known"):
+            return {"ok": False, "error": f'{dev["name"]} does not advertise {label} support.'}
+        return {"ok": False, "error": f'{dev["name"]} has not advertised {label} support.'}
+
+    def device_capability_status(self, di, capability):
+        with self.lock:
+            return self._device_capability_status_unlocked(di, capability)
+
     def rename_device(self, di, new_name):
         with self.lock:
-            if 0 <= di < len(self.devices):
-                dev = self.devices[di]
-                send_art_address(dev["ip"], new_name)
-                dev["name"] = new_name
-                _save_devices(self.devices)
-                return True
-        return False
+            status = self._device_capability_status_unlocked(di, "rename")
+            if not status["ok"]:
+                return status
+            dev = self.devices[di]
+            send_art_address(dev["ip"], new_name)
+            dev["name"] = new_name
+            _save_devices(self.devices)
+            return {"ok": True}
 
     def set_device_ip(self, di, static_ip, gateway, subnet):
         with self.lock:
-            if 0 <= di < len(self.devices):
-                dev = self.devices[di]
-                send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
-                return True
-        return False
+            status = self._device_capability_status_unlocked(di, "ip_config")
+            if not status["ok"]:
+                return status
+            dev = self.devices[di]
+            send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
+            return {"ok": True}
 
     def revert_device_dhcp(self, di):
         with self.lock:
-            if 0 <= di < len(self.devices):
-                dev = self.devices[di]
-                send_ip_config(dev["ip"], 0)
-                return True
-        return False
+            status = self._device_capability_status_unlocked(di, "ip_config")
+            if not status["ok"]:
+                return status
+            dev = self.devices[di]
+            send_ip_config(dev["ip"], 0)
+            return {"ok": True}
 
     def connect_all(self):
         with self.lock:
@@ -554,11 +736,12 @@ class ControllerState:
     def hello_device(self, di):
         """Send a quick red flash to all outputs on a device to help locate it."""
         with self.lock:
-            if di < 0 or di >= len(self.devices):
-                return
+            status = self._device_capability_status_unlocked(di, "hello")
+            if not status["ok"]:
+                return False
             dev = self.devices[di]
             if not dev["sender"].connected:
-                return
+                return False
             outputs_info = []
             for o in dev["outputs"]:
                 outputs_info.append((o["universe"], o["count"]))
@@ -573,6 +756,7 @@ class ControllerState:
         for universe, count in outputs_info:
             sender.send_output(universe, bytes(count * 3))
         sender.advance_sequence()
+        return True
 
     # ------------------------------------------------------------------
     #  Override pixels (for mixer / controller playback)
@@ -586,6 +770,34 @@ class ControllerState:
             self._override_pixels = pixels_per_output
             self._controller_device_ips = device_ips
 
+    def _clear_override_unlocked(self):
+        """Clear any cached override frame and controller-specific targeting."""
+        self._override_pixels = None
+        self._controller_device_ips = None
+
+    def _clear_mixer_preview_unlocked(self):
+        """Reset mixer preview bookkeeping without changing playback source."""
+        self._mixer_preview_look = None
+        self._mixer_preview_play_time = 0.0
+        self._mixer_preview_start_mono = 0.0
+        self._mixer_preview_playing = False
+        self._mixer_preview_device_filter = None
+        self._mixer_update_last_seq = 0
+
+    def _set_playback_source_unlocked(self, source):
+        """Apply playback-source transitions with centralized cleanup rules."""
+        if source not in self.PLAYBACK_SOURCES:
+            raise ValueError(f"Invalid playback source: {source!r}")
+
+        if source != self.SOURCE_MIXER:
+            self._clear_mixer_preview_unlocked()
+        if source != self.SOURCE_CONTROLLER:
+            self._controller_device_ips = None
+        if source in (self.SOURCE_DESIGNER, self.SOURCE_IDLE):
+            self._override_pixels = None
+
+        self.playback_source = source
+
     def start_mixer_preview(self, look, device_filter=None,
                             play_time=0.0, playing=False):
         """Start previewing a look from the mixer on connected devices.
@@ -593,13 +805,13 @@ class ControllerState:
         playing: whether the clock should advance.
         """
         with self.lock:
+            self._clear_mixer_preview_unlocked()
             self._mixer_preview_look = look
             self._mixer_preview_play_time = play_time
             self._mixer_preview_start_mono = time.monotonic()
             self._mixer_preview_playing = playing
             self._mixer_preview_device_filter = device_filter
-            self._mixer_update_last_seq = 0
-            self.playback_source = self.SOURCE_MIXER
+            self._set_playback_source_unlocked(self.SOURCE_MIXER)
 
     def update_mixer_preview(self, play_time=None, playing=None, seq=None):
         """Update time / playing state without resending the full look.
@@ -630,20 +842,20 @@ class ControllerState:
     def stop_mixer_preview(self):
         """Stop mixer preview, return to idle (no output)."""
         with self.lock:
-            self._mixer_preview_look = None
-            self._mixer_preview_playing = False
-            self._override_pixels = None
-            self._mixer_preview_device_filter = None
-            self.playback_source = self.SOURCE_IDLE
+            self._set_playback_source_unlocked(self.SOURCE_IDLE)
 
     def set_playback_source(self, source):
-        """Explicitly set the playback source (designer, idle, controller)."""
+        """Explicitly set the playback source.
+
+        Mixer preview should be started through start_mixer_preview() so the
+        preview look and timing state are initialized consistently.
+        Returns True when the source is accepted, else False.
+        """
         with self.lock:
-            self.playback_source = source
-            if source != self.SOURCE_MIXER:
-                self._mixer_preview_look = None
-            if source in (self.SOURCE_DESIGNER, self.SOURCE_IDLE):
-                self._override_pixels = None
+            if source not in self.API_PLAYBACK_SOURCES:
+                return False
+            self._set_playback_source_unlocked(source)
+            return True
 
     def get_mixer_preview(self):
         """Return (look, computed_time) if mixer preview is active, else (None, 0)."""

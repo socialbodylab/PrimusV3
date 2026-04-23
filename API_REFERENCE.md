@@ -50,12 +50,22 @@ Key fields in the 239-byte reply:
 | 10–13 | 4 | IP Address | Node's IPv4 address (4 bytes) |
 | 14–15 | 2 | Port | `0x1936` (6454, little-endian) |
 | 26–43 | 18 | Short Name | `"PrimusV3"` or custom name (null-terminated) |
-| 44–107 | 64 | Long Name | e.g. `"PrimusV3 LED Node \| A0:Short Strip A1:Long Strip A2:Grid 8x8"` |
-| 108–171 | 64 | Node Report | Status string, e.g. `"#0001 [0482] PrimusV3 OK — 30 fps"` |
+| 44–107 | 64 | Long Name | Human-readable summary, e.g. `"PrimusV3 LED Node \| A0:Short Strip A1:Long Strip"` |
+| 108–171 | 64 | Node Report | Status plus capability tag, e.g. `"#0001 [0482] PrimusV3 OK\|PV3CAP1\|0:2:0\|1:3:1\|F:RIOH"` |
 | 172–173 | 2 | NumPorts | Number of active outputs (big-endian) |
 | 174–177 | 4 | PortTypes | `0xC0` per active port (DMX output) |
 | 190–193 | 4 | SwOut | Universe assignment per port (low nibble) |
 | 201–206 | 6 | MAC Address | Node's WiFi MAC |
+
+PrimusV3 sender discovery prefers the `PV3CAP1` capability tag in Node Report.
+Each output tuple is `port_index:type_id:universe`, where `type_id` matches the
+receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. Feature flags
+are appended as `F:<letters>`; current letters are `R` for remote rename via
+ArtAddress, `I` for remote IP configuration via ArtIPConfig, `O` for remote
+output configuration via ArtOutputConfig, and `H` for the identify flash used by
+`POST /api/hello_device`. Older nodes without this tag still fall back to the
+human-readable Long Name parser, and older PrimusV3 nodes without feature flags are
+treated as legacy-compatible for rename/hello/IP/output-config control.
 
 ### Discovery Tips
 
@@ -269,14 +279,14 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | `POST /api/disconnect` | `{device: N}` | Disconnect device by index |
 | `POST /api/connect_all` | `{}` | Connect all devices |
 | `POST /api/disconnect_all` | `{}` | Disconnect all devices |
-| `POST /api/discover` | `{}` | Run ArtPoll discovery, returns `[{ip, short_name, long_name, num_ports, universes}]` |
+| `POST /api/discover` | `{}` | Run ArtPoll discovery, returns `[{ip, short_name, long_name, node_report, capabilities, num_ports, universes}]` |
 | `POST /api/add_discovered` | `{ip, short_name, ...}` | Add discovered node as device and auto-connect |
 | `POST /api/add_manual` | `{ip: "..."}` | Add device by IP address (tries unicast discovery first, falls back to bare device) |
 | `POST /api/remove_device` | `{device: N}` | Remove device by index |
-| `POST /api/rename_node` | `{device: N, name: "..."}` | Rename device — sends ArtAddress to firmware, updates TFT |
-| `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically |
-| `POST /api/set_device_ip` | `{device: N, ip: "...", gateway: "...", subnet: "..."}` | Set static IP on device — sends ArtIPConfig, device reboots |
-| `POST /api/revert_device_dhcp` | `{device: N}` | Revert device to DHCP — sends ArtIPConfig mode 0, device reboots |
+| `POST /api/rename_node` | `{device: N, name: "..."}` | Rename device — sends ArtAddress to firmware, updates TFT, returns `409` if rename support is not advertised |
+| `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically, returns `409` if hello support is not advertised |
+| `POST /api/set_device_ip` | `{device: N, ip: "...", gateway: "...", subnet: "..."}` | Set static IP on device — sends ArtIPConfig, device reboots, returns `409` if IP-config support is not advertised |
+| `POST /api/revert_device_dhcp` | `{device: N}` | Revert device to DHCP — sends ArtIPConfig mode 0, device reboots, returns `409` if IP-config support is not advertised |
 | `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
 | `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
 
