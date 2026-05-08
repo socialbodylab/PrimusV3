@@ -1,0 +1,25 @@
+{
+  "id": "ff6a2427-891e-4376-8110-991dad2686d9",
+  "name": "Radial Breathe",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "radial",
+  "start_color": [
+    255,
+    0,
+    100
+  ],
+  "end_color": [
+    0,
+    50,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.302738+00:00",
+  "modified": "2026-04-08T13:57:40.302778+00:00"
+}

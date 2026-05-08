@@ -1,0 +1,25 @@
+{
+  "id": "29fa4eb4-00da-4acb-9a52-77968fcae9dd",
+  "name": "Grid Pulse Warm",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    80,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    50
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.307343+00:00",
+  "modified": "2026-04-08T13:57:40.307374+00:00"
+}

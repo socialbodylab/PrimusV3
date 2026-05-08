@@ -1,0 +1,25 @@
+{
+  "id": "4d86cde6-8da4-4b1f-a794-50261707db0c",
+  "name": "Matrix Rain",
+  "group": "Matrix Rain",
+  "output_type": "grid",
+  "effect": "constrainbow",
+  "start_color": [
+    0,
+    200,
+    50
+  ],
+  "end_color": [
+    0,
+    40,
+    10
+  ],
+  "speed": 2.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.686949+00:00",
+  "modified": "2026-04-08T18:59:58.686965+00:00"
+}

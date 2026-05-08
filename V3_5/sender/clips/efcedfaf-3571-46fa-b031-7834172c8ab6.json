@@ -1,0 +1,25 @@
+{
+  "id": "efcedfaf-3571-46fa-b031-7834172c8ab6",
+  "name": "Corner Wipe",
+  "group": "Corner Wipe",
+  "output_type": "grid",
+  "effect": "chase",
+  "start_color": [
+    255,
+    255,
+    255
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 0.8,
+  "playback": "boomerang",
+  "angle": 135,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.688424+00:00",
+  "modified": "2026-04-08T18:59:58.688451+00:00"
+}

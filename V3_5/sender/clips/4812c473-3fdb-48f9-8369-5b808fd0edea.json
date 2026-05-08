@@ -1,0 +1,25 @@
+{
+  "id": "4812c473-3fdb-48f9-8369-5b808fd0edea",
+  "name": "Fill From Center",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    100,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "center",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.300192+00:00",
+  "modified": "2026-04-08T13:57:40.300232+00:00"
+}

@@ -1,0 +1,43 @@
+{
+  "name": "Ice Storm",
+  "description": "Icy cool tones with scanning strip and pulsing ice grid",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "cc566769-6ce9-4934-9670-ab8b81ce97cb",
+          "clip_name": "Ice Knight Rider",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "27c7bffa-4d9a-48b3-a9ff-bc4a957055c8",
+          "clip_name": "Grid Pulse Ice",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "1c4813b6-9632-4c13-996b-505d90d9876f",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}

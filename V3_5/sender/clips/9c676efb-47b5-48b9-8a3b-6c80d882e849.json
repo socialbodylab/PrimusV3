@@ -1,0 +1,25 @@
+{
+  "id": "9c676efb-47b5-48b9-8a3b-6c80d882e849",
+  "name": "Sparkle Drift",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    200,
+    100,
+    255
+  ],
+  "end_color": [
+    50,
+    200,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.290138+00:00",
+  "modified": "2026-04-08T13:57:40.290180+00:00"
+}

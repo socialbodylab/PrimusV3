@@ -1,0 +1,25 @@
+{
+  "id": "457c21ef-4093-426d-b699-245866d1e227",
+  "name": "Fire Knight Rider",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    60,
+    0
+  ],
+  "end_color": [
+    40,
+    0,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 4,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.287500+00:00",
+  "modified": "2026-04-08T13:57:40.287532+00:00"
+}
