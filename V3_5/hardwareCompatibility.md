@@ -2,6 +2,8 @@
 
 V3.5 uses one shared firmware source tree with separate Arduino build profiles. V1 and V2 boards must be reflashed with V3.5 firmware; the V3.5 sender does not use the old V1 OSC protocol or the old V2 brightness-byte Art-Net payload.
 
+For deeper development notes, start with [README.md](README.md), then use [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) for firmware changes and [SENDER_DEVELOPMENT.md](SENDER_DEVELOPMENT.md) for sender changes.
+
 ## Build Profiles
 
 | Profile | Hardware | LED driver | Display | Output 0 | Output 1 | Default output types |

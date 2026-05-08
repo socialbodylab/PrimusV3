@@ -37,4 +37,10 @@ Even though V1 and V2 do not have screens, they should be configurable via the c
 - `V3_5/sender/` has been scaffolded from V3.1 and now includes `small_grid` and `extra_long_strip` output types.
 - V3.5 discovery parses and exposes hardware profile metadata while remaining compatible with V3.1 `PV3CAP1` replies.
 - `V3_5/Arduino/upload.sh` accepts `--board v1`, `--board v2`, and `--board v3_1`.
+- See `V3_5/README.md` for the V3.5 documentation index.
+- See `V3_5/FIRMWARE_DEVELOPMENT.md` for firmware profile, protocol, output table, and validation details.
+- See `V3_5/SENDER_DEVELOPMENT.md` for sender architecture, discovery parsing, API behavior, and test guidance.
 - See `V3_5/hardwareCompatibility.md` for profile, pin, output type, and compile details.
+
+# Known follow-up
+The current sender can discover and control mixed V1/V2/V3.1 hardware, but its active look/output type selection is still global. Future work should add per-device or per-profile output routing if different hardware generations need to preserve different native output shapes during the same live playback session.

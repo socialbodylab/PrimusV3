@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run.py — PrimusV3.1 LED Controller entry point.
+run.py — PrimusV3.5 LED Controller entry point.
 
 Usage:
     python3 run.py
@@ -193,7 +193,7 @@ def _mixer_controller_loop(state, cue_list):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="PrimusV3.1 LED Controller")
+        description="PrimusV3.5 LED Controller")
     parser.add_argument("--port", type=int, default=0,
                         help="HTTP port (0 = auto-select)")
     parser.add_argument("--no-browser", action="store_true",
@@ -224,7 +224,7 @@ def main():
         target=_mixer_controller_loop, args=(state, cue_list), daemon=True)
     mc_thread.start()
 
-    print("PrimusV3.1 LED Controller")
+    print("PrimusV3.5 LED Controller")
     print(f"  URL: {url}")
     print(f"  Devices: {len(state.devices)}")
     print()

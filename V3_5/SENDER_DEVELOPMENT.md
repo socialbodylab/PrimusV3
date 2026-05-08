@@ -1,0 +1,209 @@
+# V3.5 Sender Development
+
+This document is the working reference for future V3.5 Python sender and web UI changes.
+
+## Source Tree
+
+Active sender code lives in:
+
+```text
+V3_5/sender/
+├── run.py                  # Entry point, HTTP server startup, render loops
+├── state.py                # Output tables, device state, playback source, Art-Net sends
+├── artnet.py               # Art-Net packets, discovery, capability parsing, FPS telemetry
+├── server.py               # HTTP API and static file server
+├── effects.py              # Effects and pixel transforms
+├── clips.py                # Clip persistence and preview computation
+├── mixer.py                # Look timeline frame computation
+├── controller.py           # Cue list playback and crossfades
+├── web/                    # Static Alpine.js UI
+└── tests/                  # Stdlib unittest smoke tests
+```
+
+The sender remains Python stdlib-only. Do not add package dependencies without an explicit packaging decision.
+
+## Run And Test Commands
+
+Run sender:
+
+```sh
+python3 V3_5/sender/run.py
+python3 V3_5/sender/run.py --no-browser --port 0
+```
+
+Run checks:
+
+```sh
+python3 -m py_compile V3_5/sender/*.py
+python3 -m unittest discover -s V3_5/sender/tests
+```
+
+The sender writes local runtime state to `V3_5/sender/.primus_state.json`. That file is generated during tests and should not be committed.
+
+## Core Data Model
+
+### Output Types
+
+`state.py` owns the sender-side output type table:
+
+- `OUTPUT_TYPES` maps sender keys to pixel count and layout.
+- `LOOK_OUTPUT_TYPES` maps numeric type IDs to sender keys.
+
+`LOOK_OUTPUT_TYPES` index order must match firmware `OutputType` enum values in `V3_5/Arduino/primusV3_receiver/config.h`.
+
+Current order:
+
+```python
+LOOK_OUTPUT_TYPES = [
+    "none",
+    "short_strip",
+    "long_strip",
+    "grid",
+    "small_grid",
+    "extra_long_strip",
+]
+```
+
+### Active Look
+
+The sender currently computes one active look with two logical outputs. Output config updates are sent to connected devices from that shared active look.
+
+Important mixed-hardware note: V1/V2/V3.1 devices can be discovered and controlled together, but the current sender does not yet maintain independent native output-type selections per hardware profile during live playback. Connecting all devices after changing the active look can push the same two output types to every connected receiver. Future work for true mixed-costume operation should add per-device or per-profile output routing.
+
+### Device Records
+
+Device records include:
+
+- `name`
+- `ip`
+- `base_universe`
+- `connected`
+- `capabilities`
+- `hardware_profile`
+- `hardware_label`
+- `firmware_version`
+- output records with `type`, `count`, `grid`, and `universe`
+
+The UI reads these fields from `/api/state` and displays hardware/profile metadata on device cards and discovered nodes.
+
+## Discovery And Capabilities
+
+Discovery lives in `artnet.py`:
+
+- `discover_artnet_nodes()` sends ArtPoll and optional unicast polls.
+- `parse_node_capabilities()` parses V3.5/V3.1 capability tags.
+- `parse_node_outputs()` converts Node Report output tokens into sender output configs.
+
+V3.5 Node Report example:
+
+```text
+#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|F:RIOH
+```
+
+Meaning:
+
+- `PV3CAP1`: Primus capability contract.
+- `0:4:0`: port 0 uses type ID 4 (`small_grid`) on universe 0.
+- `1:2:1`: port 1 uses type ID 2 (`long_strip`) on universe 1.
+- `B:v1`: board profile is V1.
+- `F:RIOH`: rename, IP config, output config, and hello are supported.
+
+Older V3.1-style reports without `B:<profile>` should still parse as known Primus nodes and default to the V3.1 hardware profile when the node identity indicates PrimusV3.
+
+## HTTP API Areas To Know
+
+Important device/control endpoints in `server.py`:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/state` | Full app/device/playback state for the UI. |
+| `POST /api/discover` | Art-Net discovery. |
+| `POST /api/add_discovered` | Add a discovered Art-Net node. |
+| `POST /api/add_manual` | Poll/add a device by IP. |
+| `POST /api/connect` / `connect_all` | Connect sender and send output config if supported. |
+| `POST /api/disconnect` / `disconnect_all` | Blackout and disconnect devices. |
+| `POST /api/rename_node` | ArtAddress rename. |
+| `POST /api/hello_device` | Identify flash through the live Art-Net output path. |
+| `POST /api/set_device_ip` | Static IP config. |
+| `POST /api/revert_device_dhcp` | Return device to DHCP. |
+| `POST /api/update` | Designer/output type/effect settings. |
+
+## Web UI Files
+
+The UI is static Alpine.js:
+
+```text
+V3_5/sender/web/
+├── index.html
+├── css/style.css
+└── js/
+    ├── app.js
+    ├── look-mixer.js
+    └── look-controller.js
+```
+
+Device profile fields are surfaced in `index.html` and managed through the `conn` Alpine store in `app.js`.
+
+Guidelines:
+
+- Keep the UI dependency-free and static.
+- Keep capability-aware controls disabled when the receiver does not advertise support.
+- Display profile metadata from API state rather than inferring board generation from IP/name.
+
+## Adding Output Types
+
+1. Update firmware `config.h` enum and `OUTPUT_TYPE_TABLE[]`.
+2. Update sender `OUTPUT_TYPES` and `LOOK_OUTPUT_TYPES` in `state.py`.
+3. Keep the numeric ID/index aligned.
+4. Update `hardwareCompatibility.md` and `FIRMWARE_DEVELOPMENT.md`.
+5. Add or update discovery parser tests in `sender/tests/`.
+6. Re-run sender tests and all firmware profile compiles.
+
+## Adding Profile Metadata
+
+If a new firmware board profile is introduced:
+
+1. Add the profile code/label in firmware `config.h`.
+2. Ensure Node Report emits `B:<profile>`.
+3. Add the profile label mapping in `artnet.py`.
+4. Add parser test coverage in `test_artnet_capabilities.py`.
+5. Surface any new profile-specific behavior through `/api/state`.
+
+## Runtime Smoke Test
+
+Use this to check a freshly flashed board from the command line:
+
+```sh
+python3 V3_5/sender/run.py --no-browser --port 0
+```
+
+Then, in another terminal, replace the port with the printed URL:
+
+```sh
+curl -s -X POST http://127.0.0.1:<port>/api/discover -H 'Content-Type: application/json' -d '{}'
+curl -s -X POST http://127.0.0.1:<port>/api/add_manual -H 'Content-Type: application/json' -d '{"ip":"192.168.1.8"}'
+curl -s -X POST http://127.0.0.1:<port>/api/hello_device -H 'Content-Type: application/json' -d '{"device":0}'
+curl -s -X POST http://127.0.0.1:<port>/api/disconnect_all -H 'Content-Type: application/json' -d '{}'
+```
+
+Before committing, remove generated runtime state:
+
+```sh
+rm -f V3_5/sender/.primus_state.json
+```
+
+## Test Coverage
+
+Current test coverage is focused on Art-Net capability parsing and discovery compatibility:
+
+```text
+V3_5/sender/tests/test_artnet_capabilities.py
+```
+
+Add tests when changing:
+
+- Node Report parsing.
+- Output token parsing.
+- Hardware profile fallback behavior.
+- Capability flag behavior.
+- Output type IDs.

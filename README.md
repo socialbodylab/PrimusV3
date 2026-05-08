@@ -18,6 +18,16 @@ The sender runs a web UI with a built-in effects engine. It computes animation f
 
 ## Versions
 
+### V3.5 (Compatibility Track)
+
+V3.5 builds on V3.1 to run reflashed V1, V2, and V3.1 receiver hardware from the same current Art-Net sender/controller protocol. It uses one shared firmware source tree with board profiles for V1 Huzzah32, V2 ESP32 Feather, and V3.1 ESP32-S3 Reverse TFT hardware.
+
+Start here for V3.5 development:
+- [V3_5/README.md](V3_5/README.md) - documentation index and quick start
+- [V3_5/FIRMWARE_DEVELOPMENT.md](V3_5/FIRMWARE_DEVELOPMENT.md) - firmware profiles, pins, protocol contracts, and validation
+- [V3_5/SENDER_DEVELOPMENT.md](V3_5/SENDER_DEVELOPMENT.md) - sender architecture, discovery parsing, API behavior, and tests
+- [V3_5/hardwareCompatibility.md](V3_5/hardwareCompatibility.md) - compact board/profile/pin/output reference
+
 ### V3.1 (Active)
 
 Modular Python sender with a full clip/look workflow for live performance. The sender is split into focused modules and the web UI uses Alpine.js with separate HTML/CSS/JS files.
@@ -174,6 +184,14 @@ PrimusV3/
 │           ├── config.h
 │           ├── display.h
 │           └── buttons.h
+├── V3_5/                            # Compatibility track for reflashed V1/V2/V3.1 hardware
+│   ├── README.md                    # V3.5 documentation index
+│   ├── FIRMWARE_DEVELOPMENT.md      # Firmware profile and protocol notes
+│   ├── SENDER_DEVELOPMENT.md        # Sender architecture and API notes
+│   ├── hardwareCompatibility.md     # Board, pin, and output type reference
+│   ├── Arduino/
+│   ├── sender/
+│   └── previousHardware/            # Archived V1/V2 reference firmware/specs
 ├── V3_0/                            # Archived original version
 │   ├── sender/
 │   │   └── led_controller.py       # Single-file sender (~1800 lines)
