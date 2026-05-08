@@ -15,7 +15,7 @@ WiFi-controlled LED lighting system for live performance costumes. A Python send
 └──────────────────────┘                   └──────────────────┘
 ```
 
-The included Python sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. Other Art-Net sources can send LED data directly to the same receivers. The current V3.5 track supports reflashed V1, V2, and V3.1 hardware through one shared Art-Net protocol.
+The included Python sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. Other Art-Net sources can send LED data directly to the same receivers. The system is intended to run on a dedicated router; the controller computer must be connected to that router by WiFi or Ethernet so it can reach the receiver nodes. The current V3.5 track supports reflashed V1, V2, and V3.1 hardware through one shared Art-Net protocol.
 
 ## Versions
 
