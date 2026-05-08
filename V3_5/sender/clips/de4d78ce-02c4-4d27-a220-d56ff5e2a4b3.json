@@ -1,0 +1,25 @@
+{
+  "id": "de4d78ce-02c4-4d27-a220-d56ff5e2a4b3",
+  "name": "Sunset March",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    80,
+    0
+  ],
+  "end_color": [
+    120,
+    0,
+    255
+  ],
+  "speed": 0.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 6.5,
+  "created": "2026-05-08T22:02:11.862620+00:00",
+  "modified": "2026-05-08T22:02:11.862646+00:00"
+}

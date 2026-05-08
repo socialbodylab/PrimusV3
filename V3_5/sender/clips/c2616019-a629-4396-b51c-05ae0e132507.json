@@ -1,0 +1,25 @@
+{
+  "id": "c2616019-a629-4396-b51c-05ae0e132507",
+  "name": "Warm Fade Ribbon",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    255,
+    180,
+    80
+  ],
+  "end_color": [
+    80,
+    0,
+    20
+  ],
+  "speed": 0.9,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.8,
+  "created": "2026-05-08T22:02:11.867362+00:00",
+  "modified": "2026-05-08T22:02:11.867388+00:00"
+}

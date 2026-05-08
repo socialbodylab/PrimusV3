@@ -1,0 +1,25 @@
+{
+  "id": "c025c46e-0281-4868-92ec-5bb3ee360836",
+  "name": "Centerline Flash",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    255,
+    255
+  ],
+  "speed": 1.6,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "center",
+  "duration": 3.0,
+  "created": "2026-05-08T22:02:11.864822+00:00",
+  "modified": "2026-05-08T22:02:11.864884+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "99a5d576-4032-44a8-b5fa-5a1ae3c4dc10",
+  "name": "Mint Circuit",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "linear",
+  "start_color": [
+    0,
+    255,
+    150
+  ],
+  "end_color": [
+    0,
+    30,
+    80
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.8,
+  "created": "2026-05-08T22:02:11.849994+00:00",
+  "modified": "2026-05-08T22:02:11.850007+00:00"
+}

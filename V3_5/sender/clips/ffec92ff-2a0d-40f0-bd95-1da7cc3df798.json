@@ -1,0 +1,25 @@
+{
+  "id": "ffec92ff-2a0d-40f0-bd95-1da7cc3df798",
+  "name": "Small Grid Sunrise Wipe",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "linear",
+  "start_color": [
+    255,
+    90,
+    0
+  ],
+  "end_color": [
+    255,
+    220,
+    90
+  ],
+  "speed": 0.7,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.5,
+  "created": "2026-05-08T22:02:11.848185+00:00",
+  "modified": "2026-05-08T22:02:11.848201+00:00"
+}

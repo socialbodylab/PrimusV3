@@ -1,0 +1,25 @@
+{
+  "id": "696edff9-49c2-4ff1-a413-675c4a6d6656",
+  "name": "Deep Sea Pulse",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    40,
+    180
+  ],
+  "end_color": [
+    0,
+    220,
+    255
+  ],
+  "speed": 0.9,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-05-08T22:02:11.859203+00:00",
+  "modified": "2026-05-08T22:02:11.859221+00:00"
+}

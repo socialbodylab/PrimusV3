@@ -1,0 +1,25 @@
+{
+  "id": "27c0d9f6-9ad3-4fc5-8a33-dda02e02ff4b",
+  "name": "UV Grid Breathe",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "pulse",
+  "start_color": [
+    120,
+    0,
+    255
+  ],
+  "end_color": [
+    15,
+    0,
+    60
+  ],
+  "speed": 0.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.2,
+  "created": "2026-05-08T22:02:11.850306+00:00",
+  "modified": "2026-05-08T22:02:11.850332+00:00"
+}

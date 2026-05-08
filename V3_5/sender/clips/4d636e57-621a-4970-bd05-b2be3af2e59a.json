@@ -1,0 +1,25 @@
+{
+  "id": "4d636e57-621a-4970-bd05-b2be3af2e59a",
+  "name": "Tiny Fireflies",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "constrainbow",
+  "start_color": [
+    255,
+    210,
+    70
+  ],
+  "end_color": [
+    20,
+    80,
+    20
+  ],
+  "speed": 1.1,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-05-08T22:02:11.850621+00:00",
+  "modified": "2026-05-08T22:02:11.850634+00:00"
+}

@@ -5,16 +5,17 @@ WiFi-controlled LED lighting system for live performance costumes. A Python send
 ## How It Works
 
 ```
-┌──────────────┐    Art-Net UDP    ┌──────────────────┐
-│  Sender      │  ──────────────►  │  Receiver Node   │
-│  (Python)    │    port 6454      │  (ESP32-S3)      │
-│              │  ◄──────────────  │                  │
-│  Web UI      │   FPS telemetry   │  2× NeoPixel out │
-│              │    port 6455      │  TFT display     │
-└──────────────┘                   └──────────────────┘
+     Art-Net Sender 
+┌──────────────────────┐    Art-Net UDP    ┌──────────────────┐
+│                      │  ──────────────►  │  Receiver Node   │
+│  Python Web UI       │    port 6454      │  (ESP32)         │
+│  TouchDesigner       │  ◄──────────────  │                  │
+│  Isadora / MaxMSP    │   FPS telemetry   │  2× NeoPixel out │
+│                      │    port 6455      │  Status display  │
+└──────────────────────┘                   └──────────────────┘
 ```
 
-The sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. The current V3.5 track supports reflashed V1, V2, and V3.1 hardware through one shared Art-Net protocol.
+The included Python sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. Other Art-Net sources can send LED data directly to the same receivers. The current V3.5 track supports reflashed V1, V2, and V3.1 hardware through one shared Art-Net protocol.
 
 ## Versions
 
@@ -39,6 +40,8 @@ python3 V3_5/sender/run.py
 The default URL is `http://127.0.0.1:8080`. If 8080 is busy, the sender falls back to an auto-selected port and prints the URL. Use `--no-browser` for automated checks and `--port 0` when you explicitly want an auto-selected port.
 
 Upload V3.5 firmware:
+
+Firmware upload requires [Arduino CLI](https://arduino.github.io/arduino-cli/latest/) with the ESP32 board core available. The upload script handles compile/upload commands and can check required libraries with `--install`.
 
 ```bash
 ./V3_5/Arduino/upload.sh --board v1 --compile
@@ -66,21 +69,11 @@ Start here for V3.5 development:
 - [V3_5/SENDER_DEVELOPMENT.md](V3_5/SENDER_DEVELOPMENT.md) - sender architecture, discovery parsing, API behavior, and tests
 - [V3_5/hardwareCompatibility.md](V3_5/hardwareCompatibility.md) - compact board/profile/pin/output reference
 
-### V3.1 (Previous Modular Track)
+Previous tracks are kept as historical references. See [PreviousVersions.md](PreviousVersions.md) for the V3.1 modular sender and V3.0 single-file sender notes.
 
-Modular Python sender with a full clip/look workflow for live performance. The sender is split into focused modules and the web UI uses Alpine.js with separate HTML/CSS/JS files.
+## Workflow: Clips → Looks → Cues
 
-Key features:
-- **Clip Designer** — Prototype effects per-output with live preview, save as reusable clips
-- **Clip Library** — 100+ preset clips with animated hover preview, search, and per-output-type filtering
-- **Look Mixer** — Timeline-based editor to arrange clips into sequenced Looks with crossfades, drag-to-place, and segment resizing
-- **Look Controller** — Trigger saved Looks during live performance with cue list playback
-- **Device Groups** — Organize receiver nodes into named groups
-- **Playback modes** — Loop, boomerang, once — per-clip and per-look
-
-### Workflow: Clips → Looks → Cues
-
-Each receiver node has 2 outputs (A0 and A1), and each output can be independently set to any of the 3 light types: short strip (30px), long strip (72px), or grid (8×8). A clip targets one output type, and a look assigns clips to both outputs — so a single look can mix different light types (e.g. A0: short strip, A1: grid).
+Each receiver node has 2 outputs (A0 and A1), and each output can be independently set to a supported output type. A clip targets one output type, and a look assigns clips to both outputs — so a single look can mix different light types (e.g. A0: short strip, A1: grid).
 
 Content is built up in three layers:
 
@@ -177,7 +170,11 @@ Output types are configurable at runtime from the web UI — no reflashing neede
 
 ## Network Protocol
 
-Standard Art-Net 4 over UDP, plus custom extensions for output and IP configuration:
+PrimusV3 uses Art-Net, a common DMX-over-IP lighting protocol, so the receiver nodes can be driven by the built-in sender or by outside lighting tools such as TouchDesigner, MadMapper, and other Art-Net controllers. LED frames are sent as ArtDmx packets on UDP 6454, with one universe per receiver output. Nodes also use ArtPoll/ArtPollReply for discovery, including a Primus capability tag that tells the sender which hardware profile and control features the receiver supports.
+
+The full packet layout, discovery fields, custom opcodes, HTTP API, and integration notes are documented in [API_REFERENCE.md](API_REFERENCE.md).
+
+Protocol summary:
 
 | Function | Port | Opcode |
 |----------|------|--------|
@@ -190,7 +187,7 @@ Standard Art-Net 4 over UDP, plus custom extensions for output and IP configurat
 
 Discovery also carries a PrimusV3 capability tag in ArtPollReply Node Report: `PV3CAP1|port:type_id:universe|B:profile|F:RIOH`. The sender uses that to identify hardware profile and decide whether a node explicitly advertises rename, hello, IP-config, and output-config support, while still falling back to legacy Primus behavior for older firmware.
 
-Any Art-Net compatible software (TouchDesigner, MadMapper, etc.) can drive these nodes directly. See [API_REFERENCE.md](API_REFERENCE.md) for full protocol docs.
+Any Art-Net compatible software can drive these nodes directly by sending RGB ArtDmx data to the receiver's advertised universes. The custom extensions are only needed for Primus-specific management features such as rename, output type changes, static IP configuration, and FPS telemetry.
 
 ## Project Structure
 
@@ -204,39 +201,10 @@ PrimusV3/
 │   ├── Arduino/
 │   ├── sender/
 │   └── previousHardware/            # Archived V1/V2 reference firmware/specs
-├── V3_1/                            # Previous modular version
-│   ├── sender/
-│   │   ├── run.py                   # Entry point
-│   │   ├── state.py                 # Core state, animation loop, device mgmt
-│   │   ├── server.py                # HTTP server + JSON API
-│   │   ├── effects.py               # Effect functions + color utilities
-│   │   ├── clips.py                 # Clip CRUD, library, preview engine
-│   │   ├── mixer.py                 # Look timeline computation
-│   │   ├── controller.py            # Cue list playback
-│   │   ├── artnet.py                # Art-Net transport + discovery
-│   │   ├── clips/                   # Clip JSON files (100+)
-│   │   ├── looks/                   # Saved Look JSON files
-│   │   └── web/
-│   │       ├── index.html           # Single-page app (Alpine.js)
-│   │       ├── css/style.css        # UI styles
-│   │       └── js/
-│   │           ├── alpine.min.js    # Alpine.js v3.14.9 (vendored)
-│   │           ├── app.js           # Shared stores, polling, preview render
-│   │           ├── look-mixer.js    # Designer + Timeline + Library component
-│   │           └── look-controller.js  # Cue list component
-│   └── Arduino/
-│       ├── upload.sh                # Build & upload script
-│       └── primusV3_receiver/
-│           ├── primusV3_receiver.ino
-│           ├── config.h
-│           ├── display.h
-│           └── buttons.h
-├── V3_0/                            # Archived original version
-│   ├── sender/
-│   │   └── led_controller.py       # Single-file sender (~1800 lines)
-│   └── Arduino/
-│       └── primusV3_receiver/
+├── V3_1/                            # Previous modular version; see PreviousVersions.md
+├── V3_0/                            # Archived original version; see PreviousVersions.md
 ├── API_REFERENCE.md
+├── PreviousVersions.md
 ├── CLAUDE.md
 └── .github/
     └── copilot-instructions.md
@@ -262,11 +230,3 @@ LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "small_grid", 
 ## License
 
 Private — not for redistribution.
-
-## V3.0 (Archived)
-
-Single-file Python sender (`led_controller.py`, ~1800 lines) with the HTTP server, Art-Net engine, effects engine, and full HTML/CSS/JS web UI embedded as string literals. Functional for direct effect control but no clip/look workflow. Kept in `V3_0/` for reference.
-
-```bash
-python3 V3_0/sender/led_controller.py
-```
