@@ -1,6 +1,6 @@
 # PrimusV3 Art-Net API Reference
 
-This document describes the network API exposed by PrimusV3 LED receiver nodes and strategies for integrating them into common creative-coding and lighting-control environments.
+This document describes the network API exposed by PrimusV3 LED receiver nodes and strategies for integrating them into common creative-coding and lighting-control environments. It reflects the current V3.5 protocol used by reflashed V1, V2, and V3.1 receiver hardware.
 
 ---
 
@@ -15,7 +15,7 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **IP config** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
 | **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
 
-All communication is standard Art-Net 4 over IPv4 UDP, plus three custom opcodes. No TCP, no HTTP, no proprietary framing — any software that speaks Art-Net can drive these nodes directly.
+Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing — any software that speaks Art-Net can drive these nodes directly.
 
 ---
 
@@ -50,8 +50,8 @@ Key fields in the 239-byte reply:
 | 10–13 | 4 | IP Address | Node's IPv4 address (4 bytes) |
 | 14–15 | 2 | Port | `0x1936` (6454, little-endian) |
 | 26–43 | 18 | Short Name | `"PrimusV3"` or custom name (null-terminated) |
-| 44–107 | 64 | Long Name | Human-readable summary, e.g. `"PrimusV3 LED Node \| A0:Short Strip A1:Long Strip"` |
-| 108–171 | 64 | Node Report | Status plus capability tag, e.g. `"#0001 [0482] PrimusV3 OK\|PV3CAP1\|0:2:0\|1:3:1\|F:RIOH"` |
+| 44–107 | 64 | Long Name | Human-readable summary, e.g. `"PrimusV3.5 LED Node \| A0:Short Strip A1:Long Strip"` |
+| 108–171 | 64 | Node Report | Status plus capability tag, e.g. `"#0001 [0482] OK\|PV3CAP1\|0:1:0\|1:2:1\|B:v31\|F:RIOH"` |
 | 172–173 | 2 | NumPorts | Number of active outputs (big-endian) |
 | 174–177 | 4 | PortTypes | `0xC0` per active port (DMX output) |
 | 190–193 | 4 | SwOut | Universe assignment per port (low nibble) |
@@ -59,7 +59,8 @@ Key fields in the 239-byte reply:
 
 PrimusV3 sender discovery prefers the `PV3CAP1` capability tag in Node Report.
 Each output tuple is `port_index:type_id:universe`, where `type_id` matches the
-receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. Feature flags
+receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. V3.5 nodes
+also append `B:<profile>` where profile is `v1`, `v2`, or `v31`. Feature flags
 are appended as `F:<letters>`; current letters are `R` for remote rename via
 ArtAddress, `I` for remote IP configuration via ArtIPConfig, `O` for remote
 output configuration via ArtOutputConfig, and `H` for the identify flash used by
@@ -87,14 +88,18 @@ Each physical output maps to one Art-Net universe. Outputs can be dynamically re
 | Short Strip | 30 | 90 | Linear |
 | Long Strip | 72 | 216 | Linear |
 | Grid 8×8 | 64 | 192 | Grid (serpentine) |
+| Small Grid 4×8 | 32 | 96 | Grid (serpentine) |
+| Extra Long Strip | 122 | 366 | Linear |
 
 ### Default Universe Layout
 
-| Output | Default Type | Pixels | Universe |
-|--------|------|-------:|---------|
-| A0 | Short Strip | 30 | 0 |
-| A1 | Long Strip | 72 | 1 |
-| A2 | Grid 8×8 | 64 | 2 |
+V3.5 receiver profiles expose two logical outputs per node. Each output maps to one Art-Net universe.
+
+| Profile | Hardware | Output A0 / Universe 0 | Output A1 / Universe 1 |
+|--------|----------|--------------------------|--------------------------|
+| `v1` | Huzzah32 direct NeoPixel | Small Grid 4×8, GPIO32 | Long Strip, GPIO12 |
+| `v2` | ESP32 Feather V2 direct NeoPixel | Small Grid 4×8, GPIO32 | Short Strip, GPIO12 |
+| `v31` | ESP32-S3 Reverse TFT + NeoPXL8 | Short Strip, FeatherWing output 6 / GPIO14 | Long Strip, FeatherWing output 7 / GPIO15 |
 
 All data fits within the 512-byte Art-Net universe limit. One ArtDmx packet per universe, per frame.
 
@@ -122,7 +127,7 @@ All data fits within the 512-byte Art-Net universe limit. One ArtDmx packet per 
 ### Frame Rate
 
 - The node renders data as fast as it arrives. For smooth animation, **30 FPS** is a good default. The hardware supports up to ~60+ FPS depending on strip length.
-- Packets for universes 0, 1, and 2 within a **5 ms window** are assembled into a single frame. If a universe is missing, the timeout fires and the frame renders with stale data for that output.
+- Packets for active output universes within a **5 ms window** are assembled into a single frame. If a universe is missing, the timeout fires and the frame renders with the most recent data for the other output.
 - The **sequence byte** (offset 12) should increment 1→255→1 with each frame. This lets the node detect and discard out-of-order packets.
 
 ---
@@ -170,8 +175,8 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 | 0–7 | 8 | Header | `Art-Net\0` |
 | 8–9 | 2 | Opcode | `0x8100` (little-endian) |
 | 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
-| 12 | 1 | NumOutputs | Number of outputs to configure (1–3) |
-| 13+ | N | Type IDs | One byte per output: 0=Off, 1=Short Strip, 2=Long Strip, 3=Grid |
+| 12 | 1 | NumOutputs | Number of outputs to configure (1–2) |
+| 13+ | N | Type IDs | One byte per output; IDs are listed below. |
 
 **Total: 13 + NumOutputs bytes.** The node updates its output configuration, clears pixel buffers, recounts active outputs, and broadcasts an updated ArtPollReply.
 
@@ -183,6 +188,8 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 | 1 | Short Strip | 30 |
 | 2 | Long Strip | 72 |
 | 3 | Grid 8×8 | 64 |
+| 4 | Small Grid 4×8 | 32 |
+| 5 | Extra Long Strip | 122 |
 
 ---
 
@@ -226,7 +233,7 @@ If no NVS keys are present at boot, the node uses DHCP (default behavior).
 
 ## 7. Effects Engine
 
-The sender provides a built-in effects engine (V3.1: `effects.py`, V3.0: embedded in `led_controller.py`) with the following effects:
+The sender provides a built-in effects engine (`V3_5/sender/effects.py` in the current compatibility track) with the following effects:
 
 | Effect | Description | Extra Parameters |
 |--------|-------------|------------------|
@@ -245,18 +252,18 @@ The sender provides a built-in effects engine (V3.1: `effects.py`, V3.0: embedde
 
 The effects engine uses a **Look** architecture. In **V3.0**, animation state is computed once per frame and sent identically to all connected devices, with 3 output slots matching the 3 physical outputs.
 
-In **V3.1**, this is extended with a clip/look workflow:
+In **V3.5**, this is extended with a clip/look workflow:
 - **Clips** are saved effect presets (effect type, colors, speed, playback mode) scoped to an output type.
 - **Looks** are timeline-based compositions of clips across multiple tracks, with per-segment timing and crossfades.
 - **Playback sources** determine what drives the outputs: `designer` (live effect editing), `mixer` (look preview), `controller` (cue list playback), or `idle` (black).
 
-Each Look has output slots matching physical outputs. Each slot has its own type, effect, colors, speed, and parameters.
+Each Look has two output slots matching the current V3.5 receiver profile contract. Each slot has its own type, effect, colors, speed, and parameters.
 
 ---
 
-## 8. HTTP Control API (V3.1 Sender)
+## 8. HTTP Control API (V3.5 Sender)
 
-The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server auto-selects a port (printed at startup).
+The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
 
 ### GET Endpoints
 
@@ -305,7 +312,7 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | `POST /api/looks/save` | Look dict | Save or update a look (timeline with tracks, segments, metadata) |
 | `POST /api/mixer/frame` | `{look: {...}, t: 0.0}` | Compute one preview frame for a full look at time `t`. Returns `{outputs: [{pixels, grid, type}, ...]}`. Stateless — no hardware output |
 | `POST /api/mixer/preview` | Look dict (+ optional `device_filter`, `play_time`, `playing`) | Start previewing a look on connected devices |
-| `POST /api/mixer/update` | `{play_time, playing}` | Lightweight update of mixer preview time/playing state without resending full look |
+| `POST /api/mixer/update` | `{play_time, playing, device_filter}` | Lightweight update of mixer preview time/playing state and optional live preview target list without resending full look |
 | `POST /api/mixer/stop_preview` | `{}` | Stop mixer preview, return to idle |
 
 ### POST Endpoints — Cue Controller
@@ -329,7 +336,7 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 
 ---
 
-## 9. TFT Display
+## 9. Hardware Status Indicators
 
 The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Screen modes are cycled with button D0:
 
@@ -341,6 +348,14 @@ The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Scr
 | **Test Mode** | Test pattern name (entered via D1 button) |
 
 The device name shown on the TFT is the custom name (set via ArtAddress/Rename) or the default firmware name "PrimusV3".
+
+V1 and V2 boards have no TFT, so V3.5 firmware uses simple onboard connection indicators:
+
+| Profile | Indicator | Connected | Disconnected |
+|---------|-----------|-----------|--------------|
+| `v1` | `LED_BUILTIN` | On | Off |
+| `v2` | Onboard NeoPixel | Green | Off |
+| `v31` | TFT | `WiFi OK` | `No WiFi` / error screen |
 
 ---
 
@@ -412,7 +427,7 @@ PrimusV3 speaks **Art-Net only** (not sACN). Use OLA (Open Lighting Architecture
 1. **Verify network.** Sender and node must be on the same subnet (default: 192.168.1.x/24, WiFi SSID: NETGEAR44).
 2. **Discover.** Send ArtPoll to broadcast:6454. Expect ArtPollReply within ~100 ms.
 3. **Send data.** Build ArtDmx packets for active universes with correct pixel counts. Send to node IP on port 6454.
-4. **Verify.** The TFT display shows device name, WiFi status, IP, RSSI, and live FPS.
+4. **Verify.** V3.1-style boards show WiFi/IP/FPS on the TFT. V1 shows `LED_BUILTIN` on when connected. V2 shows its onboard NeoPixel green when connected.
 5. **Optional telemetry.** Listen on UDP 6455 for 7-byte FPS packets from the node.
 
 ---
@@ -429,7 +444,9 @@ enum OutputType {
   OUTPUT_SHORT_STRIP = 1,
   OUTPUT_LONG_STRIP  = 2,
   OUTPUT_GRID        = 3,
-  OUTPUT_RING        = 4,          // ← new
+  OUTPUT_SMALL_GRID  = 4,
+  OUTPUT_EXTRA_LONG_STRIP = 5,
+  OUTPUT_RING        = 6,          // new, append only
 };
 
 const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
@@ -437,11 +454,13 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
   { "Short Strip", 30, 3, LAYOUT_LINEAR, 0, 0 },
   { "Long Strip",  72, 3, LAYOUT_LINEAR, 0, 0 },
   { "Grid 8x8",   64, 3, LAYOUT_GRID,   8, 8 },
-  { "Ring",        24, 3, LAYOUT_LINEAR, 0, 0 },  // ← new
+  { "Grid 4x8",   32, 3, LAYOUT_GRID,   4, 8 },
+  { "Extra Long Strip", 122, 3, LAYOUT_LINEAR, 0, 0 },
+  { "Ring",        24, 3, LAYOUT_LINEAR, 0, 0 },  // new, append only
 };
 ```
 
-### On the sender side (V3.1: state.py / V3.0: led_controller.py)
+### On the sender side (V3.5: state.py)
 
 Add a matching entry to `OUTPUT_TYPES` and `LOOK_OUTPUT_TYPES`:
 
@@ -451,10 +470,12 @@ OUTPUT_TYPES = {
     "short_strip": {"pixels": 30, "layout": "linear"},
     "long_strip":  {"pixels": 72, "layout": "linear"},
     "grid":        {"pixels": 64, "layout": "grid", "grid_size": [8, 8]},
-    "ring":        {"pixels": 24, "layout": "linear"},  # ← new
+    "small_grid":  {"pixels": 32, "layout": "grid", "grid_size": [4, 8]},
+    "extra_long_strip": {"pixels": 122, "layout": "linear"},
+    "ring":        {"pixels": 24, "layout": "linear"},
 }
 
-LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "ring"]
+  LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "small_grid", "extra_long_strip", "ring"]
 # Indices must match firmware OutputType enum IDs
 ```
 

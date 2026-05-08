@@ -1,6 +1,6 @@
 # PrimusV3
 
-WiFi-controlled LED lighting system for live performance costumes. A Python sender drives ESP32-S3 receiver nodes over Art-Net.
+WiFi-controlled LED lighting system for live performance costumes. A Python sender drives ESP32 receiver nodes over Art-Net.
 
 ## How It Works
 
@@ -14,13 +14,51 @@ WiFi-controlled LED lighting system for live performance costumes. A Python send
 └──────────────┘                   └──────────────────┘
 ```
 
-The sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. The current V3.1 receiver firmware drives 2 NeoPixel outputs through the NeoPXL8 FeatherWing fixed outputs 6 and 7.
+The sender runs a web UI with a built-in effects engine. It computes animation frames and sends pixel data over Art-Net to one or more receiver nodes on the same WiFi network. The current V3.5 track supports reflashed V1, V2, and V3.1 hardware through one shared Art-Net protocol.
 
 ## Versions
 
-### V3.5 (Compatibility Track)
+### V3.5 (Current Compatibility Track)
 
 V3.5 builds on V3.1 to run reflashed V1, V2, and V3.1 receiver hardware from the same current Art-Net sender/controller protocol. It uses one shared firmware source tree with board profiles for V1 Huzzah32, V2 ESP32 Feather, and V3.1 ESP32-S3 Reverse TFT hardware.
+
+Main updates:
+- One active V3.5 sender under `V3_5/sender/` with the clip/look/cue workflow from V3.1.
+- One active receiver firmware tree under `V3_5/Arduino/primusV3_receiver/` with compile-time profiles for `v1`, `v2`, and `v3_1`.
+- New output types for legacy hardware: `small_grid` (4x8 / 32 px) and `extra_long_strip` (122 px).
+- Discovery now advertises hardware profile metadata with `PV3CAP1|...|B:<profile>|F:RIOH`.
+- V1 and V2 screenless boards have connection indicators: V1 uses `LED_BUILTIN`; V2 uses the onboard NeoPixel.
+- Plain `run.py` launch replaces any previous V3.5 sender and opens one dedicated Primus browser window.
+
+Launch the V3.5 interface:
+
+```bash
+python3 V3_5/sender/run.py
+```
+
+The default URL is `http://127.0.0.1:8080`. If 8080 is busy, the sender falls back to an auto-selected port and prints the URL. Use `--no-browser` for automated checks and `--port 0` when you explicitly want an auto-selected port.
+
+Upload V3.5 firmware:
+
+```bash
+./V3_5/Arduino/upload.sh --board v1 --compile
+./V3_5/Arduino/upload.sh --board v2 --compile
+./V3_5/Arduino/upload.sh --board v3_1 --compile
+
+./V3_5/Arduino/upload.sh --board v1 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh --board v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodemXXXX
+```
+
+Useful upload flags:
+
+| Flag | Use |
+| --- | --- |
+| `--board v1`, `--board v2`, `--board v3_1` | Select the hardware profile. Defaults to `v3_1`. |
+| `--compile` | Compile only; do not upload. |
+| `--install` | Check/install required Arduino libraries for the selected board. |
+| `--baud <rate>` / `--speed <rate>` | Override upload speed. |
+| `/dev/cu...` | Explicit serial port when multiple boards are connected. |
 
 Start here for V3.5 development:
 - [V3_5/README.md](V3_5/README.md) - documentation index and quick start
@@ -28,7 +66,7 @@ Start here for V3.5 development:
 - [V3_5/SENDER_DEVELOPMENT.md](V3_5/SENDER_DEVELOPMENT.md) - sender architecture, discovery parsing, API behavior, and tests
 - [V3_5/hardwareCompatibility.md](V3_5/hardwareCompatibility.md) - compact board/profile/pin/output reference
 
-### V3.1 (Active)
+### V3.1 (Previous Modular Track)
 
 Modular Python sender with a full clip/look workflow for live performance. The sender is split into focused modules and the web UI uses Alpine.js with separate HTML/CSS/JS files.
 
@@ -76,40 +114,39 @@ flowchart LR
 
 ## Quick Start
 
-### Sender (V3.1)
+### Sender (V3.5)
 
 ```bash
-python3 V3_1/sender/run.py
+python3 V3_5/sender/run.py
 ```
 
-Opens a web UI at the printed URL (auto-selects an available port). No external dependencies — Python 3 stdlib only.
+Opens the V3.5 web UI at `http://127.0.0.1:8080` unless that port is busy. No external dependencies — Python 3 stdlib only.
 
 ```bash
-python3 V3_1/sender/run.py --port 8080        # specify port
-python3 V3_1/sender/run.py --no-browser        # don't auto-open browser
+python3 V3_5/sender/run.py --port 8080         # specify port
+python3 V3_5/sender/run.py --port 0            # force auto-selected port
+python3 V3_5/sender/run.py --no-browser        # don't auto-open browser
 ```
 
-### Firmware
+### Firmware (V3.5)
 
 ```bash
-cd V3_1/Arduino
-./upload.sh
+./V3_5/Arduino/upload.sh --board v3_1
 ```
 
-Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the board, installs libraries, compiles, and uploads.
+Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks required libraries, compiles, and uploads. Add an explicit serial port when multiple boards are connected.
 
 ```bash
-./upload.sh --compile    # compile only, no upload
-./upload.sh --install    # install required libraries only
-./upload.sh /dev/cu.usbmodem14101  # specify port manually
+./V3_5/Arduino/upload.sh --board v1 --compile
+./V3_5/Arduino/upload.sh --board v2 --install
+./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodem14101
 ```
 
 ## Hardware
 
-- **Board:** [Adafruit ESP32-S3 Reverse TFT Feather](https://www.adafruit.com/product/5691)
-- **LED driver:** NeoPXL8 FeatherWing fixed outputs 6 and 7 on GPIO14/GPIO15 (A4/A3)
-- **Display:** Built-in 240×135 ST7789 TFT — shows device name, WiFi status, IP, RSSI, live FPS
-- **Buttons:** D0 cycles display screens, D1 toggles test mode
+- **V1:** Adafruit Huzzah32 ESP32 Feather, direct NeoPixel outputs on GPIO32/GPIO12, `LED_BUILTIN` WiFi indicator
+- **V2:** Adafruit ESP32 Feather V2, direct NeoPixel outputs on GPIO32/GPIO12, onboard NeoPixel WiFi indicator
+- **V3.1:** Adafruit ESP32-S3 Reverse TFT Feather + NeoPXL8 FeatherWing fixed outputs 6 and 7 on GPIO14/GPIO15 (A4/A3), TFT status display
 
 ### Output Types
 
@@ -119,8 +156,10 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the 
 | Short Strip | 30 | Linear |
 | Long Strip | 72 | Linear |
 | Grid 8×8 | 64 | Serpentine |
+| Small Grid 4×8 | 32 | Serpentine |
+| Extra Long Strip | 122 | Linear |
 
-Output types are configurable at runtime from the web UI — no reflashing needed. The current V3.1 receiver exposes 2 independently assignable outputs (A0 and A1).
+Output types are configurable at runtime from the web UI — no reflashing needed. V3.5 receiver profiles expose 2 independently assignable outputs (A0 and A1).
 
 ## Effects
 
@@ -149,7 +188,7 @@ Standard Art-Net 4 over UDP, plus custom extensions for output and IP configurat
 | Static IP config (custom) | 6454 | 0x8200 |
 | FPS telemetry (custom) | 6455 | — |
 
-Discovery also carries a PrimusV3 capability tag in ArtPollReply Node Report: `PV3CAP1|port:type_id:universe|F:RIOH`. The sender uses that to decide whether a node explicitly advertises rename, hello, IP-config, and output-config support, while still falling back to legacy Primus behavior for older firmware.
+Discovery also carries a PrimusV3 capability tag in ArtPollReply Node Report: `PV3CAP1|port:type_id:universe|B:profile|F:RIOH`. The sender uses that to identify hardware profile and decide whether a node explicitly advertises rename, hello, IP-config, and output-config support, while still falling back to legacy Primus behavior for older firmware.
 
 Any Art-Net compatible software (TouchDesigner, MadMapper, etc.) can drive these nodes directly. See [API_REFERENCE.md](API_REFERENCE.md) for full protocol docs.
 
@@ -157,7 +196,15 @@ Any Art-Net compatible software (TouchDesigner, MadMapper, etc.) can drive these
 
 ```
 PrimusV3/
-├── V3_1/                            # Active version
+├── V3_5/                            # Current compatibility track for V1/V2/V3.1 hardware
+│   ├── README.md                    # V3.5 documentation index
+│   ├── FIRMWARE_DEVELOPMENT.md      # Firmware profile and protocol notes
+│   ├── SENDER_DEVELOPMENT.md        # Sender architecture and API notes
+│   ├── hardwareCompatibility.md     # Board, pin, and output type reference
+│   ├── Arduino/
+│   ├── sender/
+│   └── previousHardware/            # Archived V1/V2 reference firmware/specs
+├── V3_1/                            # Previous modular version
 │   ├── sender/
 │   │   ├── run.py                   # Entry point
 │   │   ├── state.py                 # Core state, animation loop, device mgmt
@@ -184,22 +231,12 @@ PrimusV3/
 │           ├── config.h
 │           ├── display.h
 │           └── buttons.h
-├── V3_5/                            # Compatibility track for reflashed V1/V2/V3.1 hardware
-│   ├── README.md                    # V3.5 documentation index
-│   ├── FIRMWARE_DEVELOPMENT.md      # Firmware profile and protocol notes
-│   ├── SENDER_DEVELOPMENT.md        # Sender architecture and API notes
-│   ├── hardwareCompatibility.md     # Board, pin, and output type reference
-│   ├── Arduino/
-│   ├── sender/
-│   └── previousHardware/            # Archived V1/V2 reference firmware/specs
 ├── V3_0/                            # Archived original version
 │   ├── sender/
 │   │   └── led_controller.py       # Single-file sender (~1800 lines)
 │   └── Arduino/
 │       └── primusV3_receiver/
 ├── API_REFERENCE.md
-├── DEPLOYMENT_STRATEGY.md
-├── V3_1Plan.md                      # V3.1 design spec
 ├── CLAUDE.md
 └── .github/
     └── copilot-instructions.md
@@ -211,14 +248,14 @@ Both sides use lookup tables — add one row each:
 
 **config.h:**
 ```c
-OUTPUT_RING = 4,  // add to OutputType enum
+OUTPUT_RING = 6,  // append to OutputType enum
 { "Ring", 24, 3, LAYOUT_LINEAR, 0, 0 },  // add to OUTPUT_TYPE_TABLE
 ```
 
-**state.py (V3.1) / led_controller.py (V3.0):**
+**state.py (V3.5):**
 ```python
 "ring": {"pixels": 24, "layout": "linear"},  # add to OUTPUT_TYPES
-LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "ring"]
+LOOK_OUTPUT_TYPES = ["none", "short_strip", "long_strip", "grid", "small_grid", "extra_long_strip", "ring"]
 # Index must match enum value
 ```
 

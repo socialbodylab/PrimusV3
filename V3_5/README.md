@@ -11,7 +11,6 @@ The important design choice is that V1 and V2 hardware are not supported through
 | [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) | Receiver firmware profiles, pins, output tables, Art-Net contracts, and firmware change checklist. |
 | [SENDER_DEVELOPMENT.md](SENDER_DEVELOPMENT.md) | Python sender architecture, discovery metadata, output type synchronization, API behavior, and tests. |
 | [hardwareCompatibility.md](hardwareCompatibility.md) | Compact board/profile/pin/output reference. |
-| [V3_5Firmwareplan.md](V3_5Firmwareplan.md) | Original implementation plan and current status notes. |
 | [previousHardware/](previousHardware/) | Archived V1/V2 firmware and specs used only as historical reference. |
 
 ## Current Structure
@@ -35,8 +34,7 @@ V3_5/
 ├── previousHardware/
 ├── hardwareCompatibility.md
 ├── FIRMWARE_DEVELOPMENT.md
-├── SENDER_DEVELOPMENT.md
-└── V3_5Firmwareplan.md
+└── SENDER_DEVELOPMENT.md
 ```
 
 ## Supported Hardware Profiles
