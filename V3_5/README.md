@@ -77,6 +77,10 @@ Run the sender:
 python3 V3_5/sender/run.py
 ```
 
+By default the interface uses `http://127.0.0.1:8080`, falling back to an auto-selected port only if 8080 is busy. Running `run.py` directly starts the server, replaces any previous V3.5 sender process, and opens the interface. When Chrome, Edge, Brave, or Chromium is available, the sender uses a fresh Primus-only app window so browser session restore cannot reopen duplicate old tabs; otherwise it falls back to the system default browser. Use `--no-browser` only for automated checks where no browser should be opened.
+
+`run.py` is the only interface entry point. `controller.py` is a cue-controller module and does not launch the UI.
+
 Run sender checks:
 
 ```sh

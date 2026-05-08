@@ -1,0 +1,11 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
+
+# Primus sender runtime state
+V3_1/sender/.primus_state.json
+V3_5/sender/.primus_state.json
+sender/.primus_state.json

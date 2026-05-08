@@ -52,6 +52,7 @@ CONTROL_CAPABILITY_LABELS = {
     "ip_config": "remote IP configuration",
     "output_config": "remote output configuration",
 }
+_DEVICE_FILTER_UNCHANGED = object()
 
 # ======================================================================
 #  DEFAULTS
@@ -417,6 +418,22 @@ class ControllerState:
             "connected_count": target["connected_count"],
             "using_override": self._override_pixels is not None,
         }
+
+    def _normalize_mixer_device_filter(self, device_filter):
+        if device_filter is None:
+            return None
+        indices = []
+        seen = set()
+        for raw_idx in device_filter:
+            try:
+                idx = int(raw_idx)
+            except (TypeError, ValueError):
+                continue
+            if idx in seen or idx < 0 or idx >= len(self.devices):
+                continue
+            seen.add(idx)
+            indices.append(idx)
+        return indices
 
     def build_black_frame(self):
         """Return an all-black frame matching the active look output sizes."""
@@ -844,11 +861,12 @@ class ControllerState:
             )
             self._mixer_preview_start_mono = time.monotonic()
             self._mixer_preview_playing = playing
-            self._mixer_preview_device_filter = device_filter
+            self._mixer_preview_device_filter = self._normalize_mixer_device_filter(device_filter)
             self._set_playback_source_unlocked(self.SOURCE_MIXER)
 
     def update_mixer_preview(self, play_time=None, playing=None,
-                             transport_time=None, seq=None):
+                             transport_time=None, seq=None,
+                             device_filter=_DEVICE_FILTER_UNCHANGED):
         """Update time / playing state without resending the full look.
         seq: monotonically increasing sequence number from the client. If
         provided and lower than the last processed sequence, the update is
@@ -861,6 +879,8 @@ class ControllerState:
                 if seq < self._mixer_update_last_seq:
                     return  # Stale request, ignore
                 self._mixer_update_last_seq = seq
+            if device_filter is not _DEVICE_FILTER_UNCHANGED:
+                self._mixer_preview_device_filter = self._normalize_mixer_device_filter(device_filter)
             if play_time is not None:
                 self._mixer_preview_play_time = play_time
             if transport_time is not None:

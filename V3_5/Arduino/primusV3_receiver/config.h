@@ -56,12 +56,18 @@ enum OutputType {
 };
 
 #if defined(PRIMUS_PROFILE_V1)
+  #ifndef LED_BUILTIN
+    #define LED_BUILTIN 13
+  #endif
   #define BOARD_PROFILE_ID        "v1_huzzah"
   #define BOARD_PROFILE_CODE      "v1"
   #define BOARD_PROFILE_LABEL     "V1 Huzzah32"
   #define BOARD_OUTPUT_DRIVER     PRIMUS_DRIVER_DIRECT
   #define BOARD_HAS_TFT_DISPLAY   0
   #define BOARD_HAS_BUTTONS       0
+  #define BOARD_HAS_STATUS_LED    1
+  #define BOARD_STATUS_LED_PIN    LED_BUILTIN
+  #define BOARD_STATUS_LED_ACTIVE_HIGH 1
   #define OUTPUT0_PIN             32
   #define OUTPUT1_PIN             12
   #define OUTPUT0_PHYSICAL_PORT   0
@@ -75,6 +81,10 @@ enum OutputType {
   #define BOARD_OUTPUT_DRIVER     PRIMUS_DRIVER_DIRECT
   #define BOARD_HAS_TFT_DISPLAY   0
   #define BOARD_HAS_BUTTONS       0
+  #define BOARD_HAS_STATUS_NEOPIXEL 1
+  #define BOARD_STATUS_NEOPIXEL_PIN 0
+  #define BOARD_STATUS_NEOPIXEL_POWER_PIN 2
+  #define BOARD_STATUS_NEOPIXEL_BRIGHTNESS 40
   #define OUTPUT0_PIN             32
   #define OUTPUT1_PIN             12
   #define OUTPUT0_PHYSICAL_PORT   0
@@ -94,6 +104,25 @@ enum OutputType {
   #define OUTPUT1_PHYSICAL_PORT   7
   #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SHORT_STRIP
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
+#endif
+
+#ifndef BOARD_HAS_STATUS_LED
+  #define BOARD_HAS_STATUS_LED 0
+#endif
+#ifndef BOARD_STATUS_LED_ACTIVE_HIGH
+  #define BOARD_STATUS_LED_ACTIVE_HIGH 1
+#endif
+#ifndef BOARD_HAS_STATUS_NEOPIXEL
+  #define BOARD_HAS_STATUS_NEOPIXEL 0
+#endif
+#ifndef BOARD_STATUS_NEOPIXEL_PIN
+  #define BOARD_STATUS_NEOPIXEL_PIN -1
+#endif
+#ifndef BOARD_STATUS_NEOPIXEL_POWER_PIN
+  #define BOARD_STATUS_NEOPIXEL_POWER_PIN -1
+#endif
+#ifndef BOARD_STATUS_NEOPIXEL_BRIGHTNESS
+  #define BOARD_STATUS_NEOPIXEL_BRIGHTNESS 40
 #endif
 
 // Layout hint — used by display and sender for rendering

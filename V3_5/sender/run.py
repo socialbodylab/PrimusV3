@@ -5,13 +5,19 @@ run.py — PrimusV3.5 LED Controller entry point.
 Usage:
     python3 run.py
     python3 run.py --port 8080
+    python3 run.py --no-browser
 """
 
 import argparse
+import errno
 import os
 import signal
+import shutil
 import subprocess
+import sys
+import tempfile
 import threading
+import time
 import webbrowser
 
 from artnet import FpsListener
@@ -22,26 +28,47 @@ from effects import blend_pixels
 from server import create_server
 
 
+DEFAULT_HTTP_PORT = 8080
+DEDICATED_BROWSER_PROFILE_ROOT = "primusv35-browser-profiles"
+DEDICATED_BROWSER_PID_FILE = "browser.pid"
+
+
+def _handle_sigterm(signum, frame):
+    raise KeyboardInterrupt
+
+
 def _kill_existing():
-    """Kill any other running instances of this script and wait for them to exit."""
+    """Kill other V3.5 sender launchers and wait for them to exit."""
     import time
     my_pid = os.getpid()
-    my_script = os.path.abspath(__file__)
+    sender_dir = os.path.dirname(os.path.abspath(__file__))
+    script_patterns = {
+        os.path.join(sender_dir, "run.py"),
+        os.path.join(sender_dir, "controller.py"),
+        "V3_5/sender/run.py",
+        "V3_5/sender/controller.py",
+    }
     try:
         out = subprocess.check_output(
-            ["pgrep", "-f", my_script], text=True, stderr=subprocess.DEVNULL
+            ["ps", "-axo", "pid=,command="], text=True, stderr=subprocess.DEVNULL
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return
     killed = []
-    for line in out.strip().splitlines():
-        pid = int(line.strip())
+    for line in out.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid = int(parts[0])
+        command = parts[1]
         if pid == my_pid:
+            continue
+        if not any(pattern in command for pattern in script_patterns):
             continue
         try:
             os.kill(pid, signal.SIGTERM)
             killed.append(pid)
-            print(f"Killed previous instance (PID {pid})")
+            print(f"Replacing previous sender instance (PID {pid})")
         except ProcessLookupError:
             pass
     # Wait for killed processes to release their sockets
@@ -52,6 +79,225 @@ def _kill_existing():
                 time.sleep(0.1)
             except ProcessLookupError:
                 break
+
+
+def _create_server_with_fallback(host, port, state, cue_list):
+    try:
+        return create_server(host, port, state, cue_list)
+    except OSError as exc:
+        if port == 0:
+            raise
+        if exc.errno not in (errno.EADDRINUSE, 48, 98):
+            raise
+        print(f"Port {port} is busy; using an auto-selected port instead.")
+        return create_server(host, 0, state, cue_list)
+
+
+def _browser_profile_root():
+    return os.path.join(tempfile.gettempdir(), DEDICATED_BROWSER_PROFILE_ROOT)
+
+
+def _new_browser_profile_dir():
+    profile_name = f"profile-{os.getpid()}-{int(time.time() * 1000)}"
+    return os.path.join(_browser_profile_root(), profile_name)
+
+
+def _browser_pid_path(profile_root):
+    return os.path.join(profile_root, DEDICATED_BROWSER_PID_FILE)
+
+
+def _add_browser_candidate(candidates, seen, label, executable):
+    if not executable:
+        return
+    path = executable if os.path.isabs(executable) else shutil.which(executable)
+    if not path:
+        return
+    path = os.path.abspath(os.path.expanduser(path))
+    if path in seen:
+        return
+    seen.add(path)
+    candidates.append((label, path))
+
+
+def _chromium_browser_candidates():
+    candidates = []
+    seen = set()
+
+    _add_browser_candidate(candidates, seen, "configured browser", os.environ.get("PRIMUS_BROWSER"))
+
+    if sys.platform == "darwin":
+        mac_apps = [
+            ("Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            ("Microsoft Edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+            ("Brave Browser", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+            ("Chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        ]
+        for label, path in mac_apps:
+            _add_browser_candidate(candidates, seen, label, path)
+    elif os.name == "nt":
+        roots = [
+            os.environ.get("PROGRAMFILES"),
+            os.environ.get("PROGRAMFILES(X86)"),
+            os.environ.get("LOCALAPPDATA"),
+        ]
+        windows_apps = [
+            ("Google Chrome", ("Google", "Chrome", "Application", "chrome.exe")),
+            ("Microsoft Edge", ("Microsoft", "Edge", "Application", "msedge.exe")),
+            ("Brave Browser", ("BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
+        ]
+        for root in roots:
+            if not root:
+                continue
+            for label, parts in windows_apps:
+                _add_browser_candidate(candidates, seen, label, os.path.join(root, *parts))
+    else:
+        linux_apps = [
+            ("Google Chrome", "google-chrome"),
+            ("Google Chrome", "google-chrome-stable"),
+            ("Microsoft Edge", "microsoft-edge"),
+            ("Brave Browser", "brave-browser"),
+            ("Chromium", "chromium"),
+            ("Chromium", "chromium-browser"),
+        ]
+        for label, command in linux_apps:
+            _add_browser_candidate(candidates, seen, label, command)
+
+    path_apps = [
+        ("Google Chrome", "chrome"),
+        ("Google Chrome", "google-chrome"),
+        ("Microsoft Edge", "msedge"),
+        ("Brave Browser", "brave"),
+        ("Brave Browser", "brave-browser"),
+        ("Chromium", "chromium"),
+        ("Chromium", "chromium-browser"),
+    ]
+    for label, command in path_apps:
+        _add_browser_candidate(candidates, seen, label, command)
+
+    return candidates
+
+
+def _terminate_process(pid, timeout=1.0):
+    if pid == os.getpid():
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except OSError:
+        return
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        except OSError:
+            return
+        time.sleep(0.05)
+    if hasattr(signal, "SIGKILL"):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _terminate_tracked_browser_process(profile_root):
+    try:
+        with open(_browser_pid_path(profile_root), "r", encoding="utf-8") as pid_file:
+            pid_text = pid_file.read().strip()
+        if pid_text:
+            _terminate_process(int(pid_text))
+    except (FileNotFoundError, OSError, ValueError):
+        return
+
+
+def _terminate_dedicated_browser_processes(profile_root):
+    profile_root = os.path.abspath(profile_root)
+    marker = "--user-data-dir="
+    _terminate_tracked_browser_process(profile_root)
+    if os.name == "nt":
+        return
+    try:
+        out = subprocess.check_output(
+            ["ps", "-axo", "pid=,command="], text=True, stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return
+    killed = []
+    for line in out.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid = int(parts[0])
+        command = parts[1]
+        if marker not in command or profile_root not in command:
+            continue
+        killed.append(pid)
+    for pid in killed:
+        _terminate_process(pid)
+
+
+def _cleanup_dedicated_browser_profiles(profile_root):
+    _terminate_dedicated_browser_processes(profile_root)
+    try:
+        shutil.rmtree(profile_root)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+    os.makedirs(profile_root, exist_ok=True)
+
+
+def _launch_dedicated_browser(url):
+    candidates = _chromium_browser_candidates()
+    if not candidates:
+        return None
+
+    profile_root = _browser_profile_root()
+    _cleanup_dedicated_browser_profiles(profile_root)
+    profile_dir = _new_browser_profile_dir()
+    os.makedirs(profile_dir, exist_ok=True)
+    for label, executable in candidates:
+        args = [
+            executable,
+            f"--user-data-dir={profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-session-crashed-bubble",
+            f"--app={url}",
+        ]
+        popen_kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "DETACHED_PROCESS", 0)
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+        try:
+            browser_process = subprocess.Popen(args, **popen_kwargs)
+        except OSError:
+            continue
+        try:
+            with open(_browser_pid_path(profile_root), "w", encoding="utf-8") as pid_file:
+                pid_file.write(str(browser_process.pid))
+        except OSError:
+            pass
+        return f"opened {label} app window"
+    return None
+
+
+def _open_browser(url):
+    dedicated_result = _launch_dedicated_browser(url)
+    if dedicated_result:
+        return dedicated_result
+    webbrowser.open_new(url)
+    return "opened default browser"
 
 
 def _mixer_controller_loop(state, cue_list):
@@ -194,12 +440,13 @@ def _mixer_controller_loop(state, cue_list):
 def main():
     parser = argparse.ArgumentParser(
         description="PrimusV3.5 LED Controller")
-    parser.add_argument("--port", type=int, default=0,
-                        help="HTTP port (0 = auto-select)")
+    parser.add_argument("--port", type=int, default=DEFAULT_HTTP_PORT,
+                        help=f"HTTP port (default {DEFAULT_HTTP_PORT}; 0 = auto-select)")
     parser.add_argument("--no-browser", action="store_true",
-                        help="Don't open browser on startup")
+                        help="Print the URL without opening the browser")
     args = parser.parse_args()
 
+    signal.signal(signal.SIGTERM, _handle_sigterm)
     _kill_existing()
 
     fps_listener = FpsListener()
@@ -213,7 +460,7 @@ def main():
     print("Restoring saved devices...")
     state.restore_devices()
 
-    server = create_server("127.0.0.1", args.port, state, cue_list)
+    server = _create_server_with_fallback("127.0.0.1", args.port, state, cue_list)
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}"
 
@@ -227,10 +474,11 @@ def main():
     print("PrimusV3.5 LED Controller")
     print(f"  URL: {url}")
     print(f"  Devices: {len(state.devices)}")
+    if args.no_browser:
+        print("  Browser: not opened (--no-browser)")
+    else:
+        print(f"  Browser: {_open_browser(url)}")
     print()
-
-    if not args.no_browser:
-        webbrowser.open(url)
 
     try:
         server.serve_forever()

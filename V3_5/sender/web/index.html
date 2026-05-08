@@ -52,8 +52,8 @@
         <div class="flex justify-between items-center mb-4">
             <span class="section-title" style="margin:0">Devices</span>
             <div class="btn-group">
-                <button class="btn btn-sm" @click="$store.conn.connectAll()">All On</button>
-                <button class="btn btn-sm" @click="$store.conn.disconnectAll()">All Off</button>
+                <button class="btn btn-sm" @click="$store.conn.connectAll()">Connect All</button>
+                <button class="btn btn-sm" @click="$store.conn.disconnectAll()">Disconnect All</button>
             </div>
         </div>
 
@@ -73,41 +73,36 @@
                                @blur="$store.conn.finishRename(di)"
                                x-init="$nextTick(() => { $el.focus(); $el.select() })">
                     </template>
-                    <div class="btn-group">
+                        <div class="btn-group device-actions">
                         <button class="btn btn-sm"
                                 :class="{ 'btn-primary': !dev.connected }"
                                 @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
-                                x-text="dev.connected ? 'Off' : 'On'"></button>
+                            x-text="dev.connected ? 'Disconnect' : 'Connect'"></button>
+                        <button class="btn btn-sm"
+                            :disabled="!$store.conn.canRenameDevice(dev)"
+                            :title="$store.conn.renameHint(dev)"
+                            @click="$store.conn.startRename(di)">Rename</button>
                         <button class="btn btn-sm" x-show="dev.connected"
                             :disabled="!$store.conn.canHelloDevice(dev)"
                             :title="$store.conn.helloHint(dev)"
                                 @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
-                        <button class="btn btn-sm"
-                                :class="{ 'btn-primary': $store.conn.ipConfigDevice === di }"
-                                :disabled="!$store.conn.canConfigureIp(dev)"
-                                :title="$store.conn.ipConfigHint(dev)"
-                                @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)">IP</button>
-                        <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">Remove</button>
                     </div>
                 </div>
                 <div class="device-meta">
-                    <span class="device-ip" x-text="dev.ip"></span>
+                    <button class="device-ip-button"
+                            :class="{ active: $store.conn.ipConfigDevice === di }"
+                            :disabled="!$store.conn.canConfigureIp(dev)"
+                            :title="$store.conn.ipConfigHint(dev)"
+                            @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)"
+                            x-text="dev.ip"></button>
+                    <span class="device-state-badge"
+                          :class="dev.connected ? 'device-state-live' : 'device-state-offline'"
+                          x-text="dev.connected ? 'Live' : 'Offline'"></span>
                     <span class="device-profile" x-text="dev.hardware_label || dev.hardware_profile || 'Unknown hardware'"></span>
                     <span class="device-fps"
                           x-show="dev.connected"
                           x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
-                </div>
-                <div class="device-capability-row">
-                    <span class="device-capability-status"
-                          :class="$store.conn.capabilityStatusClass(dev)"
-                          x-text="$store.conn.capabilityStatusLabel(dev)"></span>
-                    <div class="device-capability-pills">
-                        <template x-for="item in $store.conn.capabilityItems(dev)" :key="item.key">
-                            <span class="capability-pill"
-                                  :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
-                                  x-text="item.label"></span>
-                        </template>
-                    </div>
                 </div>
                 <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
                     <div class="form-group compact">

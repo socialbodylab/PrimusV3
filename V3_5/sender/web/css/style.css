@@ -244,8 +244,14 @@ body {
 .device-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+    gap: 8px;
     margin-bottom: 4px;
+}
+
+.device-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .device-name {
@@ -268,15 +274,60 @@ body {
 
 .device-meta {
     display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
     align-items: center;
     margin-bottom: 4px;
+}
+
+.device-state-badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+}
+
+.device-state-live {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.device-state-offline {
+    color: var(--text-muted);
+    background: var(--bg-secondary);
 }
 
 .device-ip {
     font-size: 11px;
     color: var(--text-muted);
     font-family: monospace;
+}
+
+.device-ip-button {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 1px 4px;
+}
+
+.device-ip-button:hover,
+.device-ip-button.active {
+    background: var(--bg-secondary);
+    border-color: var(--accent-dim);
+}
+
+.device-ip-button:disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
 }
 
 .device-fps {

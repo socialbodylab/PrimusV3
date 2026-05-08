@@ -28,8 +28,10 @@ Run sender:
 
 ```sh
 python3 V3_5/sender/run.py
-python3 V3_5/sender/run.py --no-browser --port 0
+python3 V3_5/sender/run.py --port 0
 ```
+
+`run.py` is the canonical entry point and defaults to `http://127.0.0.1:8080`, with auto-port fallback if 8080 is busy. Running it directly starts the server, replaces any previous V3.5 sender process, and opens the interface. Chromium-family browsers are launched with a fresh Primus-only app profile to avoid browser session-restore duplicate tabs; if no supported browser is available, startup falls back to the system default browser. `controller.py` contains cue-list logic and does not launch the interface.
 
 Run checks:
 
@@ -174,7 +176,7 @@ If a new firmware board profile is introduced:
 Use this to check a freshly flashed board from the command line:
 
 ```sh
-python3 V3_5/sender/run.py --no-browser --port 0
+python3 V3_5/sender/run.py --port 0
 ```
 
 Then, in another terminal, replace the port with the printed URL:

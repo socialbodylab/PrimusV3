@@ -44,6 +44,10 @@ Adafruit_NeoPXL8* leds = nullptr;
 Adafruit_NeoPixel* directLeds[NUM_OUTPUTS] = { nullptr, nullptr };
 #endif
 
+#if BOARD_HAS_STATUS_NEOPIXEL
+Adafruit_NeoPixel statusPixel(1, BOARD_STATUS_NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+#endif
+
 // ── Art-Net ──────────────────────────────────────────────────────────
 #define MAX_UDP_PACKET 600
 WiFiUDP udp;
@@ -75,6 +79,10 @@ bool     frameReady       = false;
 // ── WiFi ─────────────────────────────────────────────────────────────
 bool wifiConnected = false;
 unsigned long lastReconnectAttempt = 0;
+
+// No-screen board connection indicator. V1 uses LED_BUILTIN; V2 uses
+// the onboard NeoPixel. V3.1 keeps using the TFT display.
+bool statusIndicatorConnected = false;
 
 // ── Sender address (for FPS back-channel) ────────────────────────────
 IPAddress senderIP;
@@ -170,6 +178,47 @@ void saveOutputConfig() {
 //  WiFi
 // =====================================================================
 
+void setConnectionIndicator(bool connected) {
+  statusIndicatorConnected = connected;
+
+#if BOARD_HAS_STATUS_LED
+  bool ledOn = connected ? BOARD_STATUS_LED_ACTIVE_HIGH : !BOARD_STATUS_LED_ACTIVE_HIGH;
+  digitalWrite(BOARD_STATUS_LED_PIN, ledOn ? HIGH : LOW);
+#endif
+
+#if BOARD_HAS_STATUS_NEOPIXEL
+  uint32_t color = connected
+    ? statusPixel.Color(0, BOARD_STATUS_NEOPIXEL_BRIGHTNESS, 0)
+    : statusPixel.Color(0, 0, 0);
+  statusPixel.setPixelColor(0, color);
+  statusPixel.show();
+#endif
+}
+
+void initConnectionIndicator() {
+#if BOARD_HAS_STATUS_LED
+  pinMode(BOARD_STATUS_LED_PIN, OUTPUT);
+#endif
+
+#if BOARD_HAS_STATUS_NEOPIXEL
+  #if BOARD_STATUS_NEOPIXEL_POWER_PIN >= 0
+    pinMode(BOARD_STATUS_NEOPIXEL_POWER_PIN, OUTPUT);
+    digitalWrite(BOARD_STATUS_NEOPIXEL_POWER_PIN, HIGH);
+  #endif
+  statusPixel.begin();
+  statusPixel.setBrightness(BOARD_STATUS_NEOPIXEL_BRIGHTNESS);
+#endif
+
+  setConnectionIndicator(false);
+}
+
+void syncConnectionIndicator() {
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  if (connected == wifiConnected && connected == statusIndicatorConnected) return;
+  wifiConnected = connected;
+  setConnectionIndicator(connected);
+}
+
 bool connectWifi() {
   WiFi.begin(DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD);
 
@@ -198,9 +247,11 @@ bool connectWifi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Connected! IP: ");
     Serial.println(WiFi.localIP());
+    setConnectionIndicator(true);
     return true;
   }
   Serial.println("WiFi connection failed.");
+  setConnectionIndicator(false);
   return false;
 }
 
@@ -215,16 +266,20 @@ void checkWifiConnection() {
   if (now - newest > CONNECTION_TIMEOUT && newest > 0) {
     if (WiFi.status() != WL_CONNECTED) {
       wifiConnected = false;
+      setConnectionIndicator(false);
       if (now - lastReconnectAttempt > RECONNECT_INTERVAL) {
         Serial.println("Reconnecting WiFi...");
         lastReconnectAttempt = now;
         wifiConnected = connectWifi();
         if (wifiConnected) {
+          setConnectionIndicator(true);
           udp.begin(ARTNET_PORT);
         }
       }
     }
   }
+
+  syncConnectionIndicator();
 }
 
 // =====================================================================
@@ -799,6 +854,7 @@ void setup() {
   buttonsInit();
   displayInit();
   displayStartup();
+  initConnectionIndicator();
 
   // Init LED output driver
 #if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8

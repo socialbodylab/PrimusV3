@@ -35,6 +35,29 @@ Examples:
 ./V3_5/Arduino/upload.sh --board v2 --baud 230400 /dev/cu.usbserial-XXXX
 ```
 
+### Upload Script Flags
+
+`upload.sh` compiles first, then uploads unless `--compile` or `--install` stops earlier. If no serial port is supplied, the script tries to auto-detect one with `arduino-cli board list`.
+
+| Flag / argument | Meaning |
+| --- | --- |
+| `--board v1` | Build for the V1 Huzzah32 profile. Aliases: `v1_huzzah`. |
+| `--board v2` | Build for the V2 ESP32 Feather profile. Aliases: `v2_feather`. |
+| `--board v3_1` | Build for the V3.1 Reverse TFT profile. Aliases: `v3`, `v31`, `v3_1_reverse_tft`. This is the default when `--board` is omitted. |
+| `--compile` | Compile only. Do not upload. Useful before flashing hardware. |
+| `--install` | Install/check the libraries required by the selected board, then exit. |
+| `--baud <rate>` | Override the selected board's default upload speed. Alias: `--speed`. |
+| `/dev/cu...` | Optional explicit serial port. Put it as the final argument when multiple boards are connected or auto-detection is ambiguous. |
+| `-h`, `--help` | Print the script's short usage block. |
+
+Common upload commands:
+
+```sh
+./V3_5/Arduino/upload.sh --board v1 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh --board v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodemXXXX
+```
+
 ## Board Profile Responsibilities
 
 Each profile in `config.h` defines:
@@ -75,6 +98,18 @@ Rules:
 - Do not include TFT-only libraries for screenless profiles.
 - Keep public display/button function names stable so `primusV3_receiver.ino` stays profile-neutral.
 - Add screen behavior only behind profile capability checks.
+
+## No-Screen Connection Indicators
+
+V1 and V2 need an on-board WiFi connection indicator because they do not have a TFT.
+
+| Profile | Indicator | Connected state | Disconnected state |
+| --- | --- | --- | --- |
+| `v1` | `LED_BUILTIN` | On | Off |
+| `v2` | Onboard NeoPixel on GPIO0, power GPIO2 | Green | Off |
+| `v3_1` | TFT display | `WiFi OK` screen text | `No WiFi` / error screen |
+
+The indicator should reflect `WiFi.status() == WL_CONNECTED`. Keep sender activity, FPS, and Art-Net receive state separate from this simple board-level connection signal.
 
 ## Output Type Table
 

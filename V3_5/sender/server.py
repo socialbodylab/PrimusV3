@@ -355,9 +355,15 @@ class Handler(BaseHTTPRequestHandler):
                     seq = int(seq)
                 except (TypeError, ValueError):
                     seq = None
-            self.controller_state.update_mixer_preview(
-                play_time=play_time, playing=playing,
-                transport_time=transport_time, seq=seq)
+            update_kwargs = {
+                "play_time": play_time,
+                "playing": playing,
+                "transport_time": transport_time,
+                "seq": seq,
+            }
+            if "device_filter" in data:
+                update_kwargs["device_filter"] = data.get("device_filter")
+            self.controller_state.update_mixer_preview(**update_kwargs)
             self._ok()
 
         elif path == "/api/mixer/stop_preview":

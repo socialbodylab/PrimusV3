@@ -219,7 +219,7 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        toggleMixerDevice(di) {
+        async toggleMixerDevice(di) {
             if (!this.mixerPreviewDevices) {
                 const count = (this.state?.devices || []).length;
                 const all = Array.from({length: count}, (_, i) => i);
@@ -228,6 +228,16 @@ document.addEventListener("alpine:init", () => {
                 this.mixerPreviewDevices = this.mixerPreviewDevices.filter(i => i !== di);
             } else {
                 this.mixerPreviewDevices = [...this.mixerPreviewDevices, di];
+            }
+            if (this.playback.source === 'mixer') {
+                try {
+                    await api("POST", "/api/mixer/update", {
+                        device_filter: this.mixerPreviewDevices,
+                    });
+                } catch (e) {
+                    this.showApiError('Preview target update failed', e);
+                    return;
+                }
             }
             this.showNotice('Mixer preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
         },

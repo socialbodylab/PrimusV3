@@ -311,3 +311,6 @@ class CueList:
             self._auto_follow_time = 0.0
         # Release lock before calling go() (which acquires it)
         return self.go(device_groups=device_groups)
+
+if __name__ == "__main__":
+    print("controller.py is the cue-controller module. Start the interface with: python3 V3_5/sender/run.py")
