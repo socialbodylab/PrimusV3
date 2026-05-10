@@ -33,13 +33,14 @@ Examples:
 ./V3_5/Arduino/upload.sh -v1 --compile
 ./V3_5/Arduino/upload.sh -v3 --auto
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ./V3_5/Arduino/upload.sh -v2 --baud 230400 /dev/cu.usbserial-XXXX
 ```
 
 ### Upload Script Flags
 
-`upload.sh` can list likely ESP32 serial devices, compile profiles, and upload firmware. Upload commands always compile first, then upload, matching the Arduino IDE Upload workflow; `--compile` is the verify-only path. Use `--ports` before uploading to see candidates. Use `--auto` when exactly one ESP32-like serial device is attached; the script refuses to guess when zero or multiple candidates are found. Use `--all` when every detected ESP32-like candidate should receive the same selected profile. If no serial port is supplied, the script keeps the same single-device auto-detection behavior for compatibility, but explicit `--auto` is preferred.
+`upload.sh` can list likely ESP32 serial devices, compile profiles, override default WiFi credentials for a build, and upload firmware. Upload commands always compile first, then upload, matching the Arduino IDE Upload workflow; `--compile` is the verify-only path. Use `--ports` before uploading to see candidates. Use `--auto` when exactly one ESP32-like serial device is attached; the script refuses to guess when zero or multiple candidates are found. Use `--all` when every detected ESP32-like candidate should receive the same selected profile. If no serial port is supplied, the script keeps the same single-device auto-detection behavior for compatibility, but explicit `--auto` is preferred.
 
 | Flag / argument | Meaning |
 | --- | --- |
@@ -48,6 +49,8 @@ Examples:
 | `-v3` | Build for the V3.1 Reverse TFT profile. Long form: `--board v3`. Legacy aliases: `--board v3_1`, `--board v31`, `--board v3_1_reverse_tft`. This is the default when no board flag is supplied. |
 | `--compile` | Compile only. Do not upload. This is the Arduino IDE Verify-style path. |
 | `--install` | Install/check the libraries required by the selected board, then exit. |
+| `-ssid <name>`, `--ssid <name>` | Override `DEFAULT_WIFI_SSID` for this build without editing `config.h`. |
+| `-pw <password>`, `--pw <password>`, `--password <password>` | Override `DEFAULT_WIFI_PASSWORD` for this build without editing `config.h`. |
 | `--ports`, `--list-ports` | List likely ESP32 serial ports and exit without compiling or uploading. |
 | `--auto`, `-auto` | Select the only detected ESP32-like serial port. Fails if no candidates or multiple candidates are found. |
 | `--all`, `-all`, `--all-ports` | Select every detected ESP32-like serial port and upload the selected profile to each one sequentially. If Arduino CLI identifies exact selected-board matches, only those exact matches are used; otherwise all ESP32-like candidates are used. |
@@ -60,6 +63,7 @@ Common upload commands:
 ```sh
 ./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
 ./V3_5/Arduino/upload.sh -v2 --all
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ```

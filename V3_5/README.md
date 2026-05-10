@@ -8,6 +8,8 @@ The important design choice is that V1 and V2 hardware are not supported through
 
 | Document | Use it for |
 | --- | --- |
+| [../setup_primus.py](../setup_primus.py) | Automated first-time setup after Python 3 is installed. |
+| [../BOARD_UPLOAD_README.md](../BOARD_UPLOAD_README.md) | First-time board upload setup, automated setup, and manual fallback commands. |
 | [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) | Receiver firmware profiles, pins, output tables, Art-Net contracts, and firmware change checklist. |
 | [SENDER_DEVELOPMENT.md](SENDER_DEVELOPMENT.md) | Python sender architecture, discovery metadata, output type synchronization, API behavior, and tests. |
 | [hardwareCompatibility.md](hardwareCompatibility.md) | Compact board/profile/pin/output reference. |
@@ -47,6 +49,18 @@ V3_5/
 
 ## Quick Start
 
+From the repository root, after installing Python 3 manually, run the automated setup once:
+
+```sh
+python3 setup_primus.py
+```
+
+Check an existing machine without installing anything:
+
+```sh
+python3 setup_primus.py --check
+```
+
 Compile only:
 
 ```sh
@@ -60,6 +74,12 @@ Upload to a detected board:
 ```sh
 ./V3_5/Arduino/upload.sh --ports
 ./V3_5/Arduino/upload.sh -v3 --auto
+```
+
+Upload with temporary WiFi credential overrides:
+
+```sh
+./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
 ```
 
 Upload to multiple detected boards of the same profile:
@@ -76,12 +96,12 @@ Upload to one or more explicit serial ports:
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ```
 
-Use `--ports` to list likely ESP32 serial devices before uploading. Upload commands compile automatically before flashing, so `--compile` is only needed for a verify-only pass. Use `--auto` when exactly one ESP32-like device is connected; the script refuses to guess when none or multiple candidates are found. Use `--all` only when every detected ESP32-like candidate should receive the selected profile.
+Use `--ports` to list likely ESP32 serial devices before uploading. Upload commands compile automatically before flashing, so `--compile` is only needed for a verify-only pass. Use `-ssid` and `-pw` to override the firmware's default WiFi credentials for one build without editing source files. Use `--auto` when exactly one ESP32-like device is connected; the script refuses to guess when none or multiple candidates are found. Use `--all` only when every detected ESP32-like candidate should receive the selected profile.
 
 Run the sender:
 
 ```sh
-python3 V3_5/sender/run.py
+.venv/bin/python V3_5/sender/run.py
 ```
 
 By default the interface uses `http://127.0.0.1:8080`, falling back to an auto-selected port only if 8080 is busy. Running `run.py` directly starts the server, replaces any previous V3.5 sender process, and opens the interface. When Chrome, Edge, Brave, or Chromium is available, the sender uses a fresh Primus-only app window so browser session restore cannot reopen duplicate old tabs; otherwise it falls back to the system default browser. Use `--no-browser` only for automated checks where no browser should be opened.

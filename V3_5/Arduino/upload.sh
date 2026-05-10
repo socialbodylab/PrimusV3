@@ -6,13 +6,24 @@
 #   ./upload.sh -v2 --all                 # compile, then upload selected profile to every detected ESP32-like port
 #   ./upload.sh -v1 --compile             # compile V1 only, like Arduino IDE Verify
 #   ./upload.sh -v2 /dev/cu.usb...        # compile, then upload V2 to an explicit port
+#   ./upload.sh -v2 -ssid PrimusRouter -pw router-password --auto # override WiFi defaults for this build
 #   ./upload.sh -v1 /dev/cu.usb1 /dev/cu.usb2 # upload selected profile to explicit ports
 #   ./upload.sh -v2 --baud 115200 /dev/cu.usb... # override upload speed
 #   ./upload.sh --install                 # install libraries for selected board
 
 set -euo pipefail
 
-SKETCH_DIR="$(cd "$(dirname "$0")/primusV3_receiver" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SKETCH_DIR="$SCRIPT_DIR/primusV3_receiver"
+
+for local_bin in "$REPO_ROOT/.tools/arduino-cli/bin" "$REPO_ROOT/.tools/python-bin"; do
+  if [[ -d "$local_bin" ]]; then
+    PATH="$local_bin:$PATH"
+  fi
+done
+export PATH
+
 BOARD_PROFILE="v3"
 EXPLICIT_PORTS=()
 UPLOAD_PORTS=()
@@ -23,6 +34,11 @@ AUTO_PORT=false
 ALL_PORTS=false
 BAUD=921600
 BAUD_OVERRIDE=""
+WIFI_SSID_OVERRIDE=""
+WIFI_PASSWORD_OVERRIDE=""
+WIFI_SSID_OVERRIDE_SET=false
+WIFI_PASSWORD_OVERRIDE_SET=false
+WIFI_OVERRIDE_HEADER=""
 
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
 ok()    { printf "\033[1;32m[OK]\033[0m    %s\n" "$*"; }
@@ -48,6 +64,9 @@ Usage:
   ./upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
       Compile once, then upload to one or more explicit serial ports.
 
+  ./upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
+      Compile with WiFi credential overrides for this build, then upload.
+
   Behavior:
     Upload commands always compile first, then upload. You do not need to run
     --compile before uploading; use --compile only when you want a verify-only pass.
@@ -62,6 +81,9 @@ Flags:
   --list-ports             Alias for --ports.
   --compile                Compile only; do not upload. Like Arduino IDE Verify.
   --install                Check/install required Arduino libraries and exit.
+  -ssid, --ssid <name>     Override DEFAULT_WIFI_SSID for this build.
+  -pw, --pw <password>     Override DEFAULT_WIFI_PASSWORD for this build.
+  --password <password>    Alias for -pw.
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
 EOF
@@ -108,6 +130,24 @@ while [[ $# -gt 0 ]]; do
     --install)
       INSTALL_ONLY=true
       shift
+      ;;
+    -ssid|--ssid)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires an SSID value"
+        exit 1
+      fi
+      WIFI_SSID_OVERRIDE="$2"
+      WIFI_SSID_OVERRIDE_SET=true
+      shift 2
+      ;;
+    -pw|--pw|--password)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a password value"
+        exit 1
+      fi
+      WIFI_PASSWORD_OVERRIDE="$2"
+      WIFI_PASSWORD_OVERRIDE_SET=true
+      shift 2
       ;;
     --baud|--speed)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
@@ -183,6 +223,49 @@ esac
 
 BAUD="${BAUD_OVERRIDE:-$DEFAULT_BAUD}"
 FQBN_WITH_OPTIONS="${FQBN}:UploadSpeed=${BAUD}"
+
+if [[ "$WIFI_SSID_OVERRIDE_SET" == true && -z "$WIFI_SSID_OVERRIDE" ]]; then
+  err "SSID override cannot be empty."
+  exit 1
+fi
+
+if [[ "$WIFI_SSID_OVERRIDE" == *$'\n'* || "$WIFI_SSID_OVERRIDE" == *$'\r'* ]]; then
+  err "SSID override cannot contain newlines."
+  exit 1
+fi
+
+if [[ "$WIFI_PASSWORD_OVERRIDE" == *$'\n'* || "$WIFI_PASSWORD_OVERRIDE" == *$'\r'* ]]; then
+  err "Password override cannot contain newlines."
+  exit 1
+fi
+
+c_string_literal() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '"%s"' "$value"
+}
+
+create_wifi_override_header() {
+  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true ]]; then
+    return
+  fi
+
+  WIFI_OVERRIDE_HEADER="$(mktemp "/tmp/primus_wifi_overrides.XXXXXX")"
+  trap '[[ -n "${WIFI_OVERRIDE_HEADER:-}" ]] && rm -f "$WIFI_OVERRIDE_HEADER"' EXIT
+
+  {
+    printf '#pragma once\n'
+    if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then
+      printf '#define DEFAULT_WIFI_SSID %s\n' "$(c_string_literal "$WIFI_SSID_OVERRIDE")"
+    fi
+    if [[ "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
+      printf '#define DEFAULT_WIFI_PASSWORD %s\n' "$(c_string_literal "$WIFI_PASSWORD_OVERRIDE")"
+    fi
+  } > "$WIFI_OVERRIDE_HEADER"
+
+  EXTRA_FLAGS="$EXTRA_FLAGS -include $WIFI_OVERRIDE_HEADER"
+}
 
 check_cli() {
   if ! command -v arduino-cli &>/dev/null; then
@@ -435,6 +518,15 @@ install_libs
 
 if [[ "$INSTALL_ONLY" == true ]]; then
   exit 0
+fi
+
+create_wifi_override_header
+
+if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then
+  info "WiFi SSID override: $WIFI_SSID_OVERRIDE"
+fi
+if [[ "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
+  info "WiFi password override: set"
 fi
 
 if [[ "$COMPILE_ONLY" == true ]]; then

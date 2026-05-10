@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 
+# Local setup environments and tools
+.venv/
+.tools/
+
 # macOS
 .DS_Store
 

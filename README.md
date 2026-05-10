@@ -31,13 +31,25 @@ Main updates:
 - V1 and V2 screenless boards have connection indicators: V1 uses `LED_BUILTIN`; V2 uses the onboard NeoPixel.
 - Plain `run.py` launch replaces any previous V3.5 sender and opens one dedicated Primus browser window.
 
+First-time setup after installing Python 3:
+
+```bash
+python3 setup_primus.py
+```
+
+The setup script creates/checks `.venv`, confirms the sender has no external Python package requirements, installs or reuses Arduino CLI, configures the ESP32 Arduino core, and installs/checks the Arduino libraries needed by the V3.5 upload profiles. To inspect an existing machine without installing anything, run:
+
+```bash
+python3 setup_primus.py --check
+```
+
 Launch the V3.5 interface:
 
 ```bash
-python3 V3_5/sender/run.py
+.venv/bin/python V3_5/sender/run.py
 ```
 
-The default URL is `http://127.0.0.1:8080`. If 8080 is busy, the sender falls back to an auto-selected port and prints the URL. Use `--no-browser` for automated checks and `--port 0` when you explicitly want an auto-selected port.
+You can also use any Python 3 interpreter directly. The default URL is `http://127.0.0.1:8080`. If 8080 is busy, the sender falls back to an auto-selected port and prints the URL. Use `--no-browser` for automated checks and `--port 0` when you explicitly want an auto-selected port.
 
 Upload V3.5 firmware:
 
@@ -45,7 +57,15 @@ Firmware upload requires [Arduino CLI](https://arduino.github.io/arduino-cli/lat
 
 The upload workflow behaves like the Arduino IDE: `--compile` is the verify-only step, while any upload command compiles automatically before flashing the board. You do not need to run `--compile` before `--auto`, `--all`, or an explicit-port upload.
 
-First time setting up a computer for board uploads? Start with [BOARD_UPLOAD_README.md](BOARD_UPLOAD_README.md) for Arduino CLI, ESP32 core, library, port-detection, and upload commands.
+To build firmware for a different router without editing source files, pass WiFi credentials at upload time:
+
+```bash
+./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
+```
+
+These values override the firmware defaults for that compile/upload run only. Quote SSIDs or passwords that contain spaces or shell-special characters.
+
+First time setting up a computer for board uploads? Start with [BOARD_UPLOAD_README.md](BOARD_UPLOAD_README.md) for the automated setup script, manual fallback commands, Arduino CLI, ESP32 core, library, port-detection, and upload commands.
 
 Recommended upload workflow:
 
@@ -111,6 +131,8 @@ Useful upload flags:
 | `--board v1`, `--board v2`, `--board v3` | Long-form hardware profile selection. |
 | `--compile` | Compile only, like Arduino IDE Verify; do not upload. |
 | `--install` | Check/install required Arduino libraries for the selected board. |
+| `-ssid <name>` / `--ssid <name>` | Override the firmware's default WiFi SSID for this compile/upload run. |
+| `-pw <password>` / `--pw <password>` / `--password <password>` | Override the firmware's default WiFi password for this compile/upload run. |
 | `--ports` / `-ports` / `--list-ports` | List likely ESP32 serial ports without compiling or uploading. |
 | `--auto` / `-auto` | Upload to the only detected ESP32-like serial port. Fails if none or multiple are found. |
 | `--all` / `-all` / `--all-ports` | Upload the selected profile to every detected ESP32-like serial port. Use when all connected candidates are the same board type. |
@@ -119,6 +141,7 @@ Useful upload flags:
 | `-h` / `--help` | Show the upload script help text. |
 
 Start here for V3.5 development:
+- [setup_primus.py](setup_primus.py) - automated first-time setup after Python 3 is installed
 - [BOARD_UPLOAD_README.md](BOARD_UPLOAD_README.md) - first-time setup for uploading firmware to boards
 - [V3_5/README.md](V3_5/README.md) - documentation index and quick start
 - [V3_5/FIRMWARE_DEVELOPMENT.md](V3_5/FIRMWARE_DEVELOPMENT.md) - firmware profiles, pins, protocol contracts, and validation

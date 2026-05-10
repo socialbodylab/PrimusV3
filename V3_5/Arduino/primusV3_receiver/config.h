@@ -237,8 +237,12 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // =====================================================================
 //  Network Defaults
 // =====================================================================
-#define DEFAULT_WIFI_SSID      "NETGEAR44"
-#define DEFAULT_WIFI_PASSWORD  "sweetgadfly251"
+#ifndef DEFAULT_WIFI_SSID
+  #define DEFAULT_WIFI_SSID      "NETGEAR44"
+#endif
+#ifndef DEFAULT_WIFI_PASSWORD
+  #define DEFAULT_WIFI_PASSWORD  "sweetgadfly251"
+#endif
 
 #define DEFAULT_STATIC_IP      192, 168, 1, 100
 #define DEFAULT_GATEWAY        192, 168, 1, 1
