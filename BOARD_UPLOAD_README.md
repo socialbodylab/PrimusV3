@@ -106,15 +106,19 @@ Board profile choices:
 | `-v2` | V2 Adafruit ESP32 Feather V2 |
 | `-v3` | V3.1 ESP32-S3 Reverse TFT Feather with NeoPXL8 FeatherWing |
 
-## 4. Compile Before Uploading
+## 4. Optional Compile / Verify
 
-Compile once before flashing hardware. Pick the profile that matches your board:
+Use `--compile` when you want to check that the firmware builds without uploading. This is like Arduino IDE Verify.
+
+Pick the profile that matches your board:
 
 ```bash
 ./V3_5/Arduino/upload.sh -v1 --compile
 ./V3_5/Arduino/upload.sh -v2 --compile
 ./V3_5/Arduino/upload.sh -v3 --compile
 ```
+
+This step is optional. Upload commands compile automatically before flashing, just like Arduino IDE Upload.
 
 ## 5. Find Connected Boards
 
@@ -138,7 +142,7 @@ If no board appears, check that you are using a USB data cable. For V1/V2 boards
 
 ### One Connected Board
 
-Use `--auto` when exactly one ESP32-like receiver is plugged in:
+Use `--auto` when exactly one ESP32-like receiver is plugged in. This compiles first, then uploads:
 
 ```bash
 ./V3_5/Arduino/upload.sh -v2 --auto
@@ -148,17 +152,17 @@ Replace `-v2` with the matching board profile.
 
 ### Multiple Boards Of The Same Type
 
-Use `--all` when every detected ESP32-like serial port should receive the same profile:
+Use `--all` when every detected ESP32-like serial port should receive the same profile. This compiles once, then uploads sequentially:
 
 ```bash
 ./V3_5/Arduino/upload.sh -v2 --all
 ```
 
-Run `--ports` first. `--all` compiles once, then uploads sequentially to each selected port.
+Run `--ports` first. You do not need to run `--compile` separately before `--all`.
 
 ### Chosen Ports Only
 
-Use explicit ports when auto-detection is ambiguous or mixed board types are connected:
+Use explicit ports when auto-detection is ambiguous or mixed board types are connected. This compiles once, then uploads sequentially to the ports you provide:
 
 ```bash
 ./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
@@ -172,16 +176,16 @@ Use explicit ports when auto-detection is ambiguous or mixed board types are con
 # List boards
 ./V3_5/Arduino/upload.sh --ports
 
-# Compile only
+# Compile only, like Arduino IDE Verify
 ./V3_5/Arduino/upload.sh -v2 --compile
 
-# Upload one detected board
+# Upload one detected board; compiles first automatically
 ./V3_5/Arduino/upload.sh -v2 --auto
 
-# Upload all detected boards of the same type
+# Upload all detected boards of the same type; compiles first automatically
 ./V3_5/Arduino/upload.sh -v2 --all
 
-# Upload chosen ports only
+# Upload chosen ports only; compiles first automatically
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
 ```
 

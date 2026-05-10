@@ -2,10 +2,10 @@
 # upload.sh — Compile & upload PrimusV3.5 receiver build profiles
 # Usage:
 #   ./upload.sh --ports                   # list likely ESP32 serial ports
-#   ./upload.sh -v3 --auto                # upload if exactly one ESP32-like port is connected
-#   ./upload.sh -v2 --all                 # upload selected profile to every detected ESP32-like port
-#   ./upload.sh -v1 --compile             # compile V1 only
-#   ./upload.sh -v2 /dev/cu.usb...        # upload V2 to an explicit port
+#   ./upload.sh -v3 --auto                # compile, then upload if exactly one ESP32-like port is connected
+#   ./upload.sh -v2 --all                 # compile, then upload selected profile to every detected ESP32-like port
+#   ./upload.sh -v1 --compile             # compile V1 only, like Arduino IDE Verify
+#   ./upload.sh -v2 /dev/cu.usb...        # compile, then upload V2 to an explicit port
 #   ./upload.sh -v1 /dev/cu.usb1 /dev/cu.usb2 # upload selected profile to explicit ports
 #   ./upload.sh -v2 --baud 115200 /dev/cu.usb... # override upload speed
 #   ./upload.sh --install                 # install libraries for selected board
@@ -37,16 +37,20 @@ Usage:
       List likely ESP32 serial ports detected by arduino-cli.
 
   ./upload.sh -v3 --auto
-      Compile and upload when exactly one ESP32-like serial port is connected.
+      Compile first, then upload when exactly one ESP32-like serial port is connected.
 
   ./upload.sh -v2 --all
-      Compile once and upload to every detected ESP32-like serial port.
+      Compile once, then upload to every detected ESP32-like serial port.
 
   ./upload.sh -v1 --compile
-      Compile only; do not upload.
+      Compile only; do not upload. This is like Arduino IDE Verify.
 
   ./upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
-      Compile once and upload to one or more explicit serial ports.
+      Compile once, then upload to one or more explicit serial ports.
+
+  Behavior:
+    Upload commands always compile first, then upload. You do not need to run
+    --compile before uploading; use --compile only when you want a verify-only pass.
 
 Flags:
   -v1, -v2, -v3          Select hardware profile. Default: -v3.
@@ -56,7 +60,7 @@ Flags:
   --all-ports              Alias for --all.
   --ports, -ports          List likely ESP32 serial ports and exit.
   --list-ports             Alias for --ports.
-  --compile                Compile only; do not upload.
+  --compile                Compile only; do not upload. Like Arduino IDE Verify.
   --install                Check/install required Arduino libraries and exit.
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
@@ -433,7 +437,11 @@ if [[ "$INSTALL_ONLY" == true ]]; then
   exit 0
 fi
 
-info "Compiling sketch: $SKETCH_DIR"
+if [[ "$COMPILE_ONLY" == true ]]; then
+  info "Compiling sketch: $SKETCH_DIR"
+else
+  info "Compiling sketch before upload: $SKETCH_DIR"
+fi
 info "Board profile: $BOARD_PROFILE"
 info "Board: $FQBN_WITH_OPTIONS"
 arduino-cli compile \

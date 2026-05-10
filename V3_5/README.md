@@ -76,7 +76,7 @@ Upload to one or more explicit serial ports:
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ```
 
-Use `--ports` to list likely ESP32 serial devices before uploading. Use `--auto` when exactly one ESP32-like device is connected; the script refuses to guess when none or multiple candidates are found. Use `--all` only when every detected ESP32-like candidate should receive the selected profile.
+Use `--ports` to list likely ESP32 serial devices before uploading. Upload commands compile automatically before flashing, so `--compile` is only needed for a verify-only pass. Use `--auto` when exactly one ESP32-like device is connected; the script refuses to guess when none or multiple candidates are found. Use `--all` only when every detected ESP32-like candidate should receive the selected profile.
 
 Run the sender:
 

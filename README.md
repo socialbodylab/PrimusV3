@@ -43,6 +43,8 @@ Upload V3.5 firmware:
 
 Firmware upload requires [Arduino CLI](https://arduino.github.io/arduino-cli/latest/) with the ESP32 board core available. The upload script handles compile/upload commands and can check required libraries with `--install`.
 
+The upload workflow behaves like the Arduino IDE: `--compile` is the verify-only step, while any upload command compiles automatically before flashing the board. You do not need to run `--compile` before `--auto`, `--all`, or an explicit-port upload.
+
 First time setting up a computer for board uploads? Start with [BOARD_UPLOAD_README.md](BOARD_UPLOAD_README.md) for Arduino CLI, ESP32 core, library, port-detection, and upload commands.
 
 Recommended upload workflow:
@@ -107,7 +109,7 @@ Useful upload flags:
 | --- | --- |
 | `-v1`, `-v2`, `-v3` | Select the hardware profile. Defaults to `-v3`. |
 | `--board v1`, `--board v2`, `--board v3` | Long-form hardware profile selection. |
-| `--compile` | Compile only; do not upload. |
+| `--compile` | Compile only, like Arduino IDE Verify; do not upload. |
 | `--install` | Check/install required Arduino libraries for the selected board. |
 | `--ports` / `-ports` / `--list-ports` | List likely ESP32 serial ports without compiling or uploading. |
 | `--auto` / `-auto` | Upload to the only detected ESP32-like serial port. Fails if none or multiple are found. |
@@ -182,7 +184,7 @@ python3 V3_5/sender/run.py --no-browser        # don't auto-open browser
 ./V3_5/Arduino/upload.sh -v3 --auto
 ```
 
-Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks required libraries, compiles, and uploads. Use `--ports` to inspect likely ESP32 serial devices, `--auto` when exactly one device is attached, `--all` when multiple connected devices should receive the same profile, or explicit serial ports when mixed board types are connected.
+Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks required libraries, compiles, and uploads. Upload commands compile automatically before flashing, so `--compile` is only needed when you want a verify-only pass. Use `--ports` to inspect likely ESP32 serial devices, `--auto` when exactly one device is attached, `--all` when multiple connected devices should receive the same profile, or explicit serial ports when mixed board types are connected.
 
 ```bash
 ./V3_5/Arduino/upload.sh -v1 --compile

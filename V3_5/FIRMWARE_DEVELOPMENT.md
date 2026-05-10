@@ -39,14 +39,14 @@ Examples:
 
 ### Upload Script Flags
 
-`upload.sh` can list likely ESP32 serial devices, compile profiles, and upload firmware. Use `--ports` before uploading to see candidates. Use `--auto` when exactly one ESP32-like serial device is attached; the script refuses to guess when zero or multiple candidates are found. Use `--all` when every detected ESP32-like candidate should receive the same selected profile. If no serial port is supplied, the script keeps the same single-device auto-detection behavior for compatibility, but explicit `--auto` is preferred.
+`upload.sh` can list likely ESP32 serial devices, compile profiles, and upload firmware. Upload commands always compile first, then upload, matching the Arduino IDE Upload workflow; `--compile` is the verify-only path. Use `--ports` before uploading to see candidates. Use `--auto` when exactly one ESP32-like serial device is attached; the script refuses to guess when zero or multiple candidates are found. Use `--all` when every detected ESP32-like candidate should receive the same selected profile. If no serial port is supplied, the script keeps the same single-device auto-detection behavior for compatibility, but explicit `--auto` is preferred.
 
 | Flag / argument | Meaning |
 | --- | --- |
 | `-v1` | Build for the V1 Huzzah32 profile. Long form: `--board v1`. Alias: `--board v1_huzzah`. |
 | `-v2` | Build for the V2 ESP32 Feather profile. Long form: `--board v2`. Alias: `--board v2_feather`. |
 | `-v3` | Build for the V3.1 Reverse TFT profile. Long form: `--board v3`. Legacy aliases: `--board v3_1`, `--board v31`, `--board v3_1_reverse_tft`. This is the default when no board flag is supplied. |
-| `--compile` | Compile only. Do not upload. Useful before flashing hardware. |
+| `--compile` | Compile only. Do not upload. This is the Arduino IDE Verify-style path. |
 | `--install` | Install/check the libraries required by the selected board, then exit. |
 | `--ports`, `--list-ports` | List likely ESP32 serial ports and exit without compiling or uploading. |
 | `--auto`, `-auto` | Select the only detected ESP32-like serial port. Fails if no candidates or multiple candidates are found. |
