@@ -43,31 +43,40 @@ V3_5/
 | --- | --- | --- | --- |
 | `v1` | Adafruit Huzzah32 ESP32 Feather | Direct NeoPixel on GPIO32/GPIO12 | `small_grid`, `long_strip` |
 | `v2` | Adafruit ESP32 Feather V2 | Direct NeoPixel on GPIO32/GPIO12 | `small_grid`, `short_strip` |
-| `v3_1` | ESP32-S3 Reverse TFT Feather + NeoPXL8 FeatherWing | NeoPXL8 outputs 6/7 | `short_strip`, `long_strip` |
+| `v3` | ESP32-S3 Reverse TFT Feather + NeoPXL8 FeatherWing | NeoPXL8 outputs 6/7 | `short_strip`, `long_strip` |
 
 ## Quick Start
 
 Compile only:
 
 ```sh
-./V3_5/Arduino/upload.sh --board v1 --compile
-./V3_5/Arduino/upload.sh --board v2 --compile
-./V3_5/Arduino/upload.sh --board v3_1 --compile
+./V3_5/Arduino/upload.sh -v1 --compile
+./V3_5/Arduino/upload.sh -v2 --compile
+./V3_5/Arduino/upload.sh -v3 --compile
 ```
 
 Upload to a detected board:
 
 ```sh
-./V3_5/Arduino/upload.sh --board v3_1
+./V3_5/Arduino/upload.sh --ports
+./V3_5/Arduino/upload.sh -v3 --auto
 ```
 
-Upload to an explicit serial port:
+Upload to multiple detected boards of the same profile:
 
 ```sh
-./V3_5/Arduino/upload.sh --board v1 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v2 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodemXXXX
+./V3_5/Arduino/upload.sh -v2 --all
 ```
+
+Upload to one or more explicit serial ports:
+
+```sh
+./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
+./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
+```
+
+Use `--ports` to list likely ESP32 serial devices before uploading. Use `--auto` when exactly one ESP32-like device is connected; the script refuses to guess when none or multiple candidates are found. Use `--all` only when every detected ESP32-like candidate should receive the selected profile.
 
 Run the sender:
 

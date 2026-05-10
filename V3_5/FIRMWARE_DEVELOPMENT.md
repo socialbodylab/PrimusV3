@@ -24,38 +24,44 @@ V3.5 uses one source tree with compile-time board profiles. The profile is selec
 | --- | --- | --- | --- |
 | `v1` | `PRIMUS_PROFILE_V1` | `esp32:esp32:featheresp32` | `115200` |
 | `v2` | `PRIMUS_PROFILE_V2` | `esp32:esp32:adafruit_feather_esp32_v2` | `115200` |
-| `v3_1` | `PRIMUS_PROFILE_V3_1` | `esp32:esp32:adafruit_feather_esp32s3_reversetft` | `921600` |
+| `v3` | `PRIMUS_PROFILE_V3_1` | `esp32:esp32:adafruit_feather_esp32s3_reversetft` | `921600` |
 
 Examples:
 
 ```sh
-./V3_5/Arduino/upload.sh --board v1 --compile
-./V3_5/Arduino/upload.sh --board v2 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodemXXXX
-./V3_5/Arduino/upload.sh --board v2 --baud 230400 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh --ports
+./V3_5/Arduino/upload.sh -v1 --compile
+./V3_5/Arduino/upload.sh -v3 --auto
+./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
+./V3_5/Arduino/upload.sh -v2 --baud 230400 /dev/cu.usbserial-XXXX
 ```
 
 ### Upload Script Flags
 
-`upload.sh` compiles first, then uploads unless `--compile` or `--install` stops earlier. If no serial port is supplied, the script tries to auto-detect one with `arduino-cli board list`.
+`upload.sh` can list likely ESP32 serial devices, compile profiles, and upload firmware. Use `--ports` before uploading to see candidates. Use `--auto` when exactly one ESP32-like serial device is attached; the script refuses to guess when zero or multiple candidates are found. Use `--all` when every detected ESP32-like candidate should receive the same selected profile. If no serial port is supplied, the script keeps the same single-device auto-detection behavior for compatibility, but explicit `--auto` is preferred.
 
 | Flag / argument | Meaning |
 | --- | --- |
-| `--board v1` | Build for the V1 Huzzah32 profile. Aliases: `v1_huzzah`. |
-| `--board v2` | Build for the V2 ESP32 Feather profile. Aliases: `v2_feather`. |
-| `--board v3_1` | Build for the V3.1 Reverse TFT profile. Aliases: `v3`, `v31`, `v3_1_reverse_tft`. This is the default when `--board` is omitted. |
+| `-v1` | Build for the V1 Huzzah32 profile. Long form: `--board v1`. Alias: `--board v1_huzzah`. |
+| `-v2` | Build for the V2 ESP32 Feather profile. Long form: `--board v2`. Alias: `--board v2_feather`. |
+| `-v3` | Build for the V3.1 Reverse TFT profile. Long form: `--board v3`. Legacy aliases: `--board v3_1`, `--board v31`, `--board v3_1_reverse_tft`. This is the default when no board flag is supplied. |
 | `--compile` | Compile only. Do not upload. Useful before flashing hardware. |
 | `--install` | Install/check the libraries required by the selected board, then exit. |
+| `--ports`, `--list-ports` | List likely ESP32 serial ports and exit without compiling or uploading. |
+| `--auto`, `-auto` | Select the only detected ESP32-like serial port. Fails if no candidates or multiple candidates are found. |
+| `--all`, `-all`, `--all-ports` | Select every detected ESP32-like serial port and upload the selected profile to each one sequentially. If Arduino CLI identifies exact selected-board matches, only those exact matches are used; otherwise all ESP32-like candidates are used. |
 | `--baud <rate>` | Override the selected board's default upload speed. Alias: `--speed`. |
-| `/dev/cu...` | Optional explicit serial port. Put it as the final argument when multiple boards are connected or auto-detection is ambiguous. |
+| `/dev/cu...` | Optional explicit serial port. Provide one or more paths when multiple boards are connected or auto-detection is ambiguous. |
 | `-h`, `--help` | Print the script's short usage block. |
 
 Common upload commands:
 
 ```sh
-./V3_5/Arduino/upload.sh --board v1 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v2 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodemXXXX
+./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v2 --all
+./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ```
 
 ## Board Profile Responsibilities
@@ -74,7 +80,7 @@ Current defaults:
 | --- | --- | --- | --- | --- |
 | `v1` | Direct NeoPixel | GPIO32 | GPIO12 | `small_grid`, `long_strip` |
 | `v2` | Direct NeoPixel | GPIO32 | GPIO12 | `small_grid`, `short_strip` |
-| `v3_1` | NeoPXL8 | FeatherWing output 6 / GPIO14 | FeatherWing output 7 / GPIO15 | `short_strip`, `long_strip` |
+| `v3` | NeoPXL8 | FeatherWing output 6 / GPIO14 | FeatherWing output 7 / GPIO15 | `short_strip`, `long_strip` |
 
 ## LED Backend Abstraction
 
@@ -107,7 +113,7 @@ V1 and V2 need an on-board WiFi connection indicator because they do not have a 
 | --- | --- | --- | --- |
 | `v1` | `LED_BUILTIN` | On | Off |
 | `v2` | Onboard NeoPixel on GPIO0, power GPIO2 | Green | Off |
-| `v3_1` | TFT display | `WiFi OK` screen text | `No WiFi` / error screen |
+| `v3` | TFT display | `WiFi OK` screen text | `No WiFi` / error screen |
 
 The indicator should reflect `WiFi.status() == WL_CONNECTED`. Keep sender activity, FPS, and Art-Net receive state separate from this simple board-level connection signal.
 
@@ -199,9 +205,9 @@ V3.5 uses its own persistence namespace so it does not collide with older firmwa
 Run before committing firmware changes:
 
 ```sh
-./V3_5/Arduino/upload.sh --board v1 --compile
-./V3_5/Arduino/upload.sh --board v2 --compile
-./V3_5/Arduino/upload.sh --board v3_1 --compile
+./V3_5/Arduino/upload.sh -v1 --compile
+./V3_5/Arduino/upload.sh -v2 --compile
+./V3_5/Arduino/upload.sh -v3 --compile
 ```
 
 Hardware smoke test:

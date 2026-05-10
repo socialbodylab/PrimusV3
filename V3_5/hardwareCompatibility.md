@@ -10,7 +10,7 @@ For deeper development notes, start with [README.md](README.md), then use [FIRMW
 | --- | --- | --- | --- | --- | --- | --- |
 | `v1` | Adafruit Huzzah32 ESP32 Feather | Direct NeoPixel | None | GPIO32 | GPIO12 | `small_grid`, `long_strip` |
 | `v2` | Adafruit ESP32 Feather V2 | Direct NeoPixel | None | GPIO32 | GPIO12 | `small_grid`, `short_strip` |
-| `v3_1` | Adafruit ESP32-S3 Reverse TFT Feather + NeoPXL8 FeatherWing | NeoPXL8 | Built-in ST7789 TFT | FeatherWing output 6 / A4 / GPIO14 | FeatherWing output 7 / A3 / GPIO15 | `short_strip`, `long_strip` |
+| `v3` | Adafruit ESP32-S3 Reverse TFT Feather + NeoPXL8 FeatherWing | NeoPXL8 | Built-in ST7789 TFT | FeatherWing output 6 / A4 / GPIO14 | FeatherWing output 7 / A3 / GPIO15 | `short_strip`, `long_strip` |
 
 ## Output Types
 
@@ -44,9 +44,9 @@ The sender continues to accept V3.1-style tags that do not include `B:profile`; 
 ## Compile Commands
 
 ```sh
-./V3_5/Arduino/upload.sh --board v1 --compile
-./V3_5/Arduino/upload.sh --board v2 --compile
-./V3_5/Arduino/upload.sh --board v3_1 --compile
+./V3_5/Arduino/upload.sh -v1 --compile
+./V3_5/Arduino/upload.sh -v2 --compile
+./V3_5/Arduino/upload.sh -v3 --compile
 ```
 
-Use the same script without `--compile` to upload. Add a serial port path as the last argument when auto-detection is not enough.
+Use `./V3_5/Arduino/upload.sh --ports` to list likely ESP32 serial ports before uploading. Use `--auto` when exactly one ESP32-like device is connected, `--all` when every detected ESP32-like candidate should receive the same selected profile, or add one or more serial port paths when multiple board types are attached.

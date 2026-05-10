@@ -5,7 +5,7 @@ WiFi-controlled LED lighting system for live performance costumes. A Python send
 ## How It Works
 
 ```
-     Art-Net Sender 
+    Art-Net Sender
 ┌──────────────────────┐    Art-Net UDP    ┌──────────────────┐
 │                      │  ──────────────►  │  Receiver Node   │
 │  Python Web UI       │    port 6454      │  (ESP32)         │
@@ -25,7 +25,7 @@ V3.5 builds on V3.1 to run reflashed V1, V2, and V3.1 receiver hardware from the
 
 Main updates:
 - One active V3.5 sender under `V3_5/sender/` with the clip/look/cue workflow from V3.1.
-- One active receiver firmware tree under `V3_5/Arduino/primusV3_receiver/` with compile-time profiles for `v1`, `v2`, and `v3_1`.
+- One active receiver firmware tree under `V3_5/Arduino/primusV3_receiver/` with upload profiles for `-v1`, `-v2`, and `-v3`.
 - New output types for legacy hardware: `small_grid` (4x8 / 32 px) and `extra_long_strip` (122 px).
 - Discovery now advertises hardware profile metadata with `PV3CAP1|...|B:<profile>|F:RIOH`.
 - V1 and V2 screenless boards have connection indicators: V1 uses `LED_BUILTIN`; V2 uses the onboard NeoPixel.
@@ -43,27 +43,81 @@ Upload V3.5 firmware:
 
 Firmware upload requires [Arduino CLI](https://arduino.github.io/arduino-cli/latest/) with the ESP32 board core available. The upload script handles compile/upload commands and can check required libraries with `--install`.
 
-```bash
-./V3_5/Arduino/upload.sh --board v1 --compile
-./V3_5/Arduino/upload.sh --board v2 --compile
-./V3_5/Arduino/upload.sh --board v3_1 --compile
+First time setting up a computer for board uploads? Start with [BOARD_UPLOAD_README.md](BOARD_UPLOAD_README.md) for Arduino CLI, ESP32 core, library, port-detection, and upload commands.
 
-./V3_5/Arduino/upload.sh --board v1 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v2 /dev/cu.usbserial-XXXX
-./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodemXXXX
+Recommended upload workflow:
+
+1. List detected ESP32-like serial ports.
+
+    ```bash
+    ./V3_5/Arduino/upload.sh --ports
+    ```
+
+2. If exactly one receiver is plugged in over USB, let the script choose it.
+
+    ```bash
+    ./V3_5/Arduino/upload.sh -v3 --auto
+    ```
+
+    `--auto` refuses to guess if no ESP32-like ports are found or if multiple candidates are connected.
+
+3. If multiple receivers of the same hardware profile are plugged in, upload to all detected candidates.
+
+    ```bash
+    ./V3_5/Arduino/upload.sh -v2 --all
+    ```
+
+    Use this only when every ESP32-like candidate from `--ports` should receive the selected profile.
+
+4. If multiple receiver types are plugged in, pass the target ports explicitly.
+
+    ```bash
+    ./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
+    ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
+    ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
+    ```
+
+Common compile and upload commands:
+
+```bash
+./V3_5/Arduino/upload.sh --ports
+./V3_5/Arduino/upload.sh -v1 --compile
+./V3_5/Arduino/upload.sh -v2 --compile
+./V3_5/Arduino/upload.sh -v3 --compile
+
+./V3_5/Arduino/upload.sh -v3 --auto
+./V3_5/Arduino/upload.sh -v2 --all
 ```
+
+Multi-board uploads:
+
+```bash
+# Same hardware profile on every detected ESP32-like serial port
+./V3_5/Arduino/upload.sh -v2 --all
+
+# Chosen ports only, useful when multiple board types are plugged in
+./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
+```
+
+`--all` compiles once, then uploads sequentially to each selected port. Use `./V3_5/Arduino/upload.sh --ports` first and only use `--all` when every ESP32-like candidate should receive the same `-v1`, `-v2`, or `-v3` firmware profile. For mixed board types, pass the exact ports explicitly.
 
 Useful upload flags:
 
 | Flag | Use |
 | --- | --- |
-| `--board v1`, `--board v2`, `--board v3_1` | Select the hardware profile. Defaults to `v3_1`. |
+| `-v1`, `-v2`, `-v3` | Select the hardware profile. Defaults to `-v3`. |
+| `--board v1`, `--board v2`, `--board v3` | Long-form hardware profile selection. |
 | `--compile` | Compile only; do not upload. |
 | `--install` | Check/install required Arduino libraries for the selected board. |
+| `--ports` / `-ports` / `--list-ports` | List likely ESP32 serial ports without compiling or uploading. |
+| `--auto` / `-auto` | Upload to the only detected ESP32-like serial port. Fails if none or multiple are found. |
+| `--all` / `-all` / `--all-ports` | Upload the selected profile to every detected ESP32-like serial port. Use when all connected candidates are the same board type. |
 | `--baud <rate>` / `--speed <rate>` | Override upload speed. |
-| `/dev/cu...` | Explicit serial port when multiple boards are connected. |
+| `/dev/cu...` | One or more explicit serial ports when auto-detection is ambiguous or mixed board types are connected. |
+| `-h` / `--help` | Show the upload script help text. |
 
 Start here for V3.5 development:
+- [BOARD_UPLOAD_README.md](BOARD_UPLOAD_README.md) - first-time setup for uploading firmware to boards
 - [V3_5/README.md](V3_5/README.md) - documentation index and quick start
 - [V3_5/FIRMWARE_DEVELOPMENT.md](V3_5/FIRMWARE_DEVELOPMENT.md) - firmware profiles, pins, protocol contracts, and validation
 - [V3_5/SENDER_DEVELOPMENT.md](V3_5/SENDER_DEVELOPMENT.md) - sender architecture, discovery parsing, API behavior, and tests
@@ -124,15 +178,17 @@ python3 V3_5/sender/run.py --no-browser        # don't auto-open browser
 ### Firmware (V3.5)
 
 ```bash
-./V3_5/Arduino/upload.sh --board v3_1
+./V3_5/Arduino/upload.sh --ports
+./V3_5/Arduino/upload.sh -v3 --auto
 ```
 
-Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks required libraries, compiles, and uploads. Add an explicit serial port when multiple boards are connected.
+Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks required libraries, compiles, and uploads. Use `--ports` to inspect likely ESP32 serial devices, `--auto` when exactly one device is attached, `--all` when multiple connected devices should receive the same profile, or explicit serial ports when mixed board types are connected.
 
 ```bash
-./V3_5/Arduino/upload.sh --board v1 --compile
-./V3_5/Arduino/upload.sh --board v2 --install
-./V3_5/Arduino/upload.sh --board v3_1 /dev/cu.usbmodem14101
+./V3_5/Arduino/upload.sh -v1 --compile
+./V3_5/Arduino/upload.sh -v2 --install
+./V3_5/Arduino/upload.sh -v2 --all
+./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodem14101
 ```
 
 ## Hardware

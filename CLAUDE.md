@@ -33,7 +33,7 @@ V3.5 is the active compatibility track under `V3_5/`. V3.1 remains the previous 
 - `sender/led_controller.py` — Original single-file Python sender (~1800 lines). Embedded HTML/JS/CSS web UI.
 
 ### Receiver Firmware
-- `V3_5/Arduino/primusV3_receiver/` — shared V3.5 firmware with `v1`, `v2`, and `v3_1` build profiles.
+- `V3_5/Arduino/primusV3_receiver/` — shared V3.5 firmware with `-v1`, `-v2`, and `-v3` upload profiles.
   - `config.h` — Source of truth for output types, pins, network config.
   - `primusV3_receiver.ino` — Main sketch: WiFi, Art-Net parsing, NeoPixel output.
   - `display.h` — TFT display screens.
@@ -68,7 +68,7 @@ The sender and receiver must agree on:
 
 **V3.5 Sender**: `python3 V3_5/sender/run.py` — opens web UI at http://127.0.0.1:8080 by default
 **V3.0 Sender**: `python3 V3_0/sender/led_controller.py` — opens web UI at http://localhost:8080
-**Firmware**: `V3_5/Arduino/upload.sh --board v1|v2|v3_1 [port]` — compiles and uploads selected profile
+**Firmware**: `V3_5/Arduino/upload.sh -v1|-v2|-v3 [port ...]` or `--all` — compiles and uploads selected profile
 
 ## Conventions
 

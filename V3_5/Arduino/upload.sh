@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # upload.sh — Compile & upload PrimusV3.5 receiver build profiles
 # Usage:
-#   ./upload.sh --board v3_1              # auto-detect port, compile + upload
-#   ./upload.sh --board v1 --compile      # compile V1 only
-#   ./upload.sh --board v2 /dev/cu.usb... # upload V2 to an explicit port
-#   ./upload.sh --board v2 --baud 115200 /dev/cu.usb... # override upload speed
+#   ./upload.sh --ports                   # list likely ESP32 serial ports
+#   ./upload.sh -v3 --auto                # upload if exactly one ESP32-like port is connected
+#   ./upload.sh -v2 --all                 # upload selected profile to every detected ESP32-like port
+#   ./upload.sh -v1 --compile             # compile V1 only
+#   ./upload.sh -v2 /dev/cu.usb...        # upload V2 to an explicit port
+#   ./upload.sh -v1 /dev/cu.usb1 /dev/cu.usb2 # upload selected profile to explicit ports
+#   ./upload.sh -v2 --baud 115200 /dev/cu.usb... # override upload speed
 #   ./upload.sh --install                 # install libraries for selected board
 
 set -euo pipefail
 
 SKETCH_DIR="$(cd "$(dirname "$0")/primusV3_receiver" && pwd)"
-BOARD_PROFILE="v3_1"
-PORT=""
+BOARD_PROFILE="v3"
+EXPLICIT_PORTS=()
+UPLOAD_PORTS=()
 COMPILE_ONLY=false
 INSTALL_ONLY=false
+LIST_PORTS=false
+AUTO_PORT=false
+ALL_PORTS=false
 BAUD=921600
 BAUD_OVERRIDE=""
 
@@ -21,11 +28,74 @@ info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
 ok()    { printf "\033[1;32m[OK]\033[0m    %s\n" "$*"; }
 err()   { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*" >&2; }
 
+usage() {
+  cat <<'EOF'
+upload.sh — Compile & upload PrimusV3.5 receiver build profiles
+
+Usage:
+  ./upload.sh --ports
+      List likely ESP32 serial ports detected by arduino-cli.
+
+  ./upload.sh -v3 --auto
+      Compile and upload when exactly one ESP32-like serial port is connected.
+
+  ./upload.sh -v2 --all
+      Compile once and upload to every detected ESP32-like serial port.
+
+  ./upload.sh -v1 --compile
+      Compile only; do not upload.
+
+  ./upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
+      Compile once and upload to one or more explicit serial ports.
+
+Flags:
+  -v1, -v2, -v3          Select hardware profile. Default: -v3.
+  --board v1|v2|v3       Long-form hardware profile selection.
+  --auto, -auto            Select the only detected ESP32-like serial port.
+  --all, -all              Select every detected ESP32-like serial port.
+  --all-ports              Alias for --all.
+  --ports, -ports          List likely ESP32 serial ports and exit.
+  --list-ports             Alias for --ports.
+  --compile                Compile only; do not upload.
+  --install                Check/install required Arduino libraries and exit.
+  --baud, --speed <rate>   Override upload speed.
+  -h, --help               Show this help.
+EOF
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -v1)
+      BOARD_PROFILE="v1"
+      shift
+      ;;
+    -v2)
+      BOARD_PROFILE="v2"
+      shift
+      ;;
+    -v3|-v3_1)
+      BOARD_PROFILE="v3"
+      shift
+      ;;
     --board)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        err "--board requires a value: v1, v2, or v3"
+        exit 1
+      fi
       BOARD_PROFILE="${2:-}"
       shift 2
+      ;;
+    --auto|-auto)
+      AUTO_PORT=true
+      shift
+      ;;
+    --all|-all|--all-ports)
+      ALL_PORTS=true
+      shift
+      ;;
+    --ports|-ports|--list-ports|--detect-ports)
+      LIST_PORTS=true
+      shift
       ;;
     --compile)
       COMPILE_ONLY=true
@@ -36,19 +106,43 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --baud|--speed)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        err "$1 requires a baud rate"
+        exit 1
+      fi
       BAUD_OVERRIDE="${2:-}"
       shift 2
       ;;
     -h|--help)
-      sed -n '1,12p' "$0"
+      usage
       exit 0
       ;;
+    -*)
+      err "Unknown option: $1"
+      usage
+      exit 1
+      ;;
     *)
-      PORT="$1"
+      EXPLICIT_PORTS+=("$1")
       shift
       ;;
   esac
 done
+
+if [[ "$AUTO_PORT" == true && "$ALL_PORTS" == true ]]; then
+  err "Use either --auto or --all, not both."
+  exit 1
+fi
+
+if [[ "$AUTO_PORT" == true && ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
+  err "Use either --auto or an explicit serial port, not both."
+  exit 1
+fi
+
+if [[ "$ALL_PORTS" == true && ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
+  err "Use either --all or explicit serial ports, not both."
+  exit 1
+fi
 
 case "$BOARD_PROFILE" in
   v1|v1_huzzah)
@@ -66,7 +160,7 @@ case "$BOARD_PROFILE" in
     REQUIRED_LIBS=("Adafruit NeoPixel")
     ;;
   v3|v3_1|v31|v3_1_reverse_tft)
-    BOARD_PROFILE="v3_1"
+    BOARD_PROFILE="v3"
     FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
     EXTRA_FLAGS="-DPRIMUS_PROFILE_V3_1"
     DEFAULT_BAUD=921600
@@ -78,19 +172,201 @@ case "$BOARD_PROFILE" in
     ;;
   *)
     err "Unknown board profile: $BOARD_PROFILE"
-    err "Expected one of: v1, v2, v3_1"
+    err "Expected one of: v1, v2, v3"
     exit 1
     ;;
 esac
 
-  BAUD="${BAUD_OVERRIDE:-$DEFAULT_BAUD}"
-  FQBN_WITH_OPTIONS="${FQBN}:UploadSpeed=${BAUD}"
+BAUD="${BAUD_OVERRIDE:-$DEFAULT_BAUD}"
+FQBN_WITH_OPTIONS="${FQBN}:UploadSpeed=${BAUD}"
 
 check_cli() {
   if ! command -v arduino-cli &>/dev/null; then
-    err "arduino-cli not found. Install: brew install arduino-cli"
+    err "arduino-cli not found. Install Arduino CLI: https://arduino.github.io/arduino-cli/latest/installation/"
     exit 1
   fi
+  if ! command -v python3 &>/dev/null; then
+    err "python3 not found. It is required to parse arduino-cli board output."
+    exit 1
+  fi
+}
+
+port_parser() {
+  local mode="$1"
+  python3 - "$mode" "$FQBN" <<'PY'
+import json
+import re
+import subprocess
+import sys
+
+mode = sys.argv[1]
+target_fqbn = sys.argv[2].lower()
+
+ESP32_VIDS = {"10c4", "1a86", "303a", "239a", "0403"}
+KEYWORDS = (
+  "esp32", "espressif", "cp210", "cp210x", "ch340", "ch910",
+  "wch", "silicon labs", "feather", "adafruit"
+)
+IGNORED_KEYWORDS = ("bluetooth", "debug-console")
+
+
+def normalize_vid(value):
+  if value is None:
+    return ""
+  text = str(value).strip().lower()
+  if text.startswith("0x"):
+    text = text[2:]
+  return text.zfill(4)[-4:]
+
+
+def load_ports():
+  proc = subprocess.run(
+    ["arduino-cli", "board", "list", "--format", "json"],
+    text=True,
+    capture_output=True,
+  )
+  if proc.returncode != 0:
+    print(proc.stderr.strip() or "arduino-cli board list failed", file=sys.stderr)
+    sys.exit(1)
+  try:
+    data = json.loads(proc.stdout or "{}")
+  except json.JSONDecodeError as exc:
+    print(f"Could not parse arduino-cli board list JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
+  if isinstance(data, dict):
+    return data.get("detected_ports", [])
+  return data if isinstance(data, list) else []
+
+
+def port_record(entry):
+  port = entry.get("port", {}) if isinstance(entry, dict) else {}
+  if not isinstance(port, dict):
+    port = {}
+  props = port.get("properties", {})
+  if not isinstance(props, dict):
+    props = {}
+  boards = entry.get("matching_boards", []) if isinstance(entry, dict) else []
+  if not isinstance(boards, list):
+    boards = []
+
+  address = str(port.get("address", ""))
+  label = str(port.get("label", address))
+  protocol = str(port.get("protocol", ""))
+  props_lower = {str(k).lower(): str(v) for k, v in props.items()}
+  vid = normalize_vid(props_lower.get("vid") or props_lower.get("vendorid"))
+
+  board_names = []
+  board_fqbns = []
+  for board in boards:
+    if not isinstance(board, dict):
+      continue
+    board_names.append(str(board.get("name", "")))
+    board_fqbns.append(str(board.get("fqbn", "")))
+
+  text_blob = " ".join(
+    [address, label, protocol]
+    + list(props_lower.values())
+    + board_names
+    + board_fqbns
+  ).lower()
+
+  target_match = any(fqbn.lower() == target_fqbn for fqbn in board_fqbns)
+
+  reasons = []
+  if target_match:
+    reasons.append("matches selected board")
+  elif any(fqbn.lower().startswith("esp32:esp32:") for fqbn in board_fqbns):
+    reasons.append("Arduino CLI matched ESP32 board")
+  if vid in ESP32_VIDS:
+    reasons.append(f"USB VID {vid}")
+  for keyword in KEYWORDS:
+    if keyword in text_blob:
+      reasons.append(keyword)
+      break
+  if re.search(r"/(cu|tty)\.usb(serial|modem)", address.lower()):
+    reasons.append("USB serial path")
+  if re.search(r"/dev/tty(usb|acm)\d+", address.lower()):
+    reasons.append("USB serial path")
+
+  ignored = any(keyword in text_blob for keyword in IGNORED_KEYWORDS)
+  is_serial = protocol == "serial" or bool(address)
+  is_candidate = is_serial and bool(reasons) and not ignored
+
+  board_label = ", ".join(name for name in board_names if name) or "unknown board"
+  reason_label = ", ".join(dict.fromkeys(reasons)) or "no ESP32 match"
+  return {
+    "address": address,
+    "label": label,
+    "protocol": protocol or "unknown",
+    "board": board_label,
+    "reason": reason_label,
+    "candidate": is_candidate,
+    "target_match": target_match,
+  }
+
+
+records = [port_record(entry) for entry in load_ports()]
+records = [record for record in records if record["address"]]
+candidates = [record for record in records if record["candidate"]]
+others = [record for record in records if not record["candidate"]]
+
+if mode == "all":
+  if not candidates:
+    print("No ESP32-like serial ports were detected.", file=sys.stderr)
+    print("Run this script with --ports to inspect ports, or pass ports explicitly.", file=sys.stderr)
+    sys.exit(1)
+  exact_matches = [record for record in candidates if record["target_match"]]
+  selected = exact_matches or candidates
+  if exact_matches and len(exact_matches) < len(candidates):
+    print("Using only ports that Arduino CLI matched to the selected board profile.", file=sys.stderr)
+    print("Other ESP32-like candidates were ignored; use explicit ports to override.", file=sys.stderr)
+  elif not exact_matches and len(candidates) > 1:
+    print("Arduino CLI did not identify exact selected-board matches.", file=sys.stderr)
+    print("Because --all was requested, every ESP32-like candidate will be used.", file=sys.stderr)
+  for record in selected:
+    print(record["address"])
+  sys.exit(0)
+
+if mode == "auto":
+  if len(candidates) == 1:
+    print(candidates[0]["address"])
+    sys.exit(0)
+  if not candidates:
+    print("No ESP32-like serial ports were detected.", file=sys.stderr)
+  else:
+    print("Multiple ESP32-like serial ports were detected:", file=sys.stderr)
+    for record in candidates:
+      print(f"  {record['address']}  ({record['reason']})", file=sys.stderr)
+  print("Run this script with --ports to inspect ports, or pass a port explicitly.", file=sys.stderr)
+  sys.exit(1)
+
+if candidates:
+  print("ESP32 candidate serial ports:")
+  for record in candidates:
+    print(f"  {record['address']}")
+    print(f"    Board:  {record['board']}")
+    print(f"    Reason: {record['reason']}")
+else:
+  print("No ESP32-like serial ports detected.")
+
+if others:
+  print("")
+  print("Other serial ports detected (not selected by --auto):")
+  for record in others:
+    print(f"  {record['address']}  ({record['protocol']})")
+PY
+}
+
+list_ports() {
+  port_parser list
+}
+
+detect_auto_port() {
+  port_parser auto
+}
+
+detect_all_ports() {
+  port_parser all
 }
 
 install_libs() {
@@ -108,31 +384,43 @@ install_libs() {
   done
 }
 
-detect_port() {
-  local port
-  port=$(arduino-cli board list --format json 2>/dev/null \
-    | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-ports = data.get('detected_ports', data) if isinstance(data, dict) else data
-target = '$FQBN'.lower()
-for p in ports:
-    addr = p.get('port', {})
-    boards = p.get('matching_boards', [])
-    for b in boards:
-        if b.get('fqbn', '').lower() == target:
-            print(addr.get('address', '') if isinstance(addr, dict) else '')
-            sys.exit(0)
-for p in ports:
-    addr = p.get('port', {})
-    if isinstance(addr, dict) and addr.get('protocol', '') == 'serial':
-        print(addr.get('address', ''))
-        sys.exit(0)
-" 2>/dev/null)
-  echo "$port"
-}
-
 check_cli
+
+if [[ "$LIST_PORTS" == true ]]; then
+  list_ports
+  exit 0
+fi
+
+if [[ "$COMPILE_ONLY" == false && "$INSTALL_ONLY" == false ]]; then
+  if [[ "$ALL_PORTS" == true ]]; then
+    info "Detecting all ESP32 serial ports for upload..."
+    if ! detected_ports="$(detect_all_ports)"; then
+      exit 1
+    fi
+    while IFS= read -r detected_port; do
+      if [[ -n "$detected_port" ]]; then
+        UPLOAD_PORTS+=("$detected_port")
+      fi
+    done <<< "$detected_ports"
+  elif [[ ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
+    UPLOAD_PORTS=("${EXPLICIT_PORTS[@]}")
+  else
+    if [[ "$AUTO_PORT" == true ]]; then
+      info "Auto-detecting ESP32 serial port..."
+    else
+      info "No serial port supplied; using auto-detect. Use --ports to inspect candidates or pass --auto explicitly."
+    fi
+    if ! detected_port="$(detect_auto_port)"; then
+      exit 1
+    fi
+    UPLOAD_PORTS=("$detected_port")
+  fi
+fi
+
+if [[ "$COMPILE_ONLY" == false && "$INSTALL_ONLY" == false && ${#UPLOAD_PORTS[@]} -eq 0 ]]; then
+  err "No upload ports selected."
+  exit 1
+fi
 
 if ! arduino-cli core list 2>/dev/null | grep -q "esp32:esp32"; then
   info "Installing ESP32 board core..."
@@ -159,24 +447,23 @@ if [[ "$COMPILE_ONLY" == true ]]; then
   exit 0
 fi
 
-if [[ -z "$PORT" ]]; then
-  info "Auto-detecting board port..."
-  PORT=$(detect_port)
+if [[ ${#UPLOAD_PORTS[@]} -eq 1 ]]; then
+  ok "Using port: ${UPLOAD_PORTS[0]}"
+else
+  ok "Using ports:"
+  for upload_port in "${UPLOAD_PORTS[@]}"; do
+    printf "  %s\n" "$upload_port"
+  done
 fi
 
-if [[ -z "$PORT" ]]; then
-  err "No board detected. Connect the target board and try again."
-  err "  Or specify port manually: $0 --board $BOARD_PROFILE /dev/cu.usbmodemXXXX"
-  echo ""
-  info "Available ports:"
-  arduino-cli board list
-  exit 1
-fi
-
-ok "Using port: $PORT"
-
-info "Uploading to $PORT at ${BAUD} baud..."
-arduino-cli upload --fqbn "$FQBN_WITH_OPTIONS" --port "$PORT" "$SKETCH_DIR"
-ok "Upload complete!"
+for upload_port in "${UPLOAD_PORTS[@]}"; do
+  info "Uploading to $upload_port at ${BAUD} baud..."
+  arduino-cli upload --fqbn "$FQBN_WITH_OPTIONS" --port "$upload_port" "$SKETCH_DIR"
+  ok "Upload complete: $upload_port"
+done
 echo ""
-info "Monitor serial output with: arduino-cli monitor -p $PORT -b $FQBN"
+if [[ ${#UPLOAD_PORTS[@]} -eq 1 ]]; then
+  info "Monitor serial output with: arduino-cli monitor -p ${UPLOAD_PORTS[0]} -b $FQBN"
+else
+  info "Monitor serial output with: arduino-cli monitor -p <port> -b $FQBN"
+fi
