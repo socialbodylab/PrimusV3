@@ -9,10 +9,11 @@ import threading
 import time
 
 from mixer import load_look
+from paths import cues_file
 
 
 def _cues_file():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "cues.json")
+    return cues_file()
 
 
 class CueList:
@@ -62,6 +63,7 @@ class CueList:
     def save(self):
         path = _cues_file()
         with self.lock:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 json.dump({"cues": self.cues}, f, indent=2)
 

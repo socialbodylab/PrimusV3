@@ -9,11 +9,12 @@ from datetime import datetime, timezone
 
 from clips import load_clip
 from effects import EFFECTS, fx_none, compute_anim_factor, blend_pixels
+from paths import looks_dir
 from state import OUTPUT_TYPES
 
 
 def _looks_dir():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "looks")
+    return looks_dir()
 
 
 def _ensure_dir():

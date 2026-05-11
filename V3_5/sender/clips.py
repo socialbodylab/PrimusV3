@@ -7,9 +7,11 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+from paths import clips_dir
+
 
 def _clips_dir():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "clips")
+    return clips_dir()
 
 
 def _ensure_dir():

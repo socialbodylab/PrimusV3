@@ -12,6 +12,7 @@ The important design choice is that V1 and V2 hardware are not supported through
 | [../BOARD_UPLOAD_README.md](../BOARD_UPLOAD_README.md) | First-time board upload setup, automated setup, and manual fallback commands. |
 | [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) | Receiver firmware profiles, pins, output tables, Art-Net contracts, and firmware change checklist. |
 | [SENDER_DEVELOPMENT.md](SENDER_DEVELOPMENT.md) | Python sender architecture, discovery metadata, output type synchronization, API behavior, and tests. |
+| [PACKAGING.md](PACKAGING.md) | Build a one-click macOS app or Windows executable for the V3.5 sender/interface. |
 | [hardwareCompatibility.md](hardwareCompatibility.md) | Compact board/profile/pin/output reference. |
 | [previousHardware/](previousHardware/) | Archived V1/V2 firmware and specs used only as historical reference. |
 

@@ -25,6 +25,7 @@ from state import ControllerState, animation_loop
 from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
+from paths import ensure_runtime_data, is_bundled, log_path
 from server import create_server
 
 
@@ -37,6 +38,19 @@ def _handle_sigterm(signum, frame):
     raise KeyboardInterrupt
 
 
+def _configure_app_logging():
+    if not is_bundled():
+        return
+    try:
+        log_file = open(log_path("sender.log"), "a", buffering=1)
+    except OSError:
+        return
+    sys.stdout = log_file
+    sys.stderr = log_file
+    print()
+    print(f"PrimusV3.5 Sender started {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
 def _kill_existing():
     """Kill other V3.5 sender launchers and wait for them to exit."""
     import time
@@ -47,6 +61,8 @@ def _kill_existing():
         os.path.join(sender_dir, "controller.py"),
         "V3_5/sender/run.py",
         "V3_5/sender/controller.py",
+        "PrimusV3.5 Sender",
+        "PrimusV35Sender",
     }
     try:
         out = subprocess.check_output(
@@ -447,6 +463,8 @@ def main():
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
+    ensure_runtime_data()
+    _configure_app_logging()
     _kill_existing()
 
     fps_listener = FpsListener()

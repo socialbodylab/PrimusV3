@@ -12,10 +12,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import clips
 import mixer
 from artnet import discover_artnet_nodes
+from paths import web_dir
 from state import OUTPUT_TYPES, ControllerState
 
 
-_WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+_WEB_DIR = web_dir()
 _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 
 

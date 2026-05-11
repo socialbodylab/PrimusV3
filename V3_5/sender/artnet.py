@@ -77,7 +77,10 @@ class ArtNetSender:
         if not self.connected or not self.sock:
             return
         pkt = self._build_packet(universe, rgb_data)
-        self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+        try:
+            self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+        except OSError:
+            self.disconnect()
 
     def advance_sequence(self):
         self.sequence = (self.sequence % 255) + 1

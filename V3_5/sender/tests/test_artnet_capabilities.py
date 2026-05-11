@@ -6,8 +6,19 @@ SENDER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SENDER_DIR not in sys.path:
     sys.path.insert(0, SENDER_DIR)
 
-from artnet import parse_node_capabilities, parse_node_outputs
+from artnet import ArtNetSender, parse_node_capabilities, parse_node_outputs
 from state import LOOK_OUTPUT_TYPES, OUTPUT_TYPES
+
+
+class BrokenSocket:
+    def __init__(self):
+        self.closed = False
+
+    def sendto(self, packet, addr):
+        raise BrokenPipeError("test socket closed")
+
+    def close(self):
+        self.closed = True
 
 
 class ArtNetCapabilityTests(unittest.TestCase):
@@ -60,6 +71,18 @@ class ArtNetCapabilityTests(unittest.TestCase):
             [0, 1], OUTPUT_TYPES, node_report=report, type_keys=LOOK_OUTPUT_TYPES)
         self.assertEqual(outputs[0]["type"], "short_strip")
         self.assertEqual(outputs[1]["type"], "long_strip")
+
+    def test_sender_disconnects_after_udp_send_error(self):
+        sender = ArtNetSender("192.168.1.2")
+        sock = BrokenSocket()
+        sender.sock = sock
+        sender.connected = True
+
+        sender.send_output(0, bytes([0, 0, 0] * 2))
+
+        self.assertFalse(sender.connected)
+        self.assertIsNone(sender.sock)
+        self.assertTrue(sock.closed)
 
 
 if __name__ == "__main__":

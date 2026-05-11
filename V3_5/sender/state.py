@@ -19,6 +19,7 @@ from artnet import (
     send_art_address,
     send_ip_config,
 )
+from paths import state_file
 
 
 # ======================================================================
@@ -90,19 +91,19 @@ DEFAULT_TEMPLATE = [
 #  PERSISTENCE
 # ======================================================================
 
-_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           ".primus_state.json")
+def _state_file():
+    return state_file()
 
 
 def _save_output_types(types):
     try:
-        with open(_STATE_FILE, "r") as f:
+        with open(_state_file(), "r") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         data = {}
     data["output_types"] = types
     try:
-        with open(_STATE_FILE, "w") as f:
+        with open(_state_file(), "w") as f:
             json.dump(data, f)
     except OSError:
         pass
@@ -110,7 +111,7 @@ def _save_output_types(types):
 
 def _load_output_types():
     try:
-        with open(_STATE_FILE, "r") as f:
+        with open(_state_file(), "r") as f:
             data = json.load(f)
         types = data.get("output_types", [])
         if types and all(t in OUTPUT_TYPES for t in types):
@@ -140,7 +141,7 @@ def _normalize_device_capabilities(capabilities=None):
 def _save_devices(devices):
     """Persist device list so known V3.5 profile hints survive restarts."""
     try:
-        with open(_STATE_FILE, "r") as f:
+        with open(_state_file(), "r") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         data = {}
@@ -166,7 +167,7 @@ def _save_devices(devices):
         })
     data["devices"] = saved_devices
     try:
-        with open(_STATE_FILE, "w") as f:
+        with open(_state_file(), "w") as f:
             json.dump(data, f)
     except OSError:
         pass
@@ -174,7 +175,7 @@ def _save_devices(devices):
 
 def _load_devices():
     try:
-        with open(_STATE_FILE, "r") as f:
+        with open(_state_file(), "r") as f:
             data = json.load(f)
         return data.get("devices", [])
     except (OSError, json.JSONDecodeError):
@@ -183,13 +184,13 @@ def _load_devices():
 
 def _save_device_groups(groups):
     try:
-        with open(_STATE_FILE, "r") as f:
+        with open(_state_file(), "r") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         data = {}
     data["device_groups"] = groups
     try:
-        with open(_STATE_FILE, "w") as f:
+        with open(_state_file(), "w") as f:
             json.dump(data, f)
     except OSError:
         pass
@@ -197,7 +198,7 @@ def _save_device_groups(groups):
 
 def _load_device_groups():
     try:
-        with open(_STATE_FILE, "r") as f:
+        with open(_state_file(), "r") as f:
             data = json.load(f)
         return data.get("device_groups", [])
     except (OSError, json.JSONDecodeError):

@@ -13,3 +13,7 @@ __pycache__/
 V3_1/sender/.primus_state.json
 V3_5/sender/.primus_state.json
 sender/.primus_state.json
+
+# Packaging outputs
+V3_5/build/
+V3_5/dist/
