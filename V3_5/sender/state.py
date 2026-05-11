@@ -367,6 +367,8 @@ class ControllerState:
 
         # Mixer / controller override pixel buffers (set externally)
         self._override_pixels = None  # list of pixel lists per output, or None
+        self._override_frames_by_device = None
+        self._override_default_frames = None
         self._controller_device_ips = None  # set of IP strings or None (all)
         # Mixer live preview state
         self._mixer_preview_look = None
@@ -592,6 +594,7 @@ class ControllerState:
                     "hardware_label": dev.get("hardware_label", "Unknown hardware"),
                     "firmware_version": dev.get("firmware_version"),
                     "connected": dev["connected"],
+                    "transport_error": dev.get("transport_error"),
                     "receiver_fps": rx["fps"] if rx else None,
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
                     "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
@@ -679,6 +682,30 @@ class ControllerState:
     #  Output config
     # ------------------------------------------------------------------
 
+    def _transport_error_text(self, error):
+        message = getattr(error, "strerror", None) or str(error) or "UDP send failed"
+        error_number = getattr(error, "errno", None)
+        if error_number is not None:
+            return f"{message} (errno {error_number})"
+        return message
+
+    def _mark_transport_error_unlocked(self, dev, error):
+        message = self._transport_error_text(error)
+        dev["transport_error"] = message
+        dev["connected"] = False
+        dev["sender"].disconnect()
+        print(f"Transport error for {dev['name']} ({dev['ip']}): {message}")
+
+    def _clear_transport_error_unlocked(self, dev):
+        dev["transport_error"] = None
+
+    def _ensure_sender_connected_unlocked(self, dev):
+        dev["sender"].ip = dev["ip"]
+        if not dev["sender"].connected:
+            dev["sender"].connect()
+        dev["connected"] = True
+        self._clear_transport_error_unlocked(dev)
+
     def _send_output_config(self, dev):
         caps = _normalize_device_capabilities(dev.get("capabilities"))
         if not caps.get("output_config"):
@@ -686,7 +713,11 @@ class ControllerState:
 
         types = [lo["type"] for lo in self.active_look["outputs"]]
         type_to_id = {name: i for i, name in enumerate(LOOK_OUTPUT_TYPES)}
-        send_output_config(dev["ip"], types, type_to_id)
+        try:
+            send_output_config(dev["ip"], types, type_to_id)
+        except OSError as error:
+            self._mark_transport_error_unlocked(dev, error)
+            return False
         # Sync local device output records with the Look output types
         for oi, lo in enumerate(self.active_look["outputs"]):
             if oi < len(dev["outputs"]):
@@ -698,6 +729,7 @@ class ControllerState:
                         typedef.get("grid_size")
                         if typedef["layout"] == "grid" else None
                     )
+        self._clear_transport_error_unlocked(dev)
         return True
 
     # ------------------------------------------------------------------
@@ -707,11 +739,13 @@ class ControllerState:
     def connect(self, di):
         with self.lock:
             dev = self.devices[di]
-            dev["sender"].ip = dev["ip"]
-            if not dev["sender"].connected:
-                dev["sender"].connect()
-            dev["connected"] = True
-            self._send_output_config(dev)
+            self._ensure_sender_connected_unlocked(dev)
+            if self._send_output_config(dev):
+                return {"ok": True}
+            return {
+                "ok": False,
+                "error": dev.get("transport_error") or "output configuration failed",
+            }
 
     def disconnect(self, di):
         with self.lock:
@@ -753,6 +787,7 @@ class ControllerState:
                 "base_universe": base_u,
                 "connected": False,
                 "sender": ArtNetSender(node_info["ip"]),
+                "transport_error": None,
                 "capabilities": capabilities,
                 "hardware_profile": node_info.get(
                     "hardware_profile", capabilities.get("hardware_profile", "unknown")),
@@ -891,8 +926,13 @@ class ControllerState:
             if not status["ok"]:
                 return status
             dev = self.devices[di]
-            send_art_address(dev["ip"], new_name)
+            try:
+                send_art_address(dev["ip"], new_name)
+            except OSError as error:
+                self._mark_transport_error_unlocked(dev, error)
+                return {"ok": False, "error": dev.get("transport_error")}
             dev["name"] = new_name
+            self._clear_transport_error_unlocked(dev)
             _save_devices(self.devices)
             return {"ok": True}
 
@@ -902,7 +942,12 @@ class ControllerState:
             if not status["ok"]:
                 return status
             dev = self.devices[di]
-            send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
+            try:
+                send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
+            except OSError as error:
+                self._mark_transport_error_unlocked(dev, error)
+                return {"ok": False, "error": dev.get("transport_error")}
+            self._clear_transport_error_unlocked(dev)
             return {"ok": True}
 
     def revert_device_dhcp(self, di):
@@ -911,17 +956,26 @@ class ControllerState:
             if not status["ok"]:
                 return status
             dev = self.devices[di]
-            send_ip_config(dev["ip"], 0)
+            try:
+                send_ip_config(dev["ip"], 0)
+            except OSError as error:
+                self._mark_transport_error_unlocked(dev, error)
+                return {"ok": False, "error": dev.get("transport_error")}
+            self._clear_transport_error_unlocked(dev)
             return {"ok": True}
 
     def connect_all(self):
+        results = []
         with self.lock:
-            for dev in self.devices:
-                if not dev["sender"].connected:
-                    dev["sender"].ip = dev["ip"]
-                    dev["sender"].connect()
-                dev["connected"] = True
-                self._send_output_config(dev)
+            for idx, dev in enumerate(self.devices):
+                self._ensure_sender_connected_unlocked(dev)
+                ok = self._send_output_config(dev)
+                results.append({
+                    "device_index": idx,
+                    "ok": ok,
+                    "error": None if ok else dev.get("transport_error"),
+                })
+        return results
 
     def disconnect_all(self):
         with self.lock:
@@ -966,23 +1020,31 @@ class ControllerState:
             if not status["ok"]:
                 return False
             dev = self.devices[di]
-            if not dev["sender"].connected:
+            if not dev.get("connected"):
                 return False
+            self._ensure_sender_connected_unlocked(dev)
             outputs_info = []
             for o in dev["outputs"]:
                 outputs_info.append((o["universe"], o["count"]))
             sender = dev["sender"]
 
         # Flash red then black (outside lock to avoid blocking animation)
+        ok = True
         for universe, count in outputs_info:
             red = bytes([255, 0, 0] * count)
-            sender.send_output(universe, red)
+            ok = sender.send_output(universe, red) and ok
         sender.advance_sequence()
         time.sleep(1.0)
         for universe, count in outputs_info:
-            sender.send_output(universe, bytes(count * 3))
+            ok = sender.send_output(universe, bytes(count * 3)) and ok
         sender.advance_sequence()
-        return True
+        if ok:
+            return True
+        with self.lock:
+            if 0 <= di < len(self.devices) and self.devices[di]["sender"] is sender:
+                self._mark_transport_error_unlocked(
+                    self.devices[di], sender.last_error or OSError("UDP send failed"))
+        return False
 
     # ------------------------------------------------------------------
     #  Override pixels (for mixer / controller playback)
@@ -994,11 +1056,32 @@ class ControllerState:
         """
         with self.lock:
             self._override_pixels = pixels_per_output
+            self._override_frames_by_device = None
+            self._override_default_frames = None
             self._controller_device_ips = device_ips
+
+    def set_override_frames_by_device(self, frames_by_ip=None, default_frames=None):
+        """Set per-device controller frames.
+
+        frames_by_ip maps device IP -> list of output frame dicts.
+        default_frames applies to devices without a specific frame; None means
+        only explicitly mapped devices receive output.
+        """
+        frames_by_ip = frames_by_ip or {}
+        with self.lock:
+            self._override_pixels = None
+            self._override_frames_by_device = dict(frames_by_ip)
+            self._override_default_frames = default_frames
+            if default_frames is None:
+                self._controller_device_ips = set(frames_by_ip.keys())
+            else:
+                self._controller_device_ips = None
 
     def _clear_override_unlocked(self):
         """Clear any cached override frame and controller-specific targeting."""
         self._override_pixels = None
+        self._override_frames_by_device = None
+        self._override_default_frames = None
         self._controller_device_ips = None
 
     def _clear_mixer_preview_unlocked(self):
@@ -1020,6 +1103,8 @@ class ControllerState:
             self._clear_mixer_preview_unlocked()
         if source != self.SOURCE_CONTROLLER:
             self._controller_device_ips = None
+            self._override_frames_by_device = None
+            self._override_default_frames = None
         if source in (self.SOURCE_DESIGNER, self.SOURCE_IDLE):
             self._override_pixels = None
 
@@ -1122,7 +1207,15 @@ class ControllerState:
             dt = max(now - self.last_tick, 0.001)
             self.last_tick = now
 
-            if self._override_pixels is not None:
+            device_frames_active = (
+                self._override_frames_by_device is not None
+                or self._override_default_frames is not None
+            )
+
+            if device_frames_active:
+                for lo in self.active_look["outputs"]:
+                    lo["pixels"] = []
+            elif self._override_pixels is not None:
                 # Use mixer/controller pre-computed pixels
                 for i, lo in enumerate(self.active_look["outputs"]):
                     if i < len(self._override_pixels) and self._override_pixels[i]:
@@ -1161,11 +1254,42 @@ class ControllerState:
             dev_filter = self._mixer_preview_device_filter
             ctrl_ips = self._controller_device_ips if self.playback_source == self.SOURCE_CONTROLLER else None
             for di, dev in enumerate(self.devices):
-                if not dev["sender"].connected:
+                if not dev.get("connected"):
                     continue
+                if not dev["sender"].connected:
+                    self._ensure_sender_connected_unlocked(dev)
                 if dev_filter is not None and di not in dev_filter:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
+                    continue
+                if device_frames_active:
+                    frames = None
+                    if self._override_frames_by_device is not None:
+                        frames = self._override_frames_by_device.get(dev["ip"])
+                    if frames is None:
+                        frames = self._override_default_frames
+                    if not frames:
+                        continue
+                    for oi, o in enumerate(dev["outputs"]):
+                        if oi >= len(frames):
+                            continue
+                        frame = frames[oi] or {}
+                        pixels = frame.get("pixels") or []
+                        if not pixels:
+                            continue
+                        send_pixels = list(pixels)
+                        grid = frame.get("grid")
+                        if grid:
+                            cols, rows = grid
+                            if o.get("grid_rotation", 0) != 0:
+                                send_pixels = apply_grid_rotation(
+                                    send_pixels, cols, rows, o["grid_rotation"])
+                            send_pixels = apply_serpentine(send_pixels, cols, rows)
+
+                        buf = bytearray()
+                        for r, g, b in send_pixels:
+                            buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
+                        send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
                     continue
                 for oi, o in enumerate(dev["outputs"]):
                     if oi >= len(self.active_look["outputs"]):
@@ -1186,18 +1310,31 @@ class ControllerState:
                     buf = bytearray()
                     for r, g, b in send_pixels:
                         buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
-                    send_queue.append((dev["sender"], o["universe"], bytes(buf)))
+                    send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
 
-        senders_used = set()
-        for sender, universe, data in send_queue:
-            sender.send_output(universe, data)
-            senders_used.add(id(sender))
+        failed_indices = set()
+        successful_indices = set()
+        for di, sender, universe, data in send_queue:
+            if sender.send_output(universe, data):
+                successful_indices.add(di)
+            else:
+                failed_indices.add(di)
         seen = set()
-        for sender, _, _ in send_queue:
+        for _, sender, _, _ in send_queue:
             sid = id(sender)
             if sid not in seen:
                 seen.add(sid)
                 sender.advance_sequence()
+        if failed_indices or successful_indices:
+            with self.lock:
+                for di in failed_indices:
+                    if 0 <= di < len(self.devices):
+                        dev = self.devices[di]
+                        self._mark_transport_error_unlocked(
+                            dev, dev["sender"].last_error or OSError("UDP send failed"))
+                for di in successful_indices - failed_indices:
+                    if 0 <= di < len(self.devices):
+                        self._clear_transport_error_unlocked(self.devices[di])
 
     def shutdown(self):
         self.running = False

@@ -12,8 +12,23 @@ from mixer import load_look
 from paths import cues_file
 
 
+_DEVICE_IPS_UNSET = object()
+
+
 def _cues_file():
     return cues_file()
+
+
+def _normalize_device_ips(values):
+    ips = []
+    seen = set()
+    for value in values or []:
+        ip = str(value).strip()
+        if not ip or ip in seen:
+            continue
+        seen.add(ip)
+        ips.append(ip)
+    return set(ips)
 
 
 class CueList:
@@ -28,6 +43,7 @@ class CueList:
 
         # Active look (may be set by cue GO or direct control-panel activation)
         self._active_look_id = None
+        self._active_control_looks = []
 
         # Device targeting: set of IP strings, or None = all devices
         self._active_device_ips = None
@@ -71,19 +87,39 @@ class CueList:
     #  Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_device_ips(self, cue, device_groups):
-        """Resolve a cue's device targeting to a set of IP strings or None."""
+    def _look_device_ips(self, look):
+        if not isinstance(look, dict) or "device_ips" not in look:
+            return None
+        return _normalize_device_ips(look.get("device_ips"))
+
+    def _target_union(self, entries):
+        if any(entry.get("device_ips") is None for entry in entries):
+            return None
+        out = set()
+        for entry in entries:
+            out.update(entry.get("device_ips") or set())
+        return out
+
+    def _resolve_device_ips(self, cue, device_groups, look=None):
+        """Resolve cue/Look device targeting to a set of IP strings or None."""
+        if cue.get("target_mode") == "all":
+            return None
+
         gid = cue.get("device_group_id")
-        if gid and device_groups:
-            for g in device_groups:
+        if gid:
+            for g in device_groups or []:
                 if g.get("id") == gid:
                     ips = g.get("device_ips", [])
-                    return set(ips) if ips else None
-            return None  # group was deleted
-        ips = cue.get("device_ips")
-        if ips:
-            return set(ips)
-        return None  # all devices
+                    return _normalize_device_ips(ips)
+            return set()  # group was deleted or has not loaded
+        if cue.get("target_mode") == "group":
+            return set()
+
+        if cue.get("target_mode") == "devices" or (
+                "device_ips" in cue and cue.get("target_mode") != "look"):
+            return _normalize_device_ips(cue.get("device_ips"))
+
+        return self._look_device_ips(look)
 
     def _start_transition(self, new_look_id, fade_time):
         """Begin crossfade from current look to new_look_id."""
@@ -122,6 +158,11 @@ class CueList:
                 "playing": self.playing,
                 "elapsed": elapsed,
                 "active_look_id": self._active_look_id,
+                "active_look_ids": [
+                    entry["look_id"] for entry in self._active_control_looks
+                ] if self._active_control_looks else (
+                    [self._active_look_id] if self._active_look_id and self.playing else []
+                ),
                 "crossfade_active": self._prev_look_id is not None and xf_progress < 1.0,
                 "crossfade_progress": xf_progress,
                 "blackout": self._blackout,
@@ -140,13 +181,100 @@ class CueList:
     #  Direct look activation (Control Panel)
     # ------------------------------------------------------------------
 
-    def activate_look(self, look_id, fade_time=0.0, device_ips=None):
+    def activate_look(self, look_id, fade_time=0.0, device_ips=_DEVICE_IPS_UNSET):
         """Directly activate a look (bypasses cue list). Returns True/False."""
-        if load_look(look_id) is None:
+        return self._activate_look_legacy(look_id, fade_time=fade_time, device_ips=device_ips)
+
+    def activate_looks(self, look_ids, fade_time=0.0, device_ips=_DEVICE_IPS_UNSET):
+        """Activate one or more Looks from the Control Panel."""
+        entries = []
+        now = time.monotonic()
+        seen = set()
+        for look_id in look_ids or []:
+            look_id = str(look_id).strip()
+            if not look_id or look_id in seen:
+                continue
+            seen.add(look_id)
+            look = load_look(look_id)
+            if look is None:
+                continue
+            if device_ips is _DEVICE_IPS_UNSET:
+                resolved_device_ips = self._look_device_ips(look)
+            elif device_ips is None:
+                resolved_device_ips = None
+            else:
+                resolved_device_ips = _normalize_device_ips(device_ips)
+            entries.append({
+                "look_id": look_id,
+                "device_ips": resolved_device_ips,
+                "start_time": now,
+            })
+        if not entries:
             return False
+
         with self.lock:
+            self._active_control_looks = entries
+            self._active_look_id = entries[0]["look_id"]
+            self._active_device_ips = self._target_union(entries)
+            self._prev_look_id = None
+            self._transition_start = 0.0
+            self._transition_duration = 0.0
+            self.playing = True
+            self.play_start_time = now
+            self._auto_follow_time = 0.0
+            self._blackout = False
+            return True
+
+    def deactivate_look(self, look_id):
+        """Remove one Control Panel Look from the active set."""
+        with self.lock:
+            if not self._active_control_looks:
+                if self._active_look_id == look_id:
+                    self._active_look_id = None
+                    self._active_device_ips = None
+                    self.playing = False
+                    self.play_start_time = 0.0
+                    self._prev_look_id = None
+                    self._transition_start = 0.0
+                    self._transition_duration = 0.0
+                return True
+            self._active_control_looks = [
+                entry for entry in self._active_control_looks
+                if entry["look_id"] != look_id
+            ]
+            if self._active_control_looks:
+                self._active_look_id = self._active_control_looks[0]["look_id"]
+                self._active_device_ips = self._target_union(self._active_control_looks)
+            else:
+                self._active_look_id = None
+                self._active_device_ips = None
+                self.playing = False
+                self.play_start_time = 0.0
+            return True
+
+    def active_look_ids(self):
+        with self.lock:
+            if self._active_control_looks:
+                return [entry["look_id"] for entry in self._active_control_looks]
+            if self.playing and self._active_look_id:
+                return [self._active_look_id]
+            return []
+
+    def _activate_look_legacy(self, look_id, fade_time=0.0, device_ips=_DEVICE_IPS_UNSET):
+        """Activate a single Look using the older crossfade path."""
+        look = load_look(look_id)
+        if look is None:
+            return False
+        if device_ips is _DEVICE_IPS_UNSET:
+            resolved_device_ips = self._look_device_ips(look)
+        elif device_ips is None:
+            resolved_device_ips = None
+        else:
+            resolved_device_ips = _normalize_device_ips(device_ips)
+        with self.lock:
+            self._active_control_looks = []
             self._start_transition(look_id, fade_time)
-            self._active_device_ips = set(device_ips) if device_ips else None
+            self._active_device_ips = resolved_device_ips
             self.playing = True
             self.play_start_time = time.monotonic()
             # Don't change cue index — control panel is independent
@@ -156,6 +284,9 @@ class CueList:
     def blackout(self, fade_time=0.0):
         """Fade to black."""
         with self.lock:
+            self._active_control_looks = []
+            self._active_look_id = None
+            self._active_device_ips = None
             self._blackout = True
             self._blackout_fade_start = time.monotonic()
             self._blackout_fade_duration = fade_time
@@ -170,6 +301,7 @@ class CueList:
             self.playing = False
             self.play_start_time = 0.0
             self._active_look_id = None
+            self._active_control_looks = []
             self._active_device_ips = None
             self._prev_look_id = None
             self._transition_start = 0.0
@@ -197,13 +329,15 @@ class CueList:
             look_id = cue.get("look_id")
 
         # Validate look exists outside lock (disk I/O)
-        if look_id and load_look(look_id) is None:
+        look = load_look(look_id) if look_id else None
+        if look_id and look is None:
             return None  # look was deleted
 
         with self.lock:
             fade_time = cue.get("fade_time", 0.0)
+            self._active_control_looks = []
             self._start_transition(look_id, fade_time)
-            self._active_device_ips = self._resolve_device_ips(cue, device_groups)
+            self._active_device_ips = self._resolve_device_ips(cue, device_groups, look)
             self.current_index = next_idx
             self.playing = True
             self.play_start_time = time.monotonic()
@@ -229,13 +363,15 @@ class CueList:
             look_id = match.get("look_id")
 
         # Validate look exists outside lock (disk I/O)
-        if look_id and load_look(look_id) is None:
+        look = load_look(look_id) if look_id else None
+        if look_id and look is None:
             return None  # look was deleted
 
         with self.lock:
             fade_time = match.get("fade_time", 0.0)
+            self._active_control_looks = []
             self._start_transition(look_id, fade_time)
-            self._active_device_ips = self._resolve_device_ips(match, device_groups)
+            self._active_device_ips = self._resolve_device_ips(match, device_groups, look)
             self.current_index = match_idx
             self.playing = True
             self.play_start_time = time.monotonic()
@@ -275,6 +411,7 @@ class CueList:
             elapsed (since cue start), blackout, blackout_progress (0-1)
         """
         with self.lock:
+            now = time.monotonic()
             xf = self._crossfade_progress_unlocked()
             # If crossfade complete, clear the outgoing look
             if xf >= 1.0 and self._prev_look_id is not None:
@@ -289,12 +426,26 @@ class CueList:
 
             return {
                 "current_look_id": self._active_look_id if self.playing else None,
+                "active_looks": [
+                    {
+                        "look_id": entry["look_id"],
+                        "elapsed": now - entry["start_time"],
+                        "device_ips": (
+                            None if entry.get("device_ips") is None
+                            else list(entry.get("device_ips") or set())
+                        ),
+                    }
+                    for entry in self._active_control_looks
+                ] if self.playing else [],
                 "prev_look_id": self._prev_look_id,
                 "crossfade_progress": xf,
-                "elapsed": time.monotonic() - self.play_start_time if self.playing else 0.0,
+                "elapsed": now - self.play_start_time if self.playing else 0.0,
                 "blackout": self._blackout,
                 "blackout_progress": bo_progress,
-                "device_ips": list(self._active_device_ips) if self._active_device_ips else None,
+                "device_ips": (
+                    None if self._active_device_ips is None
+                    else list(self._active_device_ips)
+                ),
             }
 
     # ------------------------------------------------------------------

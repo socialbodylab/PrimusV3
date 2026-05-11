@@ -20,6 +20,7 @@ document.addEventListener("alpine:init", () => {
         saveModal: false,
         saveName: "",
         saveDesc: "",
+        saveDeviceIps: [],
         loadModal: false,
         savedLooks: [],
         pixelsPerSecond: 80,
@@ -55,6 +56,47 @@ document.addEventListener("alpine:init", () => {
 
         get outputTypes() {
             return Alpine.store("app").state?.look_output_types || [];
+        },
+
+        get devices() {
+            return Alpine.store("app").state?.devices || [];
+        },
+
+        currentDeviceIps() {
+            const ips = [];
+            for (const dev of this.devices) {
+                if (dev?.ip && !ips.includes(dev.ip)) ips.push(dev.ip);
+            }
+            return ips;
+        },
+
+        normalizeDeviceIps(values, fallbackToCurrent = false) {
+            const current = this.currentDeviceIps();
+            if (!Array.isArray(values)) return fallbackToCurrent ? current : [];
+            const out = [];
+            for (const ip of values) {
+                if (current.includes(ip) && !out.includes(ip)) out.push(ip);
+            }
+            return out;
+        },
+
+        deviceName(ip) {
+            return this.devices.find(dev => dev.ip === ip)?.name || ip;
+        },
+
+        lookDeviceIps(look) {
+            if (Array.isArray(look?.device_ips)) {
+                return this.normalizeDeviceIps(look.device_ips, false);
+            }
+            return this.currentDeviceIps();
+        },
+
+        lookTargetLabel(look) {
+            if (!Array.isArray(look?.device_ips)) return 'All devices';
+            const ips = this.normalizeDeviceIps(look.device_ips, false);
+            if (!ips.length) return 'No target devices';
+            if (ips.length === 1) return this.deviceName(ips[0]);
+            return ips.length + ' target devices';
         },
 
         get playbackInfo() {
@@ -482,6 +524,7 @@ document.addEventListener("alpine:init", () => {
                 id: "",
                 name: "New Look",
                 description: "",
+                device_ips: this.currentDeviceIps(),
                 outputs: [
                     { port: "A0", type: backendOutputs[0]?.type || "short_strip" },
                     { port: "A1", type: backendOutputs[1]?.type || "long_strip" },
@@ -1005,18 +1048,40 @@ document.addEventListener("alpine:init", () => {
         openSave() {
             this.saveName = this.look?.name || "";
             this.saveDesc = this.look?.description || "";
+            this.saveDeviceIps = this.lookDeviceIps(this.look);
             this.saveModal = true;
+        },
+
+        toggleSaveDeviceIp(ip) {
+            if (this.saveDeviceIps.includes(ip)) {
+                this.saveDeviceIps = this.saveDeviceIps.filter(savedIp => savedIp !== ip);
+            } else {
+                this.saveDeviceIps = [...this.saveDeviceIps, ip];
+            }
+        },
+
+        saveTargetSummary() {
+            const count = this.saveDeviceIps.length;
+            if (!this.devices.length) return 'No devices are saved in the device list.';
+            if (!count) return 'This Look will not target any devices.';
+            if (count === 1) return 'This Look will target ' + this.deviceName(this.saveDeviceIps[0]) + '.';
+            return 'This Look will target ' + count + ' saved devices.';
         },
 
         async doSave() {
             if (!this.saveName.trim()) return;
             this.look.name = this.saveName.trim();
             this.look.description = this.saveDesc.trim();
+            this.look.device_ips = this.normalizeDeviceIps(this.saveDeviceIps, false);
             try {
                 const saved = await api("POST", "/api/looks/save", this.look);
                 if (saved?.id) {
                     this.look.id = saved.id;
+                    this.look.device_ips = saved.device_ips || [];
                     this.saveModal = false;
+                    document.dispatchEvent(new CustomEvent('primus:looks-changed', {
+                        detail: { look: saved },
+                    }));
                 }
             } catch (e) {
                 console.error("Save failed:", e);

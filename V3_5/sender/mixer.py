@@ -23,6 +23,18 @@ def _ensure_dir():
     return d
 
 
+def _normalize_device_ips(values):
+    ips = []
+    seen = set()
+    for value in values or []:
+        ip = str(value).strip()
+        if not ip or ip in seen:
+            continue
+        seen.add(ip)
+        ips.append(ip)
+    return ips
+
+
 # ======================================================================
 #  LOOK CRUD
 # ======================================================================
@@ -36,6 +48,7 @@ def new_look(name, outputs, description=""):
         "id": str(uuid.uuid4()),
         "name": name,
         "description": description,
+        "device_ips": [],
         "outputs": outputs,
         "tracks": [{"port": o["port"], "segments": []} for o in outputs],
         "playback": "loop",
@@ -49,6 +62,7 @@ def save_look(look):
     d = _ensure_dir()
     if not look.get("id"):
         look["id"] = str(uuid.uuid4())
+    look["device_ips"] = _normalize_device_ips(look.get("device_ips", []))
     look["modified"] = datetime.now(timezone.utc).isoformat()
     if not look.get("created"):
         look["created"] = look["modified"]

@@ -6,7 +6,6 @@ import json
 import os
 import re
 import mimetypes
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import clips
@@ -115,8 +114,11 @@ class Handler(BaseHTTPRequestHandler):
                 node = next((n for n in nodes if n["ip"] == ip), None)
                 if node:
                     self.controller_state.add_device_from_node(node)
-                self.controller_state.connect(di)
-                self._ok()
+                result = self.controller_state.connect(di)
+                if result.get("ok"):
+                    self._ok()
+                else:
+                    self._json_error(503, result.get("error", "connect failed"))
             else:
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
@@ -129,8 +131,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
         elif path == "/api/connect_all":
-            self.controller_state.connect_all()
-            self._ok()
+            results = self.controller_state.connect_all()
+            failed = [r for r in results if not r.get("ok")]
+            if failed:
+                self._json_error(503, failed[0].get("error", "connect failed"))
+            else:
+                self._ok()
 
         elif path == "/api/disconnect_all":
             self.controller_state.disconnect_all()
@@ -144,7 +150,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/add_discovered":
             result = self.controller_state.add_device_from_node(data)
             if result.get("device_index") is not None:
-                self.controller_state.connect(result["device_index"])
+                connect_result = self.controller_state.connect(result["device_index"])
+                if not connect_result.get("ok"):
+                    result["connect_error"] = connect_result.get("error")
             self._json_response(result)
 
         elif path == "/api/add_manual":
@@ -168,7 +176,9 @@ class Handler(BaseHTTPRequestHandler):
                     "universes": [0, 1],
                 })
             if result.get("device_index") is not None:
-                self.controller_state.connect(result["device_index"])
+                connect_result = self.controller_state.connect(result["device_index"])
+                if not connect_result.get("ok"):
+                    result["connect_error"] = connect_result.get("error")
             self._json_response(result)
 
         elif path == "/api/remove_device":
@@ -196,10 +206,10 @@ class Handler(BaseHTTPRequestHandler):
                 code = 400 if status.get("error") == "invalid device index" else 409
                 self._json_error(code, status.get("error", "identify failed"))
                 return
-            threading.Thread(
-                target=self.controller_state.hello_device,
-                args=(di,), daemon=True).start()
-            self._ok()
+            if self.controller_state.hello_device(di):
+                self._ok()
+            else:
+                self._json_error(503, "Hello failed; reconnect the device and try again.")
 
         elif path == "/api/set_device_ip":
             di = data.get("device", -1)
@@ -297,6 +307,30 @@ class Handler(BaseHTTPRequestHandler):
                 if ok:
                     self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
                 self._json_response({"ok": ok})
+
+        elif path == "/api/controller/activate_many":
+            look_ids = data.get("look_ids", [])
+            try:
+                fade_time = float(data.get("fade_time", 0))
+            except (TypeError, ValueError):
+                fade_time = 0.0
+            if not isinstance(look_ids, list) or not look_ids:
+                self._json_error(400, "look_ids required")
+            else:
+                ok = self.cue_list.activate_looks(look_ids, fade_time)
+                if ok:
+                    self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
+                self._json_response({"ok": ok})
+
+        elif path == "/api/controller/deactivate_look":
+            look_id = data.get("look_id")
+            if not look_id:
+                self._json_error(400, "look_id required")
+            else:
+                self.cue_list.deactivate_look(str(look_id))
+                if not self.cue_list.active_look_ids():
+                    self.controller_state.set_playback_source(ControllerState.SOURCE_IDLE)
+                self._ok()
 
         elif path == "/api/controller/blackout":
             try:
@@ -412,6 +446,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _safe_id(look_id):
                 self._respond(400, "application/json", b'{"error":"invalid id"}')
                 return
+            self.cue_list.deactivate_look(look_id)
             mixer.delete_look(look_id)
             self._ok()
         elif path.startswith("/api/device_groups/"):

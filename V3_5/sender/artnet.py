@@ -47,10 +47,12 @@ class ArtNetSender:
         self.sock = None
         self.connected = False
         self.sequence = 1
+        self.last_error = None
 
     def connect(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.connected = True
+        self.last_error = None
 
     def disconnect(self):
         self.connected = False
@@ -75,22 +77,28 @@ class ArtNetSender:
 
     def send_output(self, universe, rgb_data):
         if not self.connected or not self.sock:
-            return
+            return False
         pkt = self._build_packet(universe, rgb_data)
         try:
             self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
-        except OSError:
+        except OSError as exc:
+            self.last_error = str(exc) or "UDP send failed"
             self.disconnect()
+            return False
+        self.last_error = None
+        return True
 
     def advance_sequence(self):
         self.sequence = (self.sequence % 255) + 1
 
     def blackout(self, outputs_info):
         if not self.connected:
-            return
+            return False
+        ok = True
         for universe, pixel_count in outputs_info:
-            self.send_output(universe, bytes(pixel_count * 3))
+            ok = self.send_output(universe, bytes(pixel_count * 3)) and ok
         self.advance_sequence()
+        return ok
 
 
 # ======================================================================

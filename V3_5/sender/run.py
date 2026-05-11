@@ -21,7 +21,7 @@ import time
 import webbrowser
 
 from artnet import FpsListener
-from state import ControllerState, animation_loop
+from state import ControllerState, OUTPUT_TYPES, animation_loop
 from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
@@ -316,6 +316,21 @@ def _open_browser(url):
     return "opened default browser"
 
 
+def _frame_payload(look, pixels_per_output):
+    payload = []
+    outputs = look.get("outputs", [])
+    for idx, pixels in enumerate(pixels_per_output):
+        output_type = outputs[idx].get("type", "none") if idx < len(outputs) else "none"
+        typedef = OUTPUT_TYPES.get(output_type, {"layout": "none"})
+        grid = typedef.get("grid_size") if typedef.get("layout") == "grid" else None
+        payload.append({
+            "pixels": pixels,
+            "grid": grid,
+            "type": output_type,
+        })
+    return payload
+
+
 def _mixer_controller_loop(state, cue_list):
     """Background thread: render look frames for mixer preview and controller.
 
@@ -332,6 +347,7 @@ def _mixer_controller_loop(state, cue_list):
     _clip_cache = {}          # clip_id -> clip dict
     _state_cache_cur = {}     # segment_id -> effect state (current look)
     _state_cache_prev = {}    # segment_id -> effect state (prev look during xfade)
+    _state_cache_multi = {}   # look_id -> segment effect state caches
     _current_look_id = None
     _prev_look_id = None
     _prev_elapsed_base = 0.0  # elapsed offset for outgoing look continuity
@@ -376,7 +392,43 @@ def _mixer_controller_loop(state, cue_list):
         xf_progress = xf["crossfade_progress"]
         is_blackout = xf["blackout"]
         bo_progress = xf["blackout_progress"]
-        device_ips = set(xf["device_ips"]) if xf["device_ips"] else None
+        device_ips = None if xf["device_ips"] is None else set(xf["device_ips"])
+        active_looks = xf.get("active_looks") or []
+
+        if active_looks:
+            frames_by_ip = {}
+            default_frames = None
+            active_ids = {entry["look_id"] for entry in active_looks}
+            for look_id in list(_state_cache_multi.keys()):
+                if look_id not in active_ids:
+                    _state_cache_multi.pop(look_id, None)
+
+            for entry in active_looks:
+                active_look_id = entry["look_id"]
+                if active_look_id not in _look_cache:
+                    look = load_look(active_look_id)
+                    if look:
+                        _look_cache[active_look_id] = look
+                look = _look_cache.get(active_look_id)
+                if not look:
+                    continue
+                pixels = compute_look_frame(
+                    look,
+                    entry.get("elapsed", 0.0),
+                    fps=state.fps,
+                    clip_cache=_clip_cache,
+                    state_cache=_state_cache_multi.setdefault(active_look_id, {}),
+                )
+                payload = _frame_payload(look, pixels)
+                entry_ips = entry.get("device_ips")
+                if entry_ips is None:
+                    default_frames = payload
+                else:
+                    for ip in entry_ips:
+                        frames_by_ip[ip] = payload
+            state.set_override_frames_by_device(frames_by_ip, default_frames)
+            time.sleep(1.0 / max(1, state.fps))
+            continue
 
         if look_id:
             # Track look changes and reset caches

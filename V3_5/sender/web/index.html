@@ -85,7 +85,7 @@
                         <button class="btn btn-sm" x-show="dev.connected"
                             :disabled="!$store.conn.canHelloDevice(dev)"
                             :title="$store.conn.helloHint(dev)"
-                                @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
+                                @click="$store.conn.helloDevice(di)">Hello</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">Remove</button>
                     </div>
                 </div>
@@ -100,6 +100,7 @@
                           :class="dev.connected ? 'device-state-live' : 'device-state-offline'"
                           x-text="dev.connected ? 'Live' : 'Offline'"></span>
                     <span class="device-profile" x-text="dev.hardware_label || dev.hardware_profile || 'Unknown hardware'"></span>
+                    <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                     <span class="device-fps"
                           x-show="dev.connected"
                           x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
@@ -740,6 +741,22 @@
                     <label class="form-label">Description</label>
                     <input class="form-input" x-model="saveDesc">
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Devices</label>
+                    <div class="device-checklist">
+                        <template x-for="dev in devices" :key="dev.ip">
+                            <label class="device-check-item">
+                                <input type="checkbox"
+                                       :checked="saveDeviceIps.includes(dev.ip)"
+                                       @change="toggleSaveDeviceIp(dev.ip)">
+                                <span x-text="dev.name"></span>
+                                <span class="text-muted text-sm" x-text="dev.ip"></span>
+                            </label>
+                        </template>
+                    </div>
+                    <p class="text-muted text-sm" x-show="devices.length === 0">No devices saved in the list.</p>
+                </div>
+                <div class="target-summary" x-text="saveTargetSummary()"></div>
                 <div class="modal-actions">
                     <button class="btn" @click="saveModal = false">Cancel</button>
                     <button class="btn btn-primary" @click="doSave()">Save</button>
@@ -759,6 +776,7 @@
                         <div class="device-card" style="cursor:pointer" @click="loadLook(sl.id); loadModal = false">
                             <div class="device-name" x-text="sl.name"></div>
                             <div class="text-sm text-muted" x-text="sl.description || 'No description'"></div>
+                            <div class="text-sm text-muted" x-text="lookTargetLabel(sl)"></div>
                             <div class="text-sm text-muted" x-text="sl.total_duration + 's · ' + (sl.tracks?.reduce((n,t) => n + t.segments.length, 0) || 0) + ' segments'"></div>
                         </div>
                     </template>
@@ -779,11 +797,15 @@
         <!-- ── Control Panel: Look Palette ── -->
         <div class="flex justify-between items-center mb-4">
             <h2 class="section-title" style="margin:0">Control Panel</h2>
-            <div class="flex items-center gap-2" style="min-width:180px">
+            <div class="flex items-center gap-2" style="min-width:360px;justify-content:flex-end">
                 <label class="form-label" style="margin:0;font-size:.8rem">Fade</label>
                 <input type="range" class="fade-slider"
                        x-model.number="defaultFadeTime" min="0" max="5" step="0.25">
                 <span class="text-muted text-sm" style="min-width:28px;text-align:right" x-text="defaultFadeTime + 's'"></span>
+                <button class="btn btn-primary" @click="triggerSelectedLooks()"
+                        :disabled="selectedLookIds.length === 0"
+                        x-text="selectedLookIds.length ? 'Trigger Selected (' + selectedLookIds.length + ')' : 'Trigger Selected'"></button>
+                <button class="btn" @click="stop()">Stop All</button>
             </div>
         </div>
 
@@ -799,19 +821,50 @@
             </div>
         </div>
 
+        <div class="control-board-summary">
+            <div>
+                <span class="controller-label">LIVE</span>
+                <span class="control-board-live" x-text="blackout ? 'Blackout' : activeLooksLabel()"></span>
+            </div>
+            <div class="control-board-actions">
+                <button class="btn btn-sm" @click="clearSelectedLooks()" :disabled="selectedLookIds.length === 0">Clear Selection</button>
+                <button class="btn btn-sm btn-danger" @click="doBlackout()">Blackout</button>
+            </div>
+        </div>
+
         <div class="look-palette">
-            <button class="look-palette-card look-card-blackout"
-                    :class="{ 'look-card-active': blackout }"
-                    @click="doBlackout()">
-                <div class="look-card-name">Blackout</div>
-            </button>
             <template x-for="look in looks" :key="look.id">
-                <button class="look-palette-card"
-                        :class="{ 'look-card-active': isLookActive(look.id) }"
-                        @click="activateLook(look.id)">
-                    <div class="look-card-name" x-text="look.name"></div>
-                    <div class="look-card-info text-muted" x-text="lookOutputs(look)"></div>
-                </button>
+                <div class="look-palette-card"
+                     :class="{ 'look-card-active': isLookActive(look.id), 'look-card-selected': isLookSelected(look.id) }">
+                    <div class="look-card-toolbar">
+                        <label class="look-select-control" title="Select for multi-trigger">
+                            <input type="checkbox"
+                                   :checked="isLookSelected(look.id)"
+                                   @change.stop="toggleLookSelection(look.id)">
+                            <span></span>
+                        </label>
+                        <span class="look-live-indicator" x-show="isLookActive(look.id)">Live</span>
+                        <button class="look-icon-btn look-delete-btn" title="Delete Look"
+                                @click.stop="deleteLook(look)">&times;</button>
+                    </div>
+                    <button class="look-card-main" @click="activateLook(look.id)">
+                        <div class="look-card-name" x-text="look.name"></div>
+                        <div class="look-card-info text-muted" x-text="lookOutputs(look)"></div>
+                    </button>
+                    <div class="look-target-strip">
+                        <template x-for="dev in lookTargetDevices(look).slice(0, 4)" :key="dev.ip">
+                            <span class="look-target-pill" :class="targetPillClass(dev)" x-text="dev.name || dev.ip"></span>
+                        </template>
+                        <span class="look-target-pill look-target-pill-empty" x-show="lookTargetDevices(look).length === 0">No targets</span>
+                        <span class="look-target-more" x-show="lookTargetDevices(look).length > 4"
+                              x-text="'+' + (lookTargetDevices(look).length - 4)"></span>
+                    </div>
+                    <div class="look-card-actions">
+                        <button class="btn btn-sm btn-primary" @click="activateLook(look.id)">Trigger</button>
+                        <button class="btn btn-sm" x-show="isLookActive(look.id)" @click="deactivateLook(look.id)">Stop</button>
+                        <button class="btn btn-sm" @click="openTargetEditor(look)">Targets</button>
+                    </div>
+                </div>
             </template>
         </div>
         <p class="text-muted text-sm" x-show="looks.length === 0" style="margin-top:8px">
@@ -823,6 +876,37 @@
             <div class="crossfade-bar" :style="'width:' + (crossfadeProgress * 100) + '%'"></div>
         </div>
 
+        <!-- Target editor modal -->
+        <div class="modal-overlay" x-show="targetModal" @click.self="targetModal = false">
+            <div class="modal">
+                <div class="modal-title">Edit Look Targets</div>
+                <div class="target-editor-heading">
+                    <span class="look-card-name" x-text="targetEditLook()?.name || 'Look'"></span>
+                    <span class="text-sm text-muted" x-text="targetDeviceIps.length + ' selected'"></span>
+                </div>
+                <div class="device-checklist target-device-grid">
+                    <template x-for="dev in devices" :key="dev.ip">
+                        <label class="device-check-item target-device-item"
+                               :class="{ active: targetDeviceIps.includes(dev.ip) }">
+                            <input type="checkbox"
+                                   :checked="targetDeviceIps.includes(dev.ip)"
+                                   @change="toggleTargetDevice(dev.ip)">
+                            <span x-text="dev.name"></span>
+                            <span class="text-muted text-sm" x-text="dev.ip"></span>
+                        </label>
+                    </template>
+                </div>
+                <p class="text-muted text-sm" x-show="devices.length === 0">No devices saved in the list.</p>
+                <div class="target-summary" x-text="targetDeviceIps.length ? ('This Look will target ' + targetDeviceIps.length + ' device' + (targetDeviceIps.length === 1 ? '' : 's') + '.') : 'This Look will not target any devices.'"></div>
+                <div class="modal-actions">
+                    <button class="btn" @click="targetModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="saveTargetEditor()">Save Targets</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cue List feature parked for this scope. Backend remains intact while the UI focuses on the control board. -->
+        <div x-show="false" style="display:none">
         <!-- ── Cue System ── -->
         <div class="flex justify-between items-center" style="margin-top:24px;margin-bottom:12px">
             <h2 class="section-title" style="margin:0">Cue List</h2>
@@ -929,7 +1013,8 @@
                 <div class="form-group">
                     <label class="form-label">Target Devices</label>
                     <select class="form-select" x-model="addTargetMode">
-                        <option value="all">All devices</option>
+                        <option value="look">Look target</option>
+                        <option value="all">All connected devices</option>
                         <option value="group">Device group</option>
                         <option value="devices">Individual devices</option>
                     </select>
@@ -976,6 +1061,7 @@
                             :disabled="!addLookId">Add</button>
                 </div>
             </div>
+        </div>
         </div>
     </div>
 

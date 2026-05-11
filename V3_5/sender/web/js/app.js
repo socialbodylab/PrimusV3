@@ -204,6 +204,9 @@ document.addEventListener("alpine:init", () => {
                 await api("POST", "/api/set_playback_source", { source: "idle" });
             }
             this.mode = m;
+            document.dispatchEvent(new CustomEvent('primus:mode-changed', {
+                detail: { mode: m },
+            }));
         },
 
         playbackClass() {
@@ -327,10 +330,30 @@ document.addEventListener("alpine:init", () => {
                 : 'Remote IP configuration is not advertised for this node';
         },
 
-        async connect(di) { await api("POST", "/api/connect", { device: di }); },
+        async connect(di) {
+            try {
+                await api("POST", "/api/connect", { device: di });
+            } catch (e) {
+                Alpine.store("app").showApiError('Connect failed', e);
+            }
+        },
         async disconnect(di) { await api("POST", "/api/disconnect", { device: di }); },
-        async connectAll() { await api("POST", "/api/connect_all"); },
+        async connectAll() {
+            try {
+                await api("POST", "/api/connect_all");
+            } catch (e) {
+                Alpine.store("app").showApiError('Connect all failed', e);
+            }
+        },
         async disconnectAll() { await api("POST", "/api/disconnect_all"); },
+
+        async helloDevice(di) {
+            try {
+                await api("POST", "/api/hello_device", { device: di });
+            } catch (e) {
+                Alpine.store("app").showApiError('Hello failed', e);
+            }
+        },
 
         async discover() {
             this.discovering = true;
@@ -356,10 +379,12 @@ document.addEventListener("alpine:init", () => {
                 this.discovered = this.discovered.filter(n => n.ip !== node.ip);
                 const added = result?.status === 'added';
                 Alpine.store("app").showNotice(
-                    added
+                    result?.connect_error
+                        ? 'Added ' + (node.short_name || node.ip) + ', but connect failed: ' + result.connect_error
+                        : added
                         ? 'Added ' + (node.short_name || node.ip) + '.'
                         : (node.short_name || node.ip) + ' is already in the device list.',
-                    added ? 'success' : 'info'
+                    result?.connect_error ? 'warn' : (added ? 'success' : 'info')
                 );
             } catch (e) {
                 Alpine.store("app").showApiError('Could not add discovered device', e);
@@ -372,10 +397,12 @@ document.addEventListener("alpine:init", () => {
             try {
                 const result = await api("POST", "/api/add_manual", { ip });
                 Alpine.store("app").showNotice(
-                    result?.status === 'added'
+                    result?.connect_error
+                        ? 'Added device at ' + ip + ', but connect failed: ' + result.connect_error
+                        : result?.status === 'added'
                         ? 'Added device at ' + ip + '.'
                         : 'Device ' + ip + ' is already in the list.',
-                    result?.status === 'added' ? 'success' : 'info'
+                    result?.connect_error ? 'warn' : (result?.status === 'added' ? 'success' : 'info')
                 );
                 this.manualIp = "";
             } catch (e) {

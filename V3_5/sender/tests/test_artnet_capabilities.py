@@ -78,11 +78,13 @@ class ArtNetCapabilityTests(unittest.TestCase):
         sender.sock = sock
         sender.connected = True
 
-        sender.send_output(0, bytes([0, 0, 0] * 2))
+        ok = sender.send_output(0, bytes([0, 0, 0] * 2))
 
+        self.assertFalse(ok)
         self.assertFalse(sender.connected)
         self.assertIsNone(sender.sock)
         self.assertTrue(sock.closed)
+        self.assertIn("test socket closed", sender.last_error)
 
 
 if __name__ == "__main__":

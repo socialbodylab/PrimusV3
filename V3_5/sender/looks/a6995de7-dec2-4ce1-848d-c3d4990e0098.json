@@ -1,0 +1,76 @@
+{
+  "id": "a6995de7-dec2-4ce1-848d-c3d4990e0098",
+  "name": "new new Look Tester",
+  "description": "",
+  "device_ips": [
+    "192.168.1.2",
+    "192.168.1.4"
+  ],
+  "outputs": [
+    {
+      "port": "A0",
+      "type": "grid"
+    },
+    {
+      "port": "A1",
+      "type": "grid"
+    }
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "b37b100a-3b66-4d37-98e4-1c3cc778de31",
+          "clip_id": "efcedfaf-3571-46fa-b031-7834172c8ab6",
+          "clip_name": "Corner Wipe",
+          "start_color": [
+            255,
+            255,
+            255
+          ],
+          "end_color": [
+            0,
+            0,
+            0
+          ],
+          "start_time": 0,
+          "duration": 5,
+          "fade_in": 0.5,
+          "fade_out": 0.5,
+          "speed_override": null
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "107c6fa3-68d0-4e87-ae43-5169f637b4ef",
+          "clip_id": "b58aa1b9-5431-4421-b7bf-0f59e5f27ed6",
+          "clip_name": "Spiral Neon",
+          "start_color": [
+            0,
+            255,
+            100
+          ],
+          "end_color": [
+            255,
+            0,
+            200
+          ],
+          "start_time": 0,
+          "duration": 5,
+          "fade_in": 0.5,
+          "fade_out": 0.5,
+          "speed_override": null
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 10,
+  "speed": 1,
+  "modified": "2026-05-11T21:18:14.785168+00:00",
+  "created": "2026-05-11T21:18:14.785168+00:00"
+}
