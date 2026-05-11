@@ -233,6 +233,66 @@ Use explicit ports when auto-detection is ambiguous or mixed board types are con
 ./V3_5/Arduino/upload.sh -v3 COM3
 ```
 
+## Arduino IDE Upload Fallback
+
+The upload script is the recommended firmware upload path because it selects the correct board profile, checks libraries, chooses the upload speed, handles serial-port selection, and can compile temporary WiFi credential overrides without editing source files. If necessary, the V3.5 receiver firmware can still be uploaded through the Arduino IDE because it is a normal Arduino sketch.
+
+Open this sketch in Arduino IDE:
+
+```text
+V3_5/Arduino/primusV3_receiver/primusV3_receiver.ino
+```
+
+In Arduino IDE, install the ESP32 board package. Add the Espressif package index in Preferences if it is not already configured:
+
+```text
+https://espressif.github.io/arduino-esp32/package_esp32_index.json
+```
+
+Install the required libraries from Library Manager:
+
+| Board profile | Required libraries |
+| --- | --- |
+| `v1` | `Adafruit NeoPixel` |
+| `v2` | `Adafruit NeoPixel` |
+| `v3` | `Adafruit NeoPXL8`, `Adafruit ST7735 and ST7789 Library`, `Adafruit GFX Library` |
+
+Select the matching board and upload speed:
+
+| Profile | Arduino IDE board | Upload speed |
+| --- | --- | --- |
+| `v1` | Adafruit ESP32 Feather / Huzzah32-compatible ESP32 Feather | `115200` |
+| `v2` | Adafruit Feather ESP32 V2 | `115200` |
+| `v3` | Adafruit Feather ESP32-S3 Reverse TFT | `921600` |
+
+### Board Profile Selection In Arduino IDE
+
+The upload script passes one of these compile-time profile flags:
+
+```text
+-DPRIMUS_PROFILE_V1
+-DPRIMUS_PROFILE_V2
+-DPRIMUS_PROFILE_V3_1
+```
+
+When no profile flag is supplied, `config.h` defaults to the V3.1 Reverse TFT profile. This means Arduino IDE uploads work directly for V3.1 as long as the correct board, port, upload speed, and libraries are selected.
+
+For V1 or V2 uploads from Arduino IDE, temporarily define the matching profile near the top of `V3_5/Arduino/primusV3_receiver/config.h`, before the default-profile block:
+
+```cpp
+#define PRIMUS_PROFILE_V1
+```
+
+or:
+
+```cpp
+#define PRIMUS_PROFILE_V2
+```
+
+Only one profile macro should be active at a time. Remove or change the temporary definition before building for another board profile.
+
+The script's `-ssid` and `-pw` flags are not provided by Arduino IDE. When using the IDE fallback path, WiFi defaults come from `V3_5/Arduino/primusV3_receiver/config.h`, unless you configure custom IDE build flags yourself.
+
 ## Quick Reference
 
 ```bash
