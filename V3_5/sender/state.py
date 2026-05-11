@@ -11,7 +11,14 @@ from effects import (
     EFFECTS, fx_none, compute_anim_factor,
     apply_serpentine, apply_grid_rotation,
 )
-from artnet import ArtNetSender, send_output_config, send_art_address, send_ip_config
+from artnet import (
+    ArtNetSender,
+    parse_node_capabilities,
+    parse_node_outputs,
+    send_output_config,
+    send_art_address,
+    send_ip_config,
+)
 
 
 # ======================================================================
@@ -137,12 +144,27 @@ def _save_devices(devices):
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         data = {}
-    data["devices"] = [{
-        "ip": d["ip"],
-        "name": d["name"],
-        "hardware_profile": d.get("hardware_profile", "unknown"),
-        "hardware_label": d.get("hardware_label", "Unknown hardware"),
-    } for d in devices]
+    saved_devices = []
+    for d in devices:
+        saved_outputs = []
+        for output in d.get("outputs", []):
+            saved_outputs.append({
+                "name": output.get("name", "A0"),
+                "type": output.get("type", "long_strip"),
+                "universe": output.get("universe", 0),
+                "grid_order": output.get("grid_order", "progressive"),
+                "grid_rotation": output.get("grid_rotation", 0),
+            })
+        saved_devices.append({
+            "ip": d["ip"],
+            "name": d["name"],
+            "hardware_profile": d.get("hardware_profile", "unknown"),
+            "hardware_label": d.get("hardware_label", "Unknown hardware"),
+            "firmware_version": d.get("firmware_version"),
+            "capabilities": _normalize_device_capabilities(d.get("capabilities")),
+            "outputs": saved_outputs,
+        })
+    data["devices"] = saved_devices
     try:
         with open(_STATE_FILE, "w") as f:
             json.dump(data, f)
@@ -238,6 +260,63 @@ def _make_look_output(cfg):
     }
 
 
+def _node_has_discovery_metadata(node_info):
+    return bool(
+        node_info.get("node_report")
+        or node_info.get("long_name")
+        or isinstance(node_info.get("capabilities"), dict)
+        or node_info.get("hardware_profile")
+        or node_info.get("firmware_version")
+        or node_info.get("outputs")
+    )
+
+
+def _capabilities_from_node(node_info):
+    capabilities = node_info.get("capabilities")
+    if not isinstance(capabilities, dict):
+        capabilities = parse_node_capabilities(
+            node_info.get("node_report", ""),
+            node_info.get("short_name", ""),
+            node_info.get("long_name", ""),
+        )
+    capabilities = dict(capabilities)
+    if node_info.get("firmware_version") is not None:
+        capabilities["firmware_version"] = node_info.get("firmware_version")
+    return _normalize_device_capabilities(capabilities)
+
+
+def _output_configs_from_node(node_info):
+    explicit_outputs = node_info.get("outputs")
+    if isinstance(explicit_outputs, list):
+        output_cfgs = []
+        for idx, output in enumerate(explicit_outputs):
+            if not isinstance(output, dict):
+                continue
+            output_type = output.get("type", "long_strip")
+            if output_type not in OUTPUT_TYPES:
+                continue
+            cfg = {
+                "name": output.get("name", f"A{idx}"),
+                "type": output_type,
+            }
+            if "universe" in output:
+                cfg["universe"] = output.get("universe", idx)
+            if "grid_order" in output:
+                cfg["grid_order"] = output.get("grid_order")
+            if "grid_rotation" in output:
+                cfg["grid_rotation"] = output.get("grid_rotation")
+            output_cfgs.append(cfg)
+        if output_cfgs:
+            return output_cfgs
+
+    return parse_node_outputs(
+        node_info.get("long_name", ""),
+        node_info.get("universes", []),
+        OUTPUT_TYPES,
+        node_report=node_info.get("node_report", ""),
+        type_keys=LOOK_OUTPUT_TYPES)
+
+
 # ======================================================================
 #  CONTROLLER STATE
 # ======================================================================
@@ -306,14 +385,28 @@ class ControllerState:
         known_ips = [d["ip"] for d in saved]
         nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0)
         node_map = {n["ip"]: n for n in nodes}
+        nodes_by_name = {}
+        duplicate_node_names = set()
+        for node in nodes:
+            name = node.get("short_name")
+            if not name:
+                continue
+            if name in nodes_by_name:
+                duplicate_node_names.add(name)
+            nodes_by_name[name] = node
+        for name in duplicate_node_names:
+            nodes_by_name.pop(name, None)
+        refreshed = False
         for sd in saved:
             ip = sd["ip"]
             if any(d["ip"] == ip for d in self.devices):
                 continue
-            node = node_map.get(ip)
+            node = node_map.get(ip) or nodes_by_name.get(sd.get("name"))
             if node:
-                node["short_name"] = sd.get("name") or node.get("short_name", "Node")
+                node["short_name"] = node.get("short_name") or sd.get("name") or "Node"
                 self.add_device_from_node(node, auto_save=False)
+                if node.get("ip") != ip:
+                    refreshed = True
             else:
                 # Add offline device with saved name
                 self.add_device_from_node({
@@ -324,7 +417,12 @@ class ControllerState:
                     "universes": [0, 1],
                     "hardware_profile": sd.get("hardware_profile", "unknown"),
                     "hardware_label": sd.get("hardware_label", "Unknown hardware"),
+                    "firmware_version": sd.get("firmware_version"),
+                    "capabilities": sd.get("capabilities"),
+                    "outputs": sd.get("outputs"),
                 }, auto_save=False)
+        if refreshed:
+            _save_devices(self.devices)
 
     def _playback_target_info_unlocked(self):
         total = len(self.devices)
@@ -609,7 +707,8 @@ class ControllerState:
         with self.lock:
             dev = self.devices[di]
             dev["sender"].ip = dev["ip"]
-            dev["sender"].connect()
+            if not dev["sender"].connected:
+                dev["sender"].connect()
             dev["connected"] = True
             self._send_output_config(dev)
 
@@ -624,22 +723,28 @@ class ControllerState:
 
     def add_device_from_node(self, node_info, auto_save=True):
         with self.lock:
-            for dev in self.devices:
-                if dev["ip"] == node_info["ip"]:
-                    return {"status": "exists"}
+            idx = self._find_existing_device_index_unlocked(node_info)
+            if idx is not None:
+                dev = self.devices[idx]
+                ip_changed = dev["ip"] != node_info["ip"]
+                if ip_changed:
+                    dev["ip"] = node_info["ip"]
+                    dev["sender"].ip = dev["ip"]
+                updated = self._refresh_device_from_node_unlocked(dev, node_info)
+                if (updated or ip_changed) and auto_save:
+                    _save_devices(self.devices)
+                return {
+                    "status": "updated" if (updated or ip_changed) else "exists",
+                    "device_index": idx,
+                }
 
-            from artnet import parse_node_outputs
-            output_cfgs = parse_node_outputs(
-                node_info.get("long_name", ""),
-                node_info.get("universes", []),
-                OUTPUT_TYPES,
-                node_report=node_info.get("node_report", ""),
-                type_keys=LOOK_OUTPUT_TYPES)
+            output_cfgs = _output_configs_from_node(node_info)
             base_u = (
                 output_cfgs[0].get("universe", 0)
                 if output_cfgs else
                 (node_info["universes"][0] if node_info.get("universes") else 0)
             )
+            capabilities = _capabilities_from_node(node_info)
 
             dev = {
                 "name": node_info.get("short_name", "Node"),
@@ -647,31 +752,106 @@ class ControllerState:
                 "base_universe": base_u,
                 "connected": False,
                 "sender": ArtNetSender(node_info["ip"]),
-                "capabilities": _normalize_device_capabilities(node_info.get("capabilities")),
-                "hardware_profile": node_info.get("hardware_profile", "unknown"),
-                "hardware_label": node_info.get("hardware_label", "Unknown hardware"),
-                "firmware_version": node_info.get("firmware_version"),
+                "capabilities": capabilities,
+                "hardware_profile": node_info.get(
+                    "hardware_profile", capabilities.get("hardware_profile", "unknown")),
+                "hardware_label": node_info.get(
+                    "hardware_label", capabilities.get("hardware_label", "Unknown hardware")),
+                "firmware_version": node_info.get(
+                    "firmware_version", capabilities.get("firmware_version")),
                 "outputs": [],
             }
-            for idx, o_cfg in enumerate(output_cfgs):
-                resolved = resolve_output(o_cfg)
-                universe = o_cfg.get(
-                    "universe",
-                    node_info["universes"][idx]
-                    if idx < len(node_info.get("universes", []))
-                    else base_u + idx,
-                )
-                is_grid = resolved["layout"] == "grid"
-                dev["outputs"].append({
-                    **resolved,
-                    "universe": universe,
-                    "grid_order": "serpentine" if is_grid else "progressive",
-                    "grid_rotation": 0,
-                })
+            dev["outputs"] = self._build_device_outputs_unlocked(
+                node_info, output_cfgs, base_u)
             self.devices.append(dev)
             if auto_save:
                 _save_devices(self.devices)
             return {"status": "added", "device_index": len(self.devices) - 1}
+
+    def _find_existing_device_index_unlocked(self, node_info):
+        node_ip = node_info.get("ip")
+        for idx, dev in enumerate(self.devices):
+            if dev["ip"] == node_ip:
+                return idx
+
+        if not _node_has_discovery_metadata(node_info):
+            return None
+
+        short_name = str(node_info.get("short_name", "")).strip()
+        if not short_name:
+            return None
+        matches = [
+            idx for idx, dev in enumerate(self.devices)
+            if dev.get("name") == short_name
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _build_device_outputs_unlocked(self, node_info, output_cfgs, base_u,
+                                       existing_outputs=None):
+        outputs = []
+        existing_outputs = existing_outputs or []
+        existing_by_name = {
+            output.get("name"): output
+            for output in existing_outputs
+            if isinstance(output, dict)
+        }
+        universes = node_info.get("universes", [])
+        for idx, o_cfg in enumerate(output_cfgs):
+            resolved = resolve_output(o_cfg)
+            universe = o_cfg.get(
+                "universe",
+                universes[idx] if idx < len(universes) else base_u + idx,
+            )
+            prior = existing_by_name.get(resolved["name"])
+            if prior is None and idx < len(existing_outputs):
+                prior = existing_outputs[idx]
+            is_grid = resolved["layout"] == "grid"
+            grid_order = o_cfg.get("grid_order")
+            if grid_order not in GRID_ORDERS:
+                grid_order = prior.get("grid_order") if prior else None
+            if grid_order not in GRID_ORDERS:
+                grid_order = "serpentine" if is_grid else "progressive"
+            grid_rotation = o_cfg.get("grid_rotation")
+            if grid_rotation not in GRID_ROTATIONS:
+                grid_rotation = prior.get("grid_rotation") if prior else 0
+            outputs.append({
+                **resolved,
+                "universe": universe,
+                "grid_order": grid_order if is_grid else "progressive",
+                "grid_rotation": grid_rotation if is_grid else 0,
+            })
+        return outputs
+
+    def _refresh_device_from_node_unlocked(self, dev, node_info):
+        if not _node_has_discovery_metadata(node_info):
+            return False
+
+        capabilities = _capabilities_from_node(node_info)
+        short_name = node_info.get("short_name")
+        if short_name:
+            dev["name"] = short_name
+        dev["capabilities"] = capabilities
+        dev["hardware_profile"] = node_info.get(
+            "hardware_profile", capabilities.get("hardware_profile", "unknown"))
+        dev["hardware_label"] = node_info.get(
+            "hardware_label", capabilities.get("hardware_label", "Unknown hardware"))
+        dev["firmware_version"] = node_info.get(
+            "firmware_version", capabilities.get("firmware_version"))
+
+        output_cfgs = _output_configs_from_node(node_info)
+        if output_cfgs:
+            base_u = output_cfgs[0].get(
+                "universe",
+                node_info.get("universes", [dev.get("base_universe", 0)])[0]
+                if node_info.get("universes") else dev.get("base_universe", 0)
+            )
+            dev["base_universe"] = base_u
+            dev["outputs"] = self._build_device_outputs_unlocked(
+                node_info, output_cfgs, base_u, existing_outputs=dev.get("outputs", []))
+        dev["sender"].ip = dev["ip"]
+        return True
 
     def remove_device(self, di):
         with self.lock:
@@ -739,8 +919,8 @@ class ControllerState:
                 if not dev["sender"].connected:
                     dev["sender"].ip = dev["ip"]
                     dev["sender"].connect()
-                    dev["connected"] = True
-                    self._send_output_config(dev)
+                dev["connected"] = True
+                self._send_output_config(dev)
 
     def disconnect_all(self):
         with self.lock:

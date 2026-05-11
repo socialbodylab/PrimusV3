@@ -109,6 +109,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/connect":
             di = data.get("device", 0)
             if 0 <= di < len(self.controller_state.devices):
+                ip = self.controller_state.devices[di]["ip"]
+                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0)
+                node = next((n for n in nodes if n["ip"] == ip), None)
+                if node:
+                    self.controller_state.add_device_from_node(node)
                 self.controller_state.connect(di)
                 self._ok()
             else:
@@ -137,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/add_discovered":
             result = self.controller_state.add_device_from_node(data)
-            if result.get("status") == "added":
+            if result.get("device_index") is not None:
                 self.controller_state.connect(result["device_index"])
             self._json_response(result)
 
@@ -161,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                     "num_ports": 0,
                     "universes": [0, 1],
                 })
-            if result.get("status") == "added":
+            if result.get("device_index") is not None:
                 self.controller_state.connect(result["device_index"])
             self._json_response(result)
 
