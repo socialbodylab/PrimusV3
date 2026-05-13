@@ -61,7 +61,7 @@ python3 V3_5/build_sender_app.py --target macos
 The unsigned macOS app bundle is written to:
 
 ```text
-V3_5/dist/macos/PrimusV3.5 Sender.app
+V3_5/dist/macos/PrimusCentral.app
 ```
 
 Build a Windows executable on Windows:
@@ -73,7 +73,7 @@ py V3_5\build_sender_app.py --target windows
 The unsigned Windows executable is written to:
 
 ```text
-V3_5\dist\windows\PrimusV3.5 Sender.exe
+V3_5\dist\windows\PrimusCentral.exe
 ```
 
 The older macOS-only wrapper still works:
@@ -92,7 +92,7 @@ Windows defaults to a one-file `.exe`. Use `--onedir` if you prefer a folder-bas
 
 ## Verify The App
 
-1. Double-click `V3_5/dist/macos/PrimusV3.5 Sender.app` or `V3_5\dist\windows\PrimusV3.5 Sender.exe`.
+1. Double-click `V3_5/dist/macos/PrimusCentral.app` or `V3_5\dist\windows\PrimusCentral.exe`.
 2. Confirm the browser opens to the local sender UI.
 3. Confirm Art-Net discovery finds receiver nodes.
 4. Connect a node and test Hello, Rename, and live preview.

@@ -12,7 +12,7 @@ import build_sender_app
 
 
 class PackagingBuilderTests(unittest.TestCase):
-    def make_args(self, target="macos", windowed=True, onefile=False, name="PrimusV3.5 Sender"):
+    def make_args(self, target="macos", windowed=True, onefile=False, name="PrimusCentral"):
         return SimpleNamespace(
             target=target,
             windowed=windowed,
@@ -23,12 +23,12 @@ class PackagingBuilderTests(unittest.TestCase):
     def test_macos_windowed_output_is_app_bundle(self):
         args = self.make_args(target="macos", windowed=True, onefile=False)
         out = build_sender_app._output_path(args, Path("dist") / "macos")
-        self.assertEqual(out, Path("dist") / "macos" / "PrimusV3.5 Sender.app")
+        self.assertEqual(out, Path("dist") / "macos" / "PrimusCentral.app")
 
     def test_windows_onefile_output_is_exe(self):
         args = self.make_args(target="windows", windowed=True, onefile=True)
         out = build_sender_app._output_path(args, Path("dist") / "windows")
-        self.assertEqual(out, Path("dist") / "windows" / "PrimusV3.5 Sender.exe")
+        self.assertEqual(out, Path("dist") / "windows" / "PrimusCentral.exe")
 
     def test_windows_command_uses_onefile_windowed_and_add_data(self):
         args = self.make_args(target="windows", windowed=True, onefile=True)

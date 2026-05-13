@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 
-APP_NAME = "PrimusV3.5 Sender"
+APP_NAME = "PrimusCentral"
 
 
 def _platform_default():

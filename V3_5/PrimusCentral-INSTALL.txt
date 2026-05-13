@@ -1,0 +1,16 @@
+PrimusCentral v0.5 macOS Install Notes
+
+1. Move PrimusCentral.app to your Applications folder.
+
+2. Because this v0.5 build is not Apple Developer ID notarized yet, macOS may show a malware verification warning after download. After moving the app to Applications, open Terminal and run:
+
+   xattr -dr com.apple.quarantine "/Applications/PrimusCentral.app"
+
+3. Open the app:
+
+   open "/Applications/PrimusCentral.app"
+
+Notes:
+- You only need to run the xattr command once per downloaded copy of the app.
+- The app must be on the same network as your Primus receiver hardware.
+- Future signed and notarized releases should not need this quarantine-removal step.

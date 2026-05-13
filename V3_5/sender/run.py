@@ -48,7 +48,7 @@ def _configure_app_logging():
     sys.stdout = log_file
     sys.stderr = log_file
     print()
-    print(f"PrimusV3.5 Sender started {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"PrimusCentral started {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 def _kill_existing():
@@ -61,6 +61,7 @@ def _kill_existing():
         os.path.join(sender_dir, "controller.py"),
         "V3_5/sender/run.py",
         "V3_5/sender/controller.py",
+        "PrimusCentral",
         "PrimusV3.5 Sender",
         "PrimusV35Sender",
     }
