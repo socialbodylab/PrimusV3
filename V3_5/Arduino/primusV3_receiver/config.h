@@ -149,7 +149,7 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
   /* OUTPUT_SHORT_STRIP */ { "Short Strip", 30, 3, LAYOUT_LINEAR, 0, 0 },
   /* OUTPUT_LONG_STRIP  */ { "Long Strip",  72, 3, LAYOUT_LINEAR, 0, 0 },
   /* OUTPUT_GRID        */ { "Grid 8x8",    64, 3, LAYOUT_GRID,   8, 8 },
-  /* OUTPUT_SMALL_GRID  */ { "Grid 4x8",    32, 3, LAYOUT_GRID,   4, 8 },
+  /* OUTPUT_SMALL_GRID  */ { "Grid 8x4",    32, 3, LAYOUT_GRID,   8, 4 },
   /* OUTPUT_EXTRA_LONG_STRIP */ { "Extra Long Strip", 122, 3, LAYOUT_LINEAR, 0, 0 },
 };
 

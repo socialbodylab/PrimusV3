@@ -88,7 +88,7 @@ Each physical output maps to one Art-Net universe. Outputs can be dynamically re
 | Short Strip | 30 | 90 | Linear |
 | Long Strip | 72 | 216 | Linear |
 | Grid 8×8 | 64 | 192 | Grid (serpentine) |
-| Small Grid 4×8 | 32 | 96 | Grid (serpentine) |
+| Small Grid 8×4 | 32 | 96 | Grid (serpentine) |
 | Extra Long Strip | 122 | 366 | Linear |
 
 ### Default Universe Layout
@@ -97,8 +97,8 @@ V3.5 receiver profiles expose two logical outputs per node. Each output maps to 
 
 | Profile | Hardware | Output A0 / Universe 0 | Output A1 / Universe 1 |
 |--------|----------|--------------------------|--------------------------|
-| `v1` | Huzzah32 direct NeoPixel | Small Grid 4×8, GPIO32 | Long Strip, GPIO12 |
-| `v2` | ESP32 Feather V2 direct NeoPixel | Small Grid 4×8, GPIO32 | Short Strip, GPIO12 |
+| `v1` | Huzzah32 direct NeoPixel | Small Grid 8×4, GPIO32 | Long Strip, GPIO12 |
+| `v2` | ESP32 Feather V2 direct NeoPixel | Small Grid 8×4, GPIO32 | Short Strip, GPIO12 |
 | `v31` | ESP32-S3 Reverse TFT + NeoPXL8 | Short Strip, FeatherWing output 6 / GPIO14 | Long Strip, FeatherWing output 7 / GPIO15 |
 
 All data fits within the 512-byte Art-Net universe limit. One ArtDmx packet per universe, per frame.
@@ -188,7 +188,7 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 | 1 | Short Strip | 30 |
 | 2 | Long Strip | 72 |
 | 3 | Grid 8×8 | 64 |
-| 4 | Small Grid 4×8 | 32 |
+| 4 | Small Grid 8×4 | 32 |
 | 5 | Extra Long Strip | 122 |
 
 ---
@@ -243,6 +243,9 @@ The sender provides a built-in effects engine (`V3_5/sender/effects.py` in the c
 | linear | Color gradient sweep | speed, angle (grid) |
 | constrainbow | Constrained rainbow gradient | speed |
 | rainbow | Full-spectrum rainbow | speed |
+| noise | Smooth coherent color texture | speed |
+| static_noise | Fast per-pixel noise flicker | speed |
+| sparkle_noise | Sparse twinkling noise flecks | speed |
 | knight_rider | Bouncing highlight bar | speed, highlight_width |
 | chase | Progressive color fill | speed, chase_origin, angle (grid) |
 | radial | Radial gradient from center (grid only) | speed |
@@ -489,7 +492,7 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
   { "Short Strip", 30, 3, LAYOUT_LINEAR, 0, 0 },
   { "Long Strip",  72, 3, LAYOUT_LINEAR, 0, 0 },
   { "Grid 8x8",   64, 3, LAYOUT_GRID,   8, 8 },
-  { "Grid 4x8",   32, 3, LAYOUT_GRID,   4, 8 },
+  { "Grid 8x4",   32, 3, LAYOUT_GRID,   8, 4 },
   { "Extra Long Strip", 122, 3, LAYOUT_LINEAR, 0, 0 },
   { "Ring",        24, 3, LAYOUT_LINEAR, 0, 0 },  // new, append only
 };
@@ -505,7 +508,7 @@ OUTPUT_TYPES = {
     "short_strip": {"pixels": 30, "layout": "linear"},
     "long_strip":  {"pixels": 72, "layout": "linear"},
     "grid":        {"pixels": 64, "layout": "grid", "grid_size": [8, 8]},
-    "small_grid":  {"pixels": 32, "layout": "grid", "grid_size": [4, 8]},
+    "small_grid":  {"pixels": 32, "layout": "grid", "grid_size": [8, 4]},
     "extra_long_strip": {"pixels": 122, "layout": "linear"},
     "ring":        {"pixels": 24, "layout": "linear"},
 }

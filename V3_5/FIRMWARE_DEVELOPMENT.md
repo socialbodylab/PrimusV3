@@ -151,7 +151,7 @@ The firmware output type enum must match the sender's `LOOK_OUTPUT_TYPES` index 
 | 1 | `OUTPUT_SHORT_STRIP` | `short_strip` | 30 | linear |
 | 2 | `OUTPUT_LONG_STRIP` | `long_strip` | 72 | linear |
 | 3 | `OUTPUT_GRID` | `grid` | 64 | 8x8 grid |
-| 4 | `OUTPUT_SMALL_GRID` | `small_grid` | 32 | 4x8 grid |
+| 4 | `OUTPUT_SMALL_GRID` | `small_grid` | 32 | 8x4 grid |
 | 5 | `OUTPUT_EXTRA_LONG_STRIP` | `extra_long_strip` | 122 | linear |
 
 When adding an output type:

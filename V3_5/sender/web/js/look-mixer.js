@@ -24,6 +24,7 @@ document.addEventListener("alpine:init", () => {
         loadModal: false,
         savedLooks: [],
         pixelsPerSecond: 80,
+        selectedTrackIdx: 0,
         editModal: false,
         editTrack: -1,
         editSeg: -1,
@@ -82,6 +83,34 @@ document.addEventListener("alpine:init", () => {
 
         deviceName(ip) {
             return this.devices.find(dev => dev.ip === ip)?.name || ip;
+        },
+
+        typeLabel(type) {
+            if (!type) return "None";
+            return type.split("_").map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+        },
+
+        effectLabel(effect) {
+            const labels = {
+                none: "None",
+                solid: "Solid",
+                pulse: "Pulse",
+                linear: "Linear",
+                constrainbow: "Constrainbow",
+                rainbow: "Rainbow",
+                noise: "Noise",
+                static_noise: "Static Noise",
+                sparkle_noise: "Sparkle Noise",
+                knight_rider: "Knight Rider",
+                chase: "Chase",
+                radial: "Radial",
+                spiral: "Spiral",
+            };
+            return labels[effect] || this.typeLabel(effect);
+        },
+
+        outputLabel(value, idx = null) {
+            return Alpine.store("app").outputLabel(value, idx);
         },
 
         lookDeviceIps(look) {
@@ -155,6 +184,7 @@ document.addEventListener("alpine:init", () => {
         get outputs() { return this.designerLook?.outputs || []; },
         get effects() {
             return ["none","solid","pulse","linear","constrainbow","rainbow",
+                    "noise","static_noise","sparkle_noise",
                     "knight_rider","chase","radial","spiral"];
         },
 
@@ -539,10 +569,51 @@ document.addEventListener("alpine:init", () => {
             };
             this.playTime = 0;
             this.transportTime = 0;
+            this.selectedTrackIdx = 0;
             this._mixerFrameDirty = true;
         },
 
+        selectTrack(trackIdx) {
+            const count = this.look?.tracks?.length || 0;
+            if (trackIdx < 0 || trackIdx >= count) return;
+            this.selectedTrackIdx = trackIdx;
+        },
+
+        timelineClipGroups() {
+            const outputs = this.look?.outputs || [];
+            const tracks = this.look?.tracks || [];
+            const byType = new Map();
+            outputs.forEach((out, idx) => {
+                const type = out?.type;
+                if (!type || type === "none") return;
+                if (!byType.has(type)) {
+                    byType.set(type, { type, trackIndices: [], ports: [] });
+                }
+                const group = byType.get(type);
+                group.trackIndices.push(idx);
+                group.ports.push(this.outputLabel(tracks[idx]?.port || out.port, idx));
+            });
+            const groups = Array.from(byType.values());
+            const selectedType = outputs[this.selectedTrackIdx]?.type;
+            if (selectedType && selectedType !== "none") {
+                groups.sort((a, b) => {
+                    if (a.type === selectedType && b.type !== selectedType) return -1;
+                    if (b.type === selectedType && a.type !== selectedType) return 1;
+                    return 0;
+                });
+            }
+            return groups;
+        },
+
+        selectedTrackForType(type) {
+            const outputs = this.look?.outputs || [];
+            if (outputs[this.selectedTrackIdx]?.type === type) return this.selectedTrackIdx;
+            const idx = outputs.findIndex(out => out?.type === type);
+            return idx >= 0 ? idx : 0;
+        },
+
         setTrackOutputType(trackIdx, type) {
+            this.selectTrack(trackIdx);
             if (this.look.outputs[trackIdx]) {
                 this.look.outputs[trackIdx].type = type;
             }
@@ -551,6 +622,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         addSegment(trackIdx, clip) {
+            this.selectTrack(trackIdx);
             const track = this.look.tracks[trackIdx];
             if (!track) return;
             const lastEnd = track.segments.reduce(
@@ -582,6 +654,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         openEditSegment(trackIdx, segIdx) {
+            this.selectTrack(trackIdx);
             const seg = this.look.tracks[trackIdx]?.segments[segIdx];
             if (!seg) return;
             this.editTrack = trackIdx;
@@ -658,6 +731,7 @@ document.addEventListener("alpine:init", () => {
 
         startDrag(event, trackIdx, segIdx, mode) {
             event.preventDefault();
+            this.selectTrack(trackIdx);
             const seg = this.look.tracks[trackIdx]?.segments[segIdx];
             if (!seg) return;
             this._drag = {
@@ -1041,7 +1115,12 @@ document.addEventListener("alpine:init", () => {
         clipsForTrack(trackIdx) {
             const otype = this.look?.outputs[trackIdx]?.type;
             if (!otype || otype === "none") return [];
-            return this.clips.filter(c => c.output_type === otype);
+            return this.clipsForType(otype);
+        },
+
+        clipsForType(type) {
+            if (!type || type === "none") return [];
+            return this.clips.filter(c => c.output_type === type);
         },
 
         // ── Look Save/Load ──
@@ -1110,6 +1189,7 @@ document.addEventListener("alpine:init", () => {
                 this.look = look;
                 this.playTime = 0;
                 this.transportTime = 0;
+                this.selectedTrackIdx = 0;
                 this._mixerFrameDirty = true;
             }
         },

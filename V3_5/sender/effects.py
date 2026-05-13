@@ -46,6 +46,54 @@ def blend_pixels(pixels_a, pixels_b, factor):
     return result
 
 
+def _smoothstep(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def _hash_unit(*values):
+    h = 2166136261
+    for value in values:
+        h ^= int(value) & 0xFFFFFFFF
+        h = (h * 16777619) & 0xFFFFFFFF
+    h ^= h >> 16
+    h = (h * 2246822519) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * 3266489917) & 0xFFFFFFFF
+    h ^= h >> 16
+    return h / 0xFFFFFFFF
+
+
+def _value_noise_2d(x, y, seed=0):
+    x0 = math.floor(x)
+    y0 = math.floor(y)
+    x1 = x0 + 1
+    y1 = y0 + 1
+    fx = _smoothstep(x - x0)
+    fy = _smoothstep(y - y0)
+    a = _lerp(_hash_unit(x0, y0, seed), _hash_unit(x1, y0, seed), fx)
+    b = _lerp(_hash_unit(x0, y1, seed), _hash_unit(x1, y1, seed), fx)
+    return _lerp(a, b, fy)
+
+
+def _fractal_noise_2d(x, y, seed=0, octaves=3):
+    total = 0.0
+    amplitude = 1.0
+    frequency = 1.0
+    normalizer = 0.0
+    for octave in range(octaves):
+        total += _value_noise_2d(x * frequency, y * frequency,
+                                 seed + octave * 101) * amplitude
+        normalizer += amplitude
+        frequency *= 2.0
+        amplitude *= 0.5
+    return total / max(normalizer, 0.001)
+
+
 # ======================================================================
 #  ANIMATION FACTOR
 # ======================================================================
@@ -258,6 +306,60 @@ def fx_chase(count, anim_factor, start_color, end_color,
                     else list(start_color) for i in range(count)]
 
 
+def fx_noise(count, t, start_color, end_color, anim_factor=0.0,
+             grid=None, **kw):
+    pixels = []
+    phase = anim_factor * math.tau
+    drift_x = math.cos(phase) * 1.4
+    drift_y = math.sin(phase) * 1.4
+    if grid:
+        cols, rows = grid
+        scale = 2.8
+        for idx in range(count):
+            x, y = idx % cols, idx // cols
+            nx = x / max(cols - 1, 1) * scale + drift_x
+            ny = y / max(rows - 1, 1) * scale + drift_y
+            n = _fractal_noise_2d(nx, ny, seed=73, octaves=3)
+            pixels.append(lerp_color(start_color, end_color, n))
+    else:
+        scale = 4.0
+        time_y = t * 0.45
+        for i in range(count):
+            x = i / max(count - 1, 1) * scale + drift_x
+            n = _fractal_noise_2d(x, time_y + drift_y, seed=73, octaves=3)
+            pixels.append(lerp_color(start_color, end_color, n))
+    return pixels
+
+
+def fx_static_noise(count, t, start_color, end_color, grid=None, **kw):
+    frame = math.floor(t * 18.0)
+    pixels = []
+    for i in range(count):
+        n = _hash_unit(i, frame, 197)
+        pixels.append(lerp_color(start_color, end_color, n))
+    return pixels
+
+
+def fx_sparkle_noise(count, t, start_color, end_color, grid=None, **kw):
+    if count <= 0:
+        return []
+    frame = math.floor(t * 12.0)
+    primary = int(_hash_unit(frame, 509) * count) % count
+    pixels = []
+    for i in range(count):
+        trigger = _hash_unit(i, frame, 311)
+        previous = _hash_unit(i, frame - 1, 311)
+        intensity = 0.0
+        if i == primary:
+            intensity = 1.0
+        elif trigger > 0.88:
+            intensity = 0.45 + _hash_unit(i, frame, 719) * 0.55
+        elif previous > 0.93:
+            intensity = 0.25
+        pixels.append(lerp_color(start_color, end_color, intensity))
+    return pixels
+
+
 # ======================================================================
 #  GRID PIXEL REORDERING
 # ======================================================================
@@ -309,6 +411,9 @@ EFFECTS = {
     "linear":       fx_linear,
     "constrainbow": fx_constrainbow,
     "rainbow":      fx_rainbow,
+    "noise":        fx_noise,
+    "static_noise": fx_static_noise,
+    "sparkle_noise": fx_sparkle_noise,
     "knight_rider": fx_knight_rider,
     "chase":        fx_chase,
     "radial":       fx_radial,

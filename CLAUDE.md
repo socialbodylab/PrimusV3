@@ -14,7 +14,7 @@ V3.5 is the active compatibility track under `V3_5/`. V3.1 remains the previous 
 - `run.py` — Entry point. Starts HTTP server, Art-Net listener, and animation loop.
 - `state.py` — Core state management, animation loop (`tick()`), device tracking, playback source switching.
 - `server.py` — HTTP server (port 8080). Serves static web UI and 38 JSON API endpoints.
-- `effects.py` — 10 built-in effects computed per frame into pixel buffers.
+- `effects.py` — 13 built-in effects computed per frame into pixel buffers.
 - `clips.py` — Clip CRUD, preview computation. Clips stored as JSON in `V3_5/sender/clips/`.
 - `mixer.py` — Look Mixer logic, crossfade between looks.
 - `controller.py` — Cue Controller for sequential look playback with transitions.
@@ -51,7 +51,7 @@ V3.5 is the active compatibility track under `V3_5/`. V3.1 remains the previous 
 - **Clip**: A saved effect configuration (effect, colors, speed, playback mode) for a specific output type. Stored as JSON.
 - **Look**: A set of 2 active output slots, each with a clip assignment. Defines what all devices display simultaneously.
 - **Playback sources**: `designer` (live editing), `mixer` (crossfade between looks), `controller` (cue-driven sequential playback), `idle` (black/off).
-- **Output types**: `short_strip` (30px), `long_strip` (72px), `grid` (8x8=64px), `small_grid` (4x8=32px), `extra_long_strip` (122px).
+- **Output types**: `short_strip` (30px), `long_strip` (72px), `grid` (8x8=64px), `small_grid` (8x4=32px), `extra_long_strip` (122px).
 
 ## Critical sync points
 
@@ -84,7 +84,7 @@ The sender and receiver must agree on:
 
 ## Effects
 
-none, solid, pulse, linear, constrainbow, rainbow, knight_rider, chase, radial (grid), spiral (grid)
+none, solid, pulse, linear, constrainbow, rainbow, noise, static_noise, sparkle_noise, knight_rider, chase, radial (grid), spiral (grid)
 
 ## V3.5 API endpoints
 

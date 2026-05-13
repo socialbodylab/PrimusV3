@@ -47,6 +47,15 @@ class ArtNetCapabilityTests(unittest.TestCase):
         self.assertEqual(outputs[0]["type"], "small_grid")
         self.assertEqual(outputs[1]["type"], "short_strip")
 
+    def test_legacy_small_grid_display_names_resolve_to_small_grid(self):
+        for display_name in ("Grid 8x4", "Grid 4x8"):
+            with self.subTest(display_name=display_name):
+                outputs = parse_node_outputs(
+                    f"PrimusV3.5 LED Node | A0:{display_name} A1:Long Strip",
+                    [0, 1], OUTPUT_TYPES)
+                self.assertEqual(outputs[0]["type"], "small_grid")
+                self.assertEqual(outputs[1]["type"], "long_strip")
+
     def test_v31_without_profile_tag_defaults_to_v31(self):
         report = "#0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|F:RIOH"
         caps = parse_node_capabilities(report, "PrimusV3", "PrimusV3 LED Node")

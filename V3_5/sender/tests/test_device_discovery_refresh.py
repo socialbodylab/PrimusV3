@@ -27,7 +27,7 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
         result = state.add_device_from_node({
             "ip": "192.168.1.50",
             "short_name": "NewPrimus1",
-            "long_name": "PrimusV3.5 LED Node | A0:Grid 4x8 A1:Long Strip",
+            "long_name": "PrimusV3.5 LED Node | A0:Grid 8x4 A1:Long Strip",
             "node_report": "#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|F:RIOH",
             "num_ports": 2,
             "universes": [0, 1],
@@ -51,7 +51,7 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
         state.add_device_from_node({
             "ip": "192.168.1.51",
             "short_name": "NewPrimus1",
-            "long_name": "PrimusV3.5 LED Node | A0:Grid 4x8 A1:Long Strip",
+            "long_name": "PrimusV3.5 LED Node | A0:Grid 8x4 A1:Long Strip",
             "node_report": "#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|F:RIOH",
             "num_ports": 2,
             "universes": [0, 1],

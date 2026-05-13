@@ -26,7 +26,7 @@ V3.5 builds on V3.1 to run reflashed V1, V2, and V3.1 receiver hardware from the
 Main updates:
 - One active V3.5 sender under `V3_5/sender/` with the clip/look/cue workflow from V3.1.
 - One active receiver firmware tree under `V3_5/Arduino/primusV3_receiver/` with upload profiles for `-v1`, `-v2`, and `-v3`.
-- New output types for legacy hardware: `small_grid` (4x8 / 32 px) and `extra_long_strip` (122 px).
+- New output types for legacy hardware: `small_grid` (8x4 / 32 px) and `extra_long_strip` (122 px).
 - Discovery now advertises hardware profile metadata with `PV3CAP1|...|B:<profile>|F:RIOH`.
 - V1 and V2 screenless boards have connection indicators: V1 uses `LED_BUILTIN`; V2 uses the onboard NeoPixel.
 - Plain `run.py` launch replaces any previous V3.5 sender and opens one dedicated Primus browser window.
@@ -230,7 +230,7 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks r
 | Short Strip | 30 | Linear |
 | Long Strip | 72 | Linear |
 | Grid 8×8 | 64 | Serpentine |
-| Small Grid 4×8 | 32 | Serpentine |
+| Small Grid 8×4 | 32 | Serpentine |
 | Extra Long Strip | 122 | Linear |
 
 Output types are configurable at runtime from the web UI — no reflashing needed. V3.5 receiver profiles expose 2 independently assignable outputs (A0 and A1).
@@ -244,6 +244,9 @@ Output types are configurable at runtime from the web UI — no reflashing neede
 | Linear | All |
 | Constrainbow | All |
 | Rainbow | All |
+| Noise | All |
+| Static Noise | All |
+| Sparkle Noise | All |
 | Knight Rider | All |
 | Chase | All |
 | Radial | Grid only |

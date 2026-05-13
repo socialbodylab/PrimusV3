@@ -31,7 +31,7 @@ OUTPUT_TYPES = {
     "short_strip": {"pixels": 30, "layout": "linear"},
     "long_strip":  {"pixels": 72, "layout": "linear"},
     "grid":        {"pixels": 64, "layout": "grid", "grid_size": [8, 8]},
-    "small_grid":  {"pixels": 32, "layout": "grid", "grid_size": [4, 8]},
+    "small_grid":  {"pixels": 32, "layout": "grid", "grid_size": [8, 4]},
     "extra_long_strip": {"pixels": 122, "layout": "linear"},
 }
 

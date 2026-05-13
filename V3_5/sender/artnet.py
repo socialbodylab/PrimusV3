@@ -283,6 +283,12 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
 
 def _match_output_type(display_name, output_types):
     key = display_name.strip().lower().replace(" ", "_")
+    aliases = {
+        "grid_8x4": "small_grid",
+        "grid_4x8": "small_grid",
+    }
+    if aliases.get(key) in output_types:
+        return aliases[key]
     if key in output_types:
         return key
     for type_key in output_types:

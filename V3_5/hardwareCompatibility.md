@@ -22,7 +22,7 @@ The firmware enum and sender `LOOK_OUTPUT_TYPES` list must stay in this exact or
 | 1 | `short_strip` | `OUTPUT_SHORT_STRIP` | 30 | Linear |
 | 2 | `long_strip` | `OUTPUT_LONG_STRIP` | 72 | Linear |
 | 3 | `grid` | `OUTPUT_GRID` | 64 | 8x8 grid |
-| 4 | `small_grid` | `OUTPUT_SMALL_GRID` | 32 | 4x8 grid |
+| 4 | `small_grid` | `OUTPUT_SMALL_GRID` | 32 | 8x4 grid |
 | 5 | `extra_long_strip` | `OUTPUT_EXTRA_LONG_STRIP` | 122 | Linear |
 
 ## Discovery

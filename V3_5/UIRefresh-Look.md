@@ -2,7 +2,8 @@
 This section actually contains 2 components.
 - Creating Looks
 - Creating Clips
-There are many differnt components and the hierarchy and layout needs to be carfully considered
+There are many differnt components and the hierarchy and layout needs to be carfully considered.
+Consider general practices used in animation and video editing software
 
 ## Devices Panel
 - This panel should be expandable/collapsible. expanded by default

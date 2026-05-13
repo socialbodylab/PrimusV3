@@ -72,6 +72,14 @@ document.addEventListener("alpine:init", () => {
             return connected + "/" + devices.length + " devices";
         },
 
+        outputLabel(value, idx = null) {
+            const raw = value == null ? "" : String(value);
+            const match = raw.match(/^A(\d+)$/i);
+            if (match) return "Output " + match[1];
+            if (raw) return raw;
+            return Number.isInteger(idx) ? "Output " + idx : "Output";
+        },
+
         get mixerPreviewTarget() {
             const devices = this.state?.devices || [];
             const total = devices.length;
@@ -245,6 +253,21 @@ document.addEventListener("alpine:init", () => {
             }
             this.showNotice('Mixer preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
         },
+
+        async setMixerPreviewAll() {
+            this.mixerPreviewDevices = null;
+            if (this.playback.source === 'mixer') {
+                try {
+                    await api("POST", "/api/mixer/update", {
+                        device_filter: null,
+                    });
+                } catch (e) {
+                    this.showApiError('Preview target update failed', e);
+                    return;
+                }
+            }
+            this.showNotice('Mixer preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
+        },
     });
 
     // --- Connection store: device management ---
@@ -262,6 +285,7 @@ document.addEventListener("alpine:init", () => {
         ipConfigIp: "",
         ipConfigGateway: "",
         ipConfigSubnet: "255.255.255.0",
+        sidebarCollapsed: false,
 
         get devices() {
             return Alpine.store("app").state?.devices || [];
@@ -320,7 +344,7 @@ document.addEventListener("alpine:init", () => {
 
         renameHint(dev) {
             return this.canRenameDevice(dev)
-                ? 'Double-click to rename'
+                ? 'Click to rename'
                 : 'Remote rename is not advertised for this node';
         },
 
