@@ -13,6 +13,8 @@ from paths import cues_file
 
 
 _DEVICE_IPS_UNSET = object()
+ASSIGNMENT_LOOK = "look"
+ASSIGNMENT_BLACKOUT = "blackout"
 
 
 def _cues_file():
@@ -29,6 +31,92 @@ def _normalize_device_ips(values):
         seen.add(ip)
         ips.append(ip)
     return set(ips)
+
+
+def _clean_target_mode(value):
+    text = str(value or "look").strip()
+    return text if text in {"look", "all", "group", "devices"} else "look"
+
+
+def _copy_target_fields(source, target):
+    target_mode = _clean_target_mode(source.get("target_mode"))
+    target["target_mode"] = target_mode
+    if target_mode == "group" and source.get("device_group_id"):
+        target["device_group_id"] = str(source.get("device_group_id"))
+    if target_mode == "devices" or (
+            "device_ips" in source and target_mode != "look"):
+        ips = _normalize_device_ips(source.get("device_ips"))
+        if ips:
+            target["device_ips"] = sorted(ips)
+    return target
+
+
+def normalize_assignment(assignment, cue=None):
+    cue = cue or {}
+    source = assignment if isinstance(assignment, dict) else {}
+    action = source.get("action") or source.get("type") or source.get("kind")
+    if source.get("blackout") or action == ASSIGNMENT_BLACKOUT:
+        normalized = {"action": ASSIGNMENT_BLACKOUT}
+        if source.get("note"):
+            normalized["note"] = str(source.get("note"))
+        return normalized
+
+    look_id = str(source.get("look_id") or "").strip()
+    if not look_id:
+        return None
+    normalized = {"action": ASSIGNMENT_LOOK, "look_id": look_id}
+    if source.get("note"):
+        normalized["note"] = str(source.get("note"))
+    return _copy_target_fields(source or cue, normalized)
+
+
+def normalize_cue(cue, fallback_number=1):
+    source = cue if isinstance(cue, dict) else {}
+    try:
+        number = int(source.get("number", fallback_number))
+    except (TypeError, ValueError):
+        number = fallback_number
+    try:
+        fade_time = float(source.get("fade_time", 0.0))
+    except (TypeError, ValueError):
+        fade_time = 0.0
+    try:
+        follow_delay = float(source.get("follow_delay", 5.0))
+    except (TypeError, ValueError):
+        follow_delay = 5.0
+
+    assignments = []
+    if source.get("blackout"):
+        assignments.append({"action": ASSIGNMENT_BLACKOUT})
+    for raw in source.get("assignments") or []:
+        assignment = normalize_assignment(raw, cue=source)
+        if assignment:
+            assignments.append(assignment)
+    if not assignments and source.get("look_id"):
+        assignment = normalize_assignment({
+            "look_id": source.get("look_id"),
+            "target_mode": source.get("target_mode", "look"),
+            "device_group_id": source.get("device_group_id"),
+            "device_ips": source.get("device_ips"),
+        }, cue=source)
+        if assignment:
+            assignments.append(assignment)
+
+    normalized = {
+        "number": number,
+        "name": str(source.get("name") or f"Cue {number}"),
+        "fade_time": max(0.0, fade_time),
+        "auto_follow": bool(source.get("auto_follow", False)),
+        "follow_delay": max(0.0, follow_delay),
+        "assignments": assignments,
+    }
+    first_look = next((a for a in assignments if a.get("action") == ASSIGNMENT_LOOK), None)
+    if first_look and len(assignments) == 1:
+        normalized["look_id"] = first_look["look_id"]
+        _copy_target_fields(first_look, normalized)
+    if assignments and all(a.get("action") == ASSIGNMENT_BLACKOUT for a in assignments):
+        normalized["blackout"] = True
+    return normalized
 
 
 class CueList:
@@ -72,7 +160,10 @@ class CueList:
         try:
             with open(path, "r") as f:
                 data = json.load(f)
-            self.cues = data.get("cues", [])
+            self.cues = [
+                normalize_cue(cue, i + 1)
+                for i, cue in enumerate(data.get("cues", []))
+            ]
         except (OSError, json.JSONDecodeError):
             self.cues = []
 
@@ -120,6 +211,84 @@ class CueList:
             return _normalize_device_ips(cue.get("device_ips"))
 
         return self._look_device_ips(look)
+
+    def _cue_has_blackout(self, cue):
+        return any(
+            assignment.get("action") == ASSIGNMENT_BLACKOUT
+            for assignment in cue.get("assignments") or []
+        )
+
+    def _prepare_cue_entries(self, cue, device_groups=None):
+        cue = normalize_cue(cue)
+        if self._cue_has_blackout(cue):
+            return cue, [], True
+
+        entries = []
+        for assignment in cue.get("assignments") or []:
+            if assignment.get("action") != ASSIGNMENT_LOOK:
+                continue
+            look_id = assignment.get("look_id")
+            look = load_look(look_id) if look_id else None
+            if look is None:
+                continue
+            entries.append({
+                "look_id": look_id,
+                "device_ips": self._resolve_device_ips(assignment, device_groups, look),
+            })
+        return cue, entries, False
+
+    def _blackout_unlocked(self, fade_time=0.0):
+        self._active_control_looks = []
+        self._active_look_id = None
+        self._active_device_ips = None
+        self._prev_look_id = None
+        self._transition_start = 0.0
+        self._transition_duration = 0.0
+        self._blackout = True
+        self._blackout_fade_start = time.monotonic()
+        self._blackout_fade_duration = fade_time
+
+    def _activate_entries_unlocked(self, entries, fade_time=0.0):
+        now = time.monotonic()
+        if len(entries) == 1:
+            entry = entries[0]
+            self._active_control_looks = []
+            self._start_transition(entry["look_id"], fade_time)
+            self._active_device_ips = entry.get("device_ips")
+        else:
+            self._active_control_looks = [
+                {
+                    "look_id": entry["look_id"],
+                    "device_ips": entry.get("device_ips"),
+                    "start_time": now,
+                }
+                for entry in entries
+            ]
+            self._active_look_id = entries[0]["look_id"] if entries else None
+            self._active_device_ips = self._target_union(self._active_control_looks)
+            self._prev_look_id = None
+            self._transition_start = 0.0
+            self._transition_duration = 0.0
+            self._blackout = False
+        self.playing = True
+        self.play_start_time = now
+
+    def _trigger_cue_at_index(self, cue_index, cue, device_groups=None):
+        cue, entries, blackout = self._prepare_cue_entries(cue, device_groups)
+        if not entries and not blackout:
+            return None
+
+        with self.lock:
+            fade_time = cue.get("fade_time", 0.0)
+            if blackout:
+                self._blackout_unlocked(fade_time)
+                self.playing = True
+                self.play_start_time = time.monotonic()
+            else:
+                self._activate_entries_unlocked(entries, fade_time)
+            self.current_index = cue_index
+            self._setup_auto_follow(cue)
+            return cue
 
     def _start_transition(self, new_look_id, fade_time):
         """Begin crossfade from current look to new_look_id."""
@@ -171,7 +340,7 @@ class CueList:
     def set_cues(self, cues):
         """Replace the entire cue list."""
         with self.lock:
-            self.cues = list(cues)
+            self.cues = [normalize_cue(cue, i + 1) for i, cue in enumerate(cues or [])]
             self.current_index = -1
             self.playing = False
             self._auto_follow_time = 0.0
@@ -284,12 +453,7 @@ class CueList:
     def blackout(self, fade_time=0.0):
         """Fade to black."""
         with self.lock:
-            self._active_control_looks = []
-            self._active_look_id = None
-            self._active_device_ips = None
-            self._blackout = True
-            self._blackout_fade_start = time.monotonic()
-            self._blackout_fade_duration = fade_time
+            self._blackout_unlocked(fade_time)
 
     def release_output(self, preserve_selection=True):
         """Clear live controller ownership and runtime state.
@@ -326,23 +490,7 @@ class CueList:
             if next_idx >= len(self.cues):
                 next_idx = 0  # wrap around
             cue = dict(self.cues[next_idx])
-            look_id = cue.get("look_id")
-
-        # Validate look exists outside lock (disk I/O)
-        look = load_look(look_id) if look_id else None
-        if look_id and look is None:
-            return None  # look was deleted
-
-        with self.lock:
-            fade_time = cue.get("fade_time", 0.0)
-            self._active_control_looks = []
-            self._start_transition(look_id, fade_time)
-            self._active_device_ips = self._resolve_device_ips(cue, device_groups, look)
-            self.current_index = next_idx
-            self.playing = True
-            self.play_start_time = time.monotonic()
-            self._setup_auto_follow(cue)
-            return cue
+        return self._trigger_cue_at_index(next_idx, cue, device_groups=device_groups)
 
     def stop(self):
         """Stop playback."""
@@ -360,23 +508,7 @@ class CueList:
                     break
             if match is None:
                 return None
-            look_id = match.get("look_id")
-
-        # Validate look exists outside lock (disk I/O)
-        look = load_look(look_id) if look_id else None
-        if look_id and look is None:
-            return None  # look was deleted
-
-        with self.lock:
-            fade_time = match.get("fade_time", 0.0)
-            self._active_control_looks = []
-            self._start_transition(look_id, fade_time)
-            self._active_device_ips = self._resolve_device_ips(match, device_groups, look)
-            self.current_index = match_idx
-            self.playing = True
-            self.play_start_time = time.monotonic()
-            self._setup_auto_follow(match)
-            return match
+        return self._trigger_cue_at_index(match_idx, match, device_groups=device_groups)
 
     def get_elapsed(self):
         """Seconds elapsed since current cue started."""

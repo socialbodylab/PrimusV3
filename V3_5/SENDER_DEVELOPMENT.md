@@ -73,6 +73,18 @@ The sender currently computes one active look with two logical outputs. Output c
 
 Important mixed-hardware note: V1/V2/V3.1 devices can be discovered and controlled together, but the current sender does not yet maintain independent native output-type selections per hardware profile during live playback. Connecting all devices after changing the active look can push the same two output types to every connected receiver. Future work for true mixed-costume operation should add per-device or per-profile output routing.
 
+### Cue Hierarchy
+
+The phase-one UI hierarchy is Cues, then Looks, then Clips:
+
+- Clips are single-output effect presets.
+- Looks combine and manipulate Clips across the two logical output slots.
+- Cues are production triggers that can fire multiple Looks at once, with each Look assignment targeting its saved Look target, all devices, a device group, or selected devices.
+
+`controller.py` normalizes both assignment-based cues and older one-Look cues. New cues should use `assignments`, where each item is either `{"action":"look", "look_id":"...", "target_mode":"look"}` or `{"action":"blackout"}`. Top-level `look_id` remains for compatibility when a cue has exactly one Look assignment.
+
+The Cue Controller web mode is a live manual button board. Entering it hides the network Devices sidebar, connects saved devices, and sends controller blackout before show operation begins. It does not expose sequential GO/NEXT controls, auto-follow setup, cue reordering, or a cue timeline; clicking a cue square directly fires that cue, and the only per-square control is Edit.
+
 ### Device Records
 
 Device records include:
@@ -130,6 +142,9 @@ Important device/control endpoints in `server.py`:
 | `POST /api/set_device_ip` | Static IP config. |
 | `POST /api/revert_device_dhcp` | Return device to DHCP. |
 | `POST /api/update` | Designer/output type/effect settings. |
+| `GET /api/cues` / `POST /api/cues` | Read or replace the cue list. Cues should use assignment-based payloads. |
+| `POST /api/cues/go` / `POST /api/cues/goto` | Fire the next cue or a specific cue number through the controller source. |
+| `POST /api/controller/blackout` | Send controller blackout, used when entering Cue Controller mode. |
 | `GET /api/firmware/status` | Firmware upload tooling availability and current/last job. |
 | `POST /api/firmware/jobs` | Start a source-checkout firmware job: list ports, install, compile, or upload. |
 | `GET /api/firmware/jobs/:id` | Poll a firmware job, including redacted output and structured port results. |

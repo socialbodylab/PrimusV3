@@ -151,6 +151,86 @@ class ControllerLookTargetTests(unittest.TestCase):
 
         self.assertEqual(self.device_ips(cue_list), set())
 
+    def test_set_cues_normalizes_legacy_look_id_to_assignment(self):
+        cue_list = self.make_cue_list()
+        with patch.object(cue_list, "save", return_value=None):
+            cue_list.set_cues([{
+                "number": 4,
+                "look_id": LOOK_ID,
+                "name": "Legacy Cue",
+                "target_mode": "devices",
+                "device_ips": ["192.168.1.20"],
+            }])
+
+        cue = cue_list.get_json()["cues"][0]
+        self.assertEqual(cue["look_id"], LOOK_ID)
+        self.assertEqual(cue["assignments"], [{
+            "action": "look",
+            "look_id": LOOK_ID,
+            "target_mode": "devices",
+            "device_ips": ["192.168.1.20"],
+        }])
+
+    def test_multi_assignment_cue_activates_all_valid_looks(self):
+        cue_list = self.make_cue_list()
+        cue_list.cues = [{
+            "number": 1,
+            "name": "Layered Cue",
+            "assignments": [
+                {"look_id": LOOK_ID, "target_mode": "devices", "device_ips": ["192.168.1.20"]},
+                {"look_id": "look-2", "target_mode": "group", "device_group_id": "stage-right"},
+            ],
+        }]
+
+        def load(look_id):
+            return {LOOK_ID: LOOK_WITH_TARGET, "look-2": SECOND_LOOK}.get(look_id)
+
+        groups = [{"id": "stage-right", "device_ips": ["192.168.1.30", "192.168.1.31"]}]
+        with patch("controller.load_look", side_effect=load):
+            cue = cue_list.go(device_groups=groups)
+
+        self.assertEqual(cue["name"], "Layered Cue")
+        self.assertEqual(cue_list.active_look_ids(), [LOOK_ID, "look-2"])
+        self.assertEqual(
+            self.device_ips(cue_list),
+            {"192.168.1.20", "192.168.1.30", "192.168.1.31"},
+        )
+        active = cue_list.get_crossfade_state()["active_looks"]
+        self.assertEqual([entry["look_id"] for entry in active], [LOOK_ID, "look-2"])
+
+    def test_multi_assignment_cue_skips_missing_looks(self):
+        cue_list = self.make_cue_list()
+        cue_list.cues = [{
+            "number": 1,
+            "name": "Partial Cue",
+            "assignments": [
+                {"look_id": "missing"},
+                {"look_id": LOOK_ID},
+            ],
+        }]
+
+        with patch("controller.load_look", side_effect=lambda look_id: LOOK_WITH_TARGET if look_id == LOOK_ID else None):
+            cue = cue_list.go(device_groups=[])
+
+        self.assertEqual(cue["name"], "Partial Cue")
+        self.assertEqual(cue_list.active_look_ids(), [LOOK_ID])
+
+    def test_virtual_blackout_cue_triggers_blackout_without_saved_look(self):
+        cue_list = self.make_cue_list()
+        cue_list.cues = [{
+            "number": 1,
+            "name": "Blackout",
+            "assignments": [{"action": "blackout"}],
+            "fade_time": 1.5,
+        }]
+
+        cue = cue_list.go(device_groups=[])
+
+        self.assertEqual(cue["name"], "Blackout")
+        state = cue_list.get_crossfade_state()
+        self.assertTrue(state["blackout"])
+        self.assertIsNone(state["current_look_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

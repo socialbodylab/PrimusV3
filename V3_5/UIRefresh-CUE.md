@@ -1,5 +1,8 @@
 # Overview 
 At this stage the control sofware has gotten fairly complex and needs a reorganization.
+- Cues : the top level of combined looks
+- Looks : Combination / manipulation of Clips
+- Clips : Single output effect on a channel
 
 # Clearer hierarchy between the components
 
@@ -16,3 +19,11 @@ Large Text of Cue Controller at top
 - Add cue button at the top that opens a view to add different looks 
 - Looks should have previews similar to Clips library in the timeline view
 - Create a default blackout look that can be easily added to a cue
+
+## Phase one implementation
+- Cue Controller is the live board view and hides the network Devices sidebar.
+- Entering Cue Controller connects saved devices and sends controller blackout before show operation.
+- Cues now support multiple assignments. Each assignment can trigger a Look to its own target mode, or act as a virtual blackout.
+- Old single-Look cues are still accepted and normalized into assignments.
+- The visible Cue Controller is only a manual grid of square cue buttons. There is no GO/NEXT transport, auto-follow setup, cue timeline, or output-ownership panel in this view.
+- Clicking a cue square triggers it. The only control on a square is Edit; delete lives inside the editor.

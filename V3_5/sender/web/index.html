@@ -49,7 +49,7 @@
 <div class="main-content" x-data>
 
     <!-- ──── SIDEBAR: Devices ──── -->
-    <div class="sidebar" x-show="$store.app.mode !== 'firmware'">
+    <div class="sidebar" x-show="!['controller', 'firmware'].includes($store.app.mode)">
         <div class="flex justify-between items-center mb-4">
             <span class="section-title" style="margin:0">Devices</span>
             <div class="btn-group">
@@ -792,93 +792,160 @@
         </div><!-- end timeline sub-mode -->
     </div>
 
-    <!-- ──── PANEL: Look Controller ──── -->
-    <div class="panel" x-show="$store.app.mode === 'controller'" x-data="lookController">
-
-        <!-- ── Control Panel: Look Palette ── -->
-        <div class="flex justify-between items-center mb-4">
-            <h2 class="section-title" style="margin:0">Control Panel</h2>
-            <div class="flex items-center gap-2" style="min-width:360px;justify-content:flex-end">
-                <label class="form-label" style="margin:0;font-size:.8rem">Fade</label>
-                <input type="range" class="fade-slider"
-                       x-model.number="defaultFadeTime" min="0" max="5" step="0.25">
-                <span class="text-muted text-sm" style="min-width:28px;text-align:right" x-text="defaultFadeTime + 's'"></span>
-                <button class="btn btn-primary" @click="triggerSelectedLooks()"
-                        :disabled="selectedLookIds.length === 0"
-                        x-text="selectedLookIds.length ? 'Trigger Selected (' + selectedLookIds.length + ')' : 'Trigger Selected'"></button>
-                <button class="btn" @click="stop()">Stop All</button>
-            </div>
-        </div>
-
-        <div class="panel-owner-status" :class="controllerPanelStateClass()">
-            <div class="panel-owner-copy">
-                <div class="panel-owner-eyebrow">Output ownership</div>
-                <div class="panel-owner-title" x-text="controllerPanelTitle()"></div>
-                <div class="panel-owner-detail" x-text="controllerPanelDetail()"></div>
-            </div>
-            <div class="panel-owner-summary">
-                <span class="panel-owner-source" x-text="$store.app.playback.label"></span>
-                <span class="panel-owner-target" x-text="$store.app.playback.target_label"></span>
-            </div>
-        </div>
-
-        <div class="control-board-summary">
+    <!-- ---- PANEL: Cue Controller ---- -->
+    <div class="panel cue-controller-panel" x-show="$store.app.mode === 'controller'" x-data="lookController">
+        <div class="cue-controller-header">
             <div>
-                <span class="controller-label">LIVE</span>
-                <span class="control-board-live" x-text="blackout ? 'Blackout' : activeLooksLabel()"></span>
+                <h1 class="cue-controller-title">Cue Controller</h1>
+                <div class="cue-controller-subtitle">
+                    <span x-text="connectedCount + '/' + devices.length + ' saved devices connected'"></span>
+                    <span x-show="preparingController">Preparing controller...</span>
+                </div>
             </div>
-            <div class="control-board-actions">
-                <button class="btn btn-sm" @click="clearSelectedLooks()" :disabled="selectedLookIds.length === 0">Clear Selection</button>
-                <button class="btn btn-sm btn-danger" @click="doBlackout()">Blackout</button>
+            <div class="cue-controller-actions">
+                <button class="btn btn-primary" @click="openAddCue()">Add Cue</button>
             </div>
         </div>
 
-        <div class="look-palette">
-            <template x-for="look in looks" :key="look.id">
-                <div class="look-palette-card"
-                     :class="{ 'look-card-active': isLookActive(look.id), 'look-card-selected': isLookSelected(look.id) }">
-                    <div class="look-card-toolbar">
-                        <label class="look-select-control" title="Select for multi-trigger">
-                            <input type="checkbox"
-                                   :checked="isLookSelected(look.id)"
-                                   @change.stop="toggleLookSelection(look.id)">
-                            <span></span>
-                        </label>
-                        <span class="look-live-indicator" x-show="isLookActive(look.id)">Live</span>
-                        <button class="look-icon-btn look-delete-btn" title="Delete Look"
-                                @click.stop="deleteLook(look)">&times;</button>
+        <div class="cue-board-header">
+            <div>
+                <span class="section-title" style="margin:0">Cue Board</span>
+                <span class="text-sm text-muted" x-text="cues.length + ' cue' + (cues.length === 1 ? '' : 's')"></span>
+            </div>
+        </div>
+
+        <div class="cue-card-grid">
+            <template x-for="(cue, idx) in cues" :key="cue.number + '-' + idx">
+                <div class="cue-card" :class="cueCardClass(idx)" role="button" tabindex="0"
+                     @click="triggerCue(cue.number)" @keydown.enter.prevent="triggerCue(cue.number)" @keydown.space.prevent="triggerCue(cue.number)">
+                    <div class="cue-card-topline">
+                        <span class="cue-card-number" x-text="cue.number"></span>
+                        <button class="btn btn-sm cue-card-edit" @click.stop="openEditCue(cue, idx)">Edit</button>
                     </div>
-                    <button class="look-card-main" @click="activateLook(look.id)">
-                        <div class="look-card-name" x-text="look.name"></div>
-                        <div class="look-card-info text-muted" x-text="lookOutputs(look)"></div>
-                    </button>
-                    <div class="look-target-strip">
-                        <template x-for="dev in lookTargetDevices(look).slice(0, 4)" :key="dev.ip">
-                            <span class="look-target-pill" :class="targetPillClass(dev)" x-text="dev.name || dev.ip"></span>
+                    <div class="cue-card-main">
+                        <span class="cue-card-name" x-text="cue.name"></span>
+                        <span class="cue-card-summary" x-text="cueLookSummary(cue)"></span>
+                    </div>
+                    <div class="cue-assignment-strip">
+                        <template x-for="(assignment, ai) in cueAssignments(cue).slice(0, 2)" :key="ai">
+                            <span class="cue-assignment-pill">
+                                <span x-text="assignmentName(assignment)"></span>
+                                <span class="cue-assignment-target" x-text="assignmentTargetLabel(assignment)"></span>
+                            </span>
                         </template>
-                        <span class="look-target-pill look-target-pill-empty" x-show="lookTargetDevices(look).length === 0">No targets</span>
-                        <span class="look-target-more" x-show="lookTargetDevices(look).length > 4"
-                              x-text="'+' + (lookTargetDevices(look).length - 4)"></span>
+                        <span class="look-target-more" x-show="cueAssignments(cue).length > 2"
+                              x-text="'+' + (cueAssignments(cue).length - 2)"></span>
                     </div>
-                    <div class="look-card-actions">
-                        <button class="btn btn-sm btn-primary" @click="activateLook(look.id)">Trigger</button>
-                        <button class="btn btn-sm" x-show="isLookActive(look.id)" @click="deactivateLook(look.id)">Stop</button>
-                        <button class="btn btn-sm" @click="openTargetEditor(look)">Targets</button>
+                    <div class="cue-card-meta">
+                        <span class="cue-card-state" x-show="isActive(idx)">Live</span>
+                        <span x-text="(cue.fade_time || 0) + 's fade'"></span>
                     </div>
                 </div>
             </template>
         </div>
-        <p class="text-muted text-sm" x-show="looks.length === 0" style="margin-top:8px">
-            No looks saved yet. Create looks in the Look Mixer first.
-        </p>
-
-        <!-- Crossfade progress bar -->
-        <div class="crossfade-bar-container" x-show="crossfadeActive">
-            <div class="crossfade-bar" :style="'width:' + (crossfadeProgress * 100) + '%'"></div>
+        <div class="cue-empty-state" x-show="cues.length === 0">
+            No cues yet. Add a cue from saved Looks to build the production board.
         </div>
 
-        <!-- Target editor modal -->
-        <div class="modal-overlay" x-show="targetModal" @click.self="targetModal = false">
+        <div class="modal-overlay" x-show="cueModal" @click.self="closeCueModal()" x-cloak>
+            <div class="modal cue-modal">
+                <div class="modal-title" x-text="cueEditIndex >= 0 ? 'Edit Cue' : 'Add Cue'"></div>
+                <div class="cue-modal-grid" x-show="cueForm">
+                    <div class="form-group">
+                        <label class="form-label">Cue Name</label>
+                        <input class="form-input" type="text" x-model="cueForm.name" autocomplete="off">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Fade Time (s)</label>
+                        <input class="form-input" type="number" min="0" max="30" step="0.5" x-model.number="cueForm.fade_time">
+                    </div>
+                </div>
+                <div class="cue-assignment-editor" x-show="cueForm">
+                    <div class="cue-assignment-editor-header">
+                        <span class="section-title" style="margin:0">Looks</span>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" @click="addLookAssignment()" :disabled="looks.length === 0">Add Look</button>
+                            <button class="btn btn-sm btn-danger" @click="addBlackoutAssignment()">Add Blackout</button>
+                        </div>
+                    </div>
+                    <template x-for="(assignment, ai) in cueForm.assignments" :key="ai">
+                        <div class="cue-assignment-row">
+                            <template x-if="assignment.action === 'blackout'">
+                                <div class="cue-assignment-blackout">
+                                    <div class="cue-assignment-preview blackout-preview"></div>
+                                    <div>
+                                        <div class="look-card-name">Blackout</div>
+                                        <div class="text-sm text-muted">Fade every target to black.</div>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="assignment.action === 'look'">
+                                <div class="cue-assignment-look-grid">
+                                    <div class="cue-assignment-preview" :style="lookThumbStyle(assignmentLook(assignment))"></div>
+                                    <div class="form-group">
+                                        <label class="form-label">Look</label>
+                                        <select class="form-select" x-model="assignment.look_id">
+                                            <template x-for="look in looks" :key="look.id">
+                                                <option :value="look.id" x-text="look.name"></option>
+                                            </template>
+                                        </select>
+                                        <div class="text-sm text-muted" x-text="lookOutputs(assignmentLook(assignment)) || 'No outputs'"></div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Target</label>
+                                        <select class="form-select" x-model="assignment.target_mode">
+                                            <option value="look">Look target</option>
+                                            <option value="all">All devices</option>
+                                            <option value="group">Device group</option>
+                                            <option value="devices">Selected devices</option>
+                                        </select>
+                                        <div class="text-sm text-muted" x-text="assignmentTargetLabel(assignment)"></div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'group'">
+                                <label class="form-label">Group</label>
+                                <select class="form-select" x-model="assignment.device_group_id">
+                                    <template x-for="group in deviceGroups" :key="group.id">
+                                        <option :value="group.id" x-text="group.name"></option>
+                                    </template>
+                                </select>
+                                <p class="text-muted text-sm" x-show="deviceGroups.length === 0">No groups defined.</p>
+                            </div>
+                            <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'devices'">
+                                <label class="form-label">Devices</label>
+                                <div class="device-checklist target-device-grid">
+                                    <template x-for="dev in devices" :key="dev.ip">
+                                        <label class="device-check-item target-device-item"
+                                               :class="{ active: (assignment.device_ips || []).includes(dev.ip) }">
+                                            <input type="checkbox"
+                                                   :checked="(assignment.device_ips || []).includes(dev.ip)"
+                                                   @change="toggleAssignmentDevice(assignment, dev.ip)">
+                                            <span x-text="dev.name"></span>
+                                            <span class="text-muted text-sm" x-text="dev.ip"></span>
+                                        </label>
+                                    </template>
+                                </div>
+                            </div>
+                            <div class="cue-assignment-actions">
+                                <button class="btn btn-sm" @click="moveAssignment(ai, -1)" :disabled="ai === 0">Up</button>
+                                <button class="btn btn-sm" @click="moveAssignment(ai, 1)" :disabled="ai === cueForm.assignments.length - 1">Down</button>
+                                <button class="btn btn-sm btn-danger" @click="removeAssignment(ai)">Remove</button>
+                            </div>
+                        </div>
+                    </template>
+                    <p class="text-muted text-sm" x-show="cueForm.assignments.length === 0">Add at least one Look or Blackout item.</p>
+                </div>
+                <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet. Create Looks in the Look Mixer first, or add a Blackout cue.</p>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" x-show="cueEditIndex >= 0" @click="deleteCueFromModal()">Delete Cue</button>
+                    <button class="btn" @click="closeCueModal()">Cancel</button>
+                    <button class="btn btn-primary" @click="saveCueForm()" :disabled="!cueFormValid">Save Cue</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-overlay" x-show="targetModal" @click.self="targetModal = false" x-cloak>
             <div class="modal">
                 <div class="modal-title">Edit Look Targets</div>
                 <div class="target-editor-heading">
@@ -904,165 +971,6 @@
                     <button class="btn btn-primary" @click="saveTargetEditor()">Save Targets</button>
                 </div>
             </div>
-        </div>
-
-        <!-- Cue List feature parked for this scope. Backend remains intact while the UI focuses on the control board. -->
-        <div x-show="false" style="display:none">
-        <!-- ── Cue System ── -->
-        <div class="flex justify-between items-center" style="margin-top:24px;margin-bottom:12px">
-            <h2 class="section-title" style="margin:0">Cue List</h2>
-            <button class="btn" @click="openAddCue()">+ Add Cue</button>
-        </div>
-
-        <!-- Transport -->
-        <div class="controller-transport">
-            <div class="controller-transport-main">
-                <button class="btn-go" @click="go()">GO</button>
-                <button class="btn-stop" @click="stop()">STOP</button>
-            </div>
-            <div class="controller-status">
-                <div class="controller-now" x-show="playing && currentIndex >= 0">
-                    <span class="controller-label">NOW</span>
-                    <span class="controller-cue-name" x-text="currentIndex >= 0 && cues[currentIndex] ? cues[currentIndex].name : '-'"></span>
-                    <span class="controller-elapsed" x-text="elapsed.toFixed(1) + 's'"></span>
-                </div>
-                <div class="controller-next">
-                    <span class="controller-label">NEXT</span>
-                    <span class="controller-cue-name" x-text="nextCueName()"></span>
-                </div>
-            </div>
-            <div class="text-sm text-muted" style="margin-top:8px">
-                Space = GO &middot; Esc = STOP
-            </div>
-        </div>
-
-        <!-- Cue list table -->
-        <table class="cue-list">
-            <thead>
-                <tr>
-                    <th style="width:50px">#</th>
-                    <th>Name</th>
-                    <th>Look</th>
-                    <th style="width:70px">Target</th>
-                    <th style="width:60px">Fade</th>
-                    <th style="width:80px">Auto</th>
-                    <th style="width:130px">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <template x-for="(cue, idx) in cues" :key="idx">
-                    <tr class="cue-row"
-                        :class="{ active: isActive(idx), standby: isStandby(idx) }">
-                        <td class="cue-number" x-text="cue.number"></td>
-                        <td x-text="cue.name"></td>
-                        <td class="text-sm text-muted" x-text="lookName(cue.look_id)"></td>
-                        <td class="text-sm text-muted" x-text="cueTargetLabel(cue)"></td>
-                        <td>
-                            <input type="number" class="form-input form-input-sm"
-                                   :value="cue.fade_time || 0" min="0" max="30" step="0.5"
-                                   @change="updateCueField(idx, 'fade_time', parseFloat($event.target.value))"
-                                   style="width:50px">
-                        </td>
-                        <td>
-                            <template x-if="cue.auto_follow">
-                                <span class="auto-follow-badge"
-                                      @click="updateCueField(idx, 'auto_follow', false)"
-                                      x-text="(cue.follow_delay || 0) + 's'"
-                                      title="Auto-follow enabled. Click to disable."></span>
-                            </template>
-                            <template x-if="!cue.auto_follow">
-                                <button class="btn btn-sm"
-                                        @click="updateCueField(idx, 'auto_follow', true); updateCueField(idx, 'follow_delay', 5)"
-                                        title="Enable auto-follow">--</button>
-                            </template>
-                        </td>
-                        <td>
-                            <div class="btn-group">
-                                <button class="btn btn-sm" @click="goToCue(cue.number)">Go</button>
-                                <button class="btn btn-sm" @click="moveCue(idx, -1)"
-                                        :disabled="idx === 0">^</button>
-                                <button class="btn btn-sm" @click="moveCue(idx, 1)"
-                                        :disabled="idx === cues.length-1">v</button>
-                                <button class="btn btn-sm btn-danger"
-                                        @click="removeCue(idx)">&times;</button>
-                            </div>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
-        </table>
-
-        <p class="text-muted mt-2" x-show="cues.length === 0">No cues yet. Save some Looks in the Look Mixer, then add them as cues here.</p>
-
-        <!-- Add cue modal -->
-        <div class="modal-overlay" x-show="addModal" @click.self="addModal = false">
-            <div class="modal">
-                <div class="modal-title">Add Cue</div>
-                <div class="form-group">
-                    <label class="form-label">Look</label>
-                    <select class="form-select" x-model="addLookId">
-                        <template x-for="l in looks" :key="l.id">
-                            <option :value="l.id" x-text="l.name"></option>
-                        </template>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Fade Time (s)</label>
-                    <input type="number" class="form-input" x-model.number="addFadeTime"
-                           min="0" max="30" step="0.5">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Target Devices</label>
-                    <select class="form-select" x-model="addTargetMode">
-                        <option value="look">Look target</option>
-                        <option value="all">All connected devices</option>
-                        <option value="group">Device group</option>
-                        <option value="devices">Individual devices</option>
-                    </select>
-                </div>
-                <div class="form-group" x-show="addTargetMode === 'group'">
-                    <label class="form-label">Group</label>
-                    <select class="form-select" x-model="addGroupId">
-                        <template x-for="g in deviceGroups" :key="g.id">
-                            <option :value="g.id" x-text="g.name"></option>
-                        </template>
-                    </select>
-                    <p class="text-muted text-sm" x-show="deviceGroups.length === 0">No groups defined.</p>
-                </div>
-                <div class="form-group" x-show="addTargetMode === 'devices'">
-                    <label class="form-label">Devices</label>
-                    <div class="device-checklist">
-                        <template x-for="d in devices" :key="d.ip">
-                            <label class="device-check-item">
-                                <input type="checkbox" :checked="addDeviceIps.includes(d.ip)"
-                                       @change="toggleDeviceIp(d.ip)">
-                                <span x-text="d.name"></span>
-                                <span class="text-muted text-sm" x-text="d.ip"></span>
-                            </label>
-                        </template>
-                    </div>
-                    <p class="text-muted text-sm" x-show="devices.length === 0">No devices found.</p>
-                </div>
-                <div class="target-summary" x-text="addTargetSummary()"></div>
-                <div class="form-group">
-                    <label class="flex items-center gap-2" style="cursor:pointer">
-                        <input type="checkbox" x-model="addAutoFollow">
-                        <span class="form-label" style="margin:0">Auto-follow</span>
-                    </label>
-                </div>
-                <div class="form-group" x-show="addAutoFollow">
-                    <label class="form-label">Follow Delay (s)</label>
-                    <input type="number" class="form-input" x-model.number="addFollowDelay"
-                           min="0" max="120" step="0.5">
-                </div>
-                <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet.</p>
-                <div class="modal-actions">
-                    <button class="btn" @click="addModal = false">Cancel</button>
-                    <button class="btn btn-primary" @click="addCue()"
-                            :disabled="!addLookId">Add</button>
-                </div>
-            </div>
-        </div>
         </div>
     </div>
 

@@ -255,6 +255,7 @@ The effects engine uses a **Look** architecture. In **V3.0**, animation state is
 In **V3.5**, this is extended with a clip/look workflow:
 - **Clips** are saved effect presets (effect type, colors, speed, playback mode) scoped to an output type.
 - **Looks** are timeline-based compositions of clips across multiple tracks, with per-segment timing and crossfades.
+- **Cues** are triggerable production steps. A cue contains one or more assignments, where each assignment triggers a Look against its own target set, or triggers a virtual blackout.
 - **Playback sources** determine what drives the outputs: `designer` (live effect editing), `mixer` (look preview), `controller` (cue list playback), or `idle` (black).
 
 Each Look has two output slots matching the current V3.5 receiver profile contract. Each slot has its own type, effect, colors, speed, and parameters.
@@ -318,6 +319,25 @@ The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. A
 | `POST /api/mixer/stop_preview` | `{}` | Stop mixer preview, return to idle |
 
 ### POST Endpoints — Cue Controller
+
+Cue payloads use the assignment model below. Older single-Look cues with top-level `look_id`, `target_mode`, `device_group_id`, and `device_ips` are still accepted and normalized into a one-item `assignments` list.
+
+```json
+{
+  "number": 1,
+  "name": "Opening",
+  "fade_time": 2.0,
+  "auto_follow": false,
+  "follow_delay": 5.0,
+  "assignments": [
+    {"action": "look", "look_id": "look-a", "target_mode": "look"},
+    {"action": "look", "look_id": "look-b", "target_mode": "devices", "device_ips": ["192.168.1.2"]},
+    {"action": "blackout"}
+  ]
+}
+```
+
+`target_mode` values are `look`, `all`, `group`, and `devices`. A cue containing a `blackout` assignment is treated as a virtual blackout cue.
 
 | Route | Body | Description |
 |---|---|---|

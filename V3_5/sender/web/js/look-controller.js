@@ -1,94 +1,95 @@
 /**
- * look-controller.js — Look Controller Alpine component.
- * Control board for saved Looks and target-device playback.
+ * look-controller.js - Cue Controller Alpine component.
+ * Manual button board for cue playback.
  */
 
 document.addEventListener("alpine:init", () => {
-
     Alpine.data("lookController", () => ({
-        // -- Control Panel --
         looks: [],
-        activeLookId: null,
-        activeLookIds: [],
-        selectedLookIds: [],
-        defaultFadeTime: 0,
-
-        // -- Crossfade state --
-        crossfadeActive: false,
-        crossfadeProgress: 0,
-        blackout: false,
-
-        // -- Cue list --
         cues: [],
         currentIndex: -1,
         playing: false,
         elapsed: 0,
-        _pollInterval: null,
-        _looksChangedHandler: null,
-        _modeChangedHandler: null,
+        activeLookId: null,
+        activeLookIds: [],
+        selectedLookIds: [],
+        defaultFadeTime: 0,
+        crossfadeActive: false,
+        crossfadeProgress: 0,
+        blackout: false,
+        controllerPrepared: false,
+        preparingController: false,
 
-        // -- Modals --
-        addModal: false,
-        addLookId: "",
-        addFadeTime: 2.0,
-        addAutoFollow: false,
-        addFollowDelay: 5.0,
-        addTargetMode: "look",       // "look", "all", "group", "devices"
-        addGroupId: "",
-        addDeviceIps: [],
+        cueModal: false,
+        cueEditIndex: -1,
+        cueForm: {
+            number: 1,
+            name: 'Cue 1',
+            fade_time: 2.0,
+            auto_follow: false,
+            follow_delay: 5.0,
+            assignments: [],
+        },
         targetModal: false,
         targetLookId: "",
         targetDeviceIps: [],
 
+        _pollInterval: null,
+        _looksChangedHandler: null,
+        _modeChangedHandler: null,
+
         async init() {
             await this.loadLooks();
             await this.refresh();
-            // Keyboard shortcuts for the visible control board only.
-            this._keyHandler = (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-                if (Alpine.store("app").mode !== "controller") return;
-                if (e.code === "Space") { e.preventDefault(); this.triggerSelectedLooks(); }
-                if (e.code === "Escape") { e.preventDefault(); this.stop(); }
-            };
-            document.addEventListener("keydown", this._keyHandler);
             this._looksChangedHandler = () => this.loadLooks();
-            this._modeChangedHandler = (event) => {
-                if (event?.detail?.mode === "controller") this.loadLooks();
+            this._modeChangedHandler = async (event) => {
+                if (event?.detail?.mode === "controller") {
+                    await this.loadLooks();
+                    await this.refresh();
+                    await this.prepareControllerMode();
+                } else {
+                    this.controllerPrepared = false;
+                }
             };
             document.addEventListener("primus:looks-changed", this._looksChangedHandler);
             document.addEventListener("primus:mode-changed", this._modeChangedHandler);
             this._pollInterval = setInterval(() => this._poll(), 200);
+            if (Alpine.store("app").mode === "controller") await this.prepareControllerMode();
         },
 
         destroy() {
-            if (this._keyHandler) document.removeEventListener("keydown", this._keyHandler);
-            if (this._looksChangedHandler) {
-                document.removeEventListener("primus:looks-changed", this._looksChangedHandler);
-            }
-            if (this._modeChangedHandler) {
-                document.removeEventListener("primus:mode-changed", this._modeChangedHandler);
-            }
+            if (this._looksChangedHandler) document.removeEventListener("primus:looks-changed", this._looksChangedHandler);
+            if (this._modeChangedHandler) document.removeEventListener("primus:mode-changed", this._modeChangedHandler);
             if (this._pollInterval) clearInterval(this._pollInterval);
+        },
+
+        get playbackInfo() { return Alpine.store("app").playback; },
+        get devices() { return Alpine.store("app").state?.devices || []; },
+        get deviceGroups() { return Alpine.store("app").state?.device_groups || []; },
+        get connectedCount() { return this.devices.filter(device => device.connected).length; },
+        get cueFormValid() {
+            if (!this.cueForm) return false;
+            return this.cueForm.assignments.some(assignment => {
+                if (assignment.action === 'blackout') return true;
+                return !!assignment.look_id;
+            });
         },
 
         async _poll() {
             if (Alpine.store("app").mode !== "controller") return;
             try {
                 const data = await api("GET", "/api/cues");
-                this.elapsed = data.elapsed || 0;
-                this.currentIndex = data.current_index ?? -1;
-                this.playing = data.playing || false;
-                this.activeLookId = data.active_look_id || null;
-                this.activeLookIds = data.active_look_ids || (this.activeLookId ? [this.activeLookId] : []);
-                this.crossfadeActive = data.crossfade_active || false;
-                this.crossfadeProgress = data.crossfade_progress ?? 1;
-                this.blackout = data.blackout || false;
-            } catch(e) {}
+                this.applyCueState(data);
+            } catch (e) {}
         },
 
         async refresh() {
             const data = await api("GET", "/api/cues");
-            this.cues = data.cues || [];
+            this.applyCueState(data);
+        },
+
+        applyCueState(data) {
+            this.cues = (data.cues || []).map((cue, idx) => this.normalizeCue(cue, idx + 1));
             this.currentIndex = data.current_index ?? -1;
             this.playing = data.playing || false;
             this.activeLookId = data.active_look_id || null;
@@ -96,65 +97,138 @@ document.addEventListener("alpine:init", () => {
             this.crossfadeActive = data.crossfade_active || false;
             this.crossfadeProgress = data.crossfade_progress ?? 1;
             this.blackout = data.blackout || false;
+            this.elapsed = data.elapsed || 0;
         },
 
         async loadLooks() {
             this.looks = await api("GET", "/api/looks");
         },
 
+        async prepareControllerMode() {
+            if (this.controllerPrepared || this.preparingController) return;
+            this.preparingController = true;
+            try {
+                await Alpine.store("conn").connectAll();
+                await api("POST", "/api/controller/blackout", { fade_time: 0 });
+                this.controllerPrepared = true;
+                await this.refresh();
+                Alpine.store("app").showNotice("Cue Controller ready: saved devices connected and output blacked out.", "success");
+            } catch (e) {
+                Alpine.store("app").showApiError("Cue Controller setup failed", e);
+            } finally {
+                this.preparingController = false;
+            }
+        },
+
+        cleanTargetMode(value) {
+            return ['look', 'all', 'group', 'devices'].includes(value) ? value : 'look';
+        },
+
+        normalizeAssignment(raw = {}, cue = {}) {
+            const action = raw.action || raw.type || (raw.blackout ? 'blackout' : 'look');
+            if (action === 'blackout') return { action: 'blackout' };
+            const assignment = {
+                action: 'look',
+                look_id: raw.look_id || '',
+                target_mode: this.cleanTargetMode(raw.target_mode || cue.target_mode || 'look'),
+                device_group_id: raw.device_group_id || cue.device_group_id || '',
+                device_ips: Array.isArray(raw.device_ips) ? [...raw.device_ips] : (Array.isArray(cue.device_ips) ? [...cue.device_ips] : []),
+                note: raw.note || '',
+            };
+            if (assignment.target_mode !== 'group') assignment.device_group_id = '';
+            if (assignment.target_mode !== 'devices') assignment.device_ips = [];
+            return assignment;
+        },
+
+        normalizeCue(cue = {}, fallbackNumber = 1) {
+            let assignments = [];
+            if (cue.blackout) assignments.push({ action: 'blackout' });
+            if (Array.isArray(cue.assignments)) {
+                assignments = assignments.concat(cue.assignments.map(item => this.normalizeAssignment(item, cue)));
+            }
+            if (!assignments.length && cue.look_id) {
+                assignments.push(this.normalizeAssignment({
+                    look_id: cue.look_id,
+                    target_mode: cue.target_mode || 'look',
+                    device_group_id: cue.device_group_id || '',
+                    device_ips: cue.device_ips || [],
+                }, cue));
+            }
+            const number = Number.isFinite(Number(cue.number)) ? Number(cue.number) : fallbackNumber;
+            return {
+                number,
+                name: cue.name || ('Cue ' + number),
+                fade_time: Number.isFinite(Number(cue.fade_time)) ? Number(cue.fade_time) : 0,
+                auto_follow: !!cue.auto_follow,
+                follow_delay: Number.isFinite(Number(cue.follow_delay)) ? Number(cue.follow_delay) : 5,
+                assignments,
+            };
+        },
+
+        serializeCue(form) {
+            const assignments = form.assignments
+                .map(assignment => {
+                    if (assignment.action === 'blackout') return { action: 'blackout' };
+                    const out = {
+                        action: 'look',
+                        look_id: assignment.look_id,
+                        target_mode: this.cleanTargetMode(assignment.target_mode),
+                    };
+                    if (assignment.note) out.note = assignment.note;
+                    if (out.target_mode === 'group' && assignment.device_group_id) {
+                        out.device_group_id = assignment.device_group_id;
+                    }
+                    if (out.target_mode === 'devices') {
+                        out.device_ips = [...(assignment.device_ips || [])];
+                    }
+                    return out;
+                })
+                .filter(assignment => assignment.action === 'blackout' || assignment.look_id);
+            const cue = {
+                number: form.number,
+                name: form.name || ('Cue ' + form.number),
+                fade_time: Number(form.fade_time) || 0,
+                auto_follow: false,
+                follow_delay: 0,
+                assignments,
+            };
+            const firstLook = assignments.length === 1 && assignments[0].action === 'look' ? assignments[0] : null;
+            if (firstLook) {
+                cue.look_id = firstLook.look_id;
+                cue.target_mode = firstLook.target_mode;
+                if (firstLook.device_group_id) cue.device_group_id = firstLook.device_group_id;
+                if (firstLook.device_ips) cue.device_ips = [...firstLook.device_ips];
+            }
+            if (assignments.length && assignments.every(assignment => assignment.action === 'blackout')) {
+                cue.blackout = true;
+            }
+            return cue;
+        },
+
+        lookById(lookId) {
+            return this.looks.find(look => look.id === lookId) || null;
+        },
+
         lookName(lookId) {
-            const l = this.looks.find(l => l.id === lookId);
-            return l ? l.name : "(unknown)";
-        },
-
-        activeLooksLabel() {
-            const count = this.activeLookIds.length;
-            if (!count) return 'No Looks live';
-            if (count === 1) return this.lookName(this.activeLookIds[0]);
-            return count + ' Looks live';
-        },
-
-        get playbackInfo() { return Alpine.store("app").playback; },
-        get devices() { return Alpine.store("app").state?.devices || []; },
-        get deviceGroups() { return Alpine.store("app").state?.device_groups || []; },
-
-        controllerPanelStateClass() {
-            if (this.playbackInfo.source === 'controller') {
-                return 'panel-owner-live';
-            }
-            if (this.playing || this.activeLookId) {
-                return 'panel-owner-warn';
-            }
-            return 'panel-owner-idle';
-        },
-
-        controllerPanelTitle() {
-            if (this.playbackInfo.source === 'controller') {
-                return 'Controller owns output';
-            }
-            if (this.playing || this.activeLookId) {
-                return 'Controller is queued but not live';
-            }
-            return 'Controller is standing by';
-        },
-
-        controllerPanelDetail() {
-            if (this.playbackInfo.source === 'controller') {
-                return 'Control board output is live on ' + this.playbackInfo.target_label.toLowerCase() + '.';
-            }
-            if (this.playing || this.activeLookId) {
-                return 'Controller state exists, but output is currently owned by ' + this.playbackInfo.label.toLowerCase() + '.';
-            }
-            return 'Trigger a Look to take output ownership from idle.';
+            return this.lookById(lookId)?.name || "(unknown)";
         },
 
         lookOutputs(look) {
-            return (look.outputs || []).map(o => o.port + ':' + o.type).join(', ');
+            return (look?.outputs || []).map(output => output.port + ':' + output.type).join(', ');
+        },
+
+        lookThumbStyle(look) {
+            if (!look) return 'background: var(--bg-secondary)';
+            const tracks = look.tracks || [];
+            const hasSegments = tracks.some(track => (track.segments || []).length > 0);
+            return hasSegments
+                ? 'background: linear-gradient(135deg, var(--accent-dim), var(--bg-tertiary))'
+                : 'background: var(--bg-secondary)';
         },
 
         lookDeviceIps(look) {
             if (!Array.isArray(look?.device_ips)) return null;
-            const currentIps = this.devices.map(d => d.ip);
+            const currentIps = this.devices.map(device => device.ip);
             const ips = [];
             for (const ip of look.device_ips) {
                 if (currentIps.includes(ip) && !ips.includes(ip)) ips.push(ip);
@@ -167,7 +241,7 @@ document.addEventListener("alpine:init", () => {
             if (ips === null) return 'All devices';
             if (!ips.length) return 'No target devices';
             if (ips.length === 1) {
-                const dev = this.devices.find(d => d.ip === ips[0]);
+                const dev = this.devices.find(device => device.ip === ips[0]);
                 return dev ? dev.name : ips[0];
             }
             return ips.length + ' target devices';
@@ -176,34 +250,234 @@ document.addEventListener("alpine:init", () => {
         lookTargetDevices(look) {
             const ips = this.lookDeviceIps(look);
             if (ips === null) return this.devices;
-            return ips.map(ip => this.devices.find(d => d.ip === ip) || {
+            return ips.map(ip => this.devices.find(device => device.ip === ip) || {
                 ip,
                 name: ip,
                 connected: false,
             });
         },
 
+        assignmentLook(assignment) {
+            return assignment?.action === 'look' ? this.lookById(assignment.look_id) : null;
+        },
+
+        assignmentName(assignment) {
+            if (assignment?.action === 'blackout') return 'Blackout';
+            return this.lookName(assignment?.look_id);
+        },
+
+        assignmentTargetLabel(assignment) {
+            if (assignment?.action === 'blackout') return 'All devices';
+            if (assignment.target_mode === 'all') return 'All devices';
+            if (assignment.target_mode === 'group') {
+                const group = this.deviceGroups.find(item => item.id === assignment.device_group_id);
+                return group ? group.name : 'Missing group';
+            }
+            if (assignment.target_mode === 'devices') {
+                const count = (assignment.device_ips || []).length;
+                if (!count) return 'No target devices';
+                if (count === 1) {
+                    const dev = this.devices.find(device => device.ip === assignment.device_ips[0]);
+                    return dev ? dev.name : assignment.device_ips[0];
+                }
+                return count + ' selected devices';
+            }
+            const look = this.assignmentLook(assignment);
+            return look ? this.lookTargetLabel(look) : 'Look target';
+        },
+
+        cueAssignments(cue) {
+            return this.normalizeCue(cue).assignments;
+        },
+
+        cueLookSummary(cue) {
+            const assignments = this.cueAssignments(cue);
+            if (!assignments.length) return 'No assignments';
+            return assignments.map(assignment => this.assignmentName(assignment)).join(' + ');
+        },
+
+        cueTargetSummary(cue) {
+            const labels = this.cueAssignments(cue).map(assignment => this.assignmentTargetLabel(assignment));
+            const unique = [...new Set(labels)];
+            if (!unique.length) return 'No targets';
+            return unique.join(' / ');
+        },
+
+        cueCardClass(idx) {
+            return {
+                'cue-card-active': this.isActive(idx),
+            };
+        },
+
+        activeLooksLabel() {
+            if (this.blackout) return 'Blackout';
+            const count = this.activeLookIds.length;
+            if (!count) return 'No Looks live';
+            if (count === 1) return this.lookName(this.activeLookIds[0]);
+            return count + ' Looks live';
+        },
+
+        progressPercent() {
+            return Math.round((this.crossfadeProgress || 0) * 100);
+        },
+
+        async triggerCue(number) {
+            try {
+                await api("POST", "/api/cues/goto", { number });
+                await this.refresh();
+            } catch (e) {
+                Alpine.store("app").showApiError('Cue trigger failed', e);
+            }
+        },
+
+        async doBlackout() {
+            try {
+                await api("POST", "/api/controller/blackout", { fade_time: this.defaultFadeTime });
+                await this.refresh();
+            } catch (e) {
+                Alpine.store("app").showApiError('Blackout failed', e);
+            }
+        },
+
+        nextCueNumber() {
+            if (!this.cues.length) return 1;
+            return Math.max(...this.cues.map(cue => cue.number || 0)) + 1;
+        },
+
+        blankCueForm(number = null) {
+            const cueNumber = number || this.nextCueNumber();
+            return {
+                number: cueNumber,
+                name: 'Cue ' + cueNumber,
+                fade_time: 2.0,
+                auto_follow: false,
+                follow_delay: 5.0,
+                assignments: [],
+            };
+        },
+
+        openAddCue() {
+            this.cueEditIndex = -1;
+            this.cueForm = this.blankCueForm();
+            if (this.looks.length) this.addLookAssignment();
+            this.cueModal = true;
+        },
+
+        openEditCue(cue, idx) {
+            const normalized = this.normalizeCue(cue, idx + 1);
+            this.cueEditIndex = idx;
+            this.cueForm = JSON.parse(JSON.stringify(normalized));
+            this.cueModal = true;
+        },
+
+        closeCueModal() {
+            this.cueModal = false;
+            this.cueEditIndex = -1;
+            this.cueForm = this.blankCueForm();
+        },
+
+        addLookAssignment() {
+            if (!this.cueForm) this.cueForm = this.blankCueForm();
+            this.cueForm.assignments = this.cueForm.assignments.filter(item => item.action !== 'blackout');
+            this.cueForm.assignments.push({
+                action: 'look',
+                look_id: this.looks[0]?.id || '',
+                target_mode: 'look',
+                device_group_id: this.deviceGroups[0]?.id || '',
+                device_ips: [],
+                note: '',
+            });
+        },
+
+        addBlackoutAssignment() {
+            if (!this.cueForm) this.cueForm = this.blankCueForm();
+            this.cueForm.assignments = [{ action: 'blackout' }];
+            if (!this.cueForm.name || this.cueForm.name.startsWith('Cue ')) this.cueForm.name = 'Blackout';
+        },
+
+        removeAssignment(idx) {
+            if (!this.cueForm) return;
+            this.cueForm.assignments.splice(idx, 1);
+        },
+
+        moveAssignment(idx, dir) {
+            const next = idx + dir;
+            if (!this.cueForm || next < 0 || next >= this.cueForm.assignments.length) return;
+            const item = this.cueForm.assignments[idx];
+            this.cueForm.assignments.splice(idx, 1);
+            this.cueForm.assignments.splice(next, 0, item);
+        },
+
+        toggleAssignmentDevice(assignment, ip) {
+            if (!assignment.device_ips) assignment.device_ips = [];
+            if (assignment.device_ips.includes(ip)) {
+                assignment.device_ips = assignment.device_ips.filter(savedIp => savedIp !== ip);
+            } else {
+                assignment.device_ips = [...assignment.device_ips, ip];
+            }
+        },
+
+        async saveCueForm() {
+            if (!this.cueFormValid) return;
+            const cue = this.serializeCue(this.cueForm);
+            if (this.cueEditIndex >= 0) {
+                this.cues.splice(this.cueEditIndex, 1, cue);
+            } else {
+                this.cues.push(cue);
+            }
+            this.cues.forEach((item, idx) => { item.number = idx + 1; });
+            try {
+                await this.saveCues();
+                this.closeCueModal();
+                await this.refresh();
+            } catch (e) {
+                Alpine.store("app").showApiError('Cue save failed', e);
+            }
+        },
+
+        async deleteCueFromModal() {
+            if (this.cueEditIndex < 0 || !confirm('Delete this cue?')) return;
+            await this.removeCue(this.cueEditIndex);
+            this.closeCueModal();
+        },
+
+        async removeCue(idx) {
+            this.cues.splice(idx, 1);
+            this.cues.forEach((cue, cueIndex) => { cue.number = cueIndex + 1; });
+            await this.saveCues();
+            await this.refresh();
+        },
+
+        async saveCues() {
+            await api("POST", "/api/cues", { cues: this.cues.map(cue => this.serializeCue(this.normalizeCue(cue))) });
+        },
+
+        isActive(idx) { return this.playing && idx === this.currentIndex; },
+
         targetPillClass(dev) {
             return dev?.connected ? 'look-target-pill-live' : 'look-target-pill-offline';
         },
 
-        selectedAddLook() {
-            return this.looks.find(l => l.id === this.addLookId) || null;
+        isLookActive(lookId) {
+            return this.activeLookIds.includes(lookId) && !this.blackout;
         },
 
-        lookThumbStyle(look) {
-            // Gradient from first track's first segment colors, or fallback
-            const tracks = look.tracks || [];
-            const colors = [];
-            for (const t of tracks) {
-                for (const seg of (t.segments || [])) {
-                    return `background:linear-gradient(135deg, var(--accent-dim), var(--bg-tertiary))`;
-                }
+        isLookSelected(lookId) {
+            return this.selectedLookIds.includes(lookId);
+        },
+
+        toggleLookSelection(lookId) {
+            if (this.isLookSelected(lookId)) {
+                this.selectedLookIds = this.selectedLookIds.filter(id => id !== lookId);
+            } else {
+                this.selectedLookIds = [...this.selectedLookIds, lookId];
             }
-            return `background: var(--bg-tertiary)`;
         },
 
-        // ── Control Panel ──
+        clearSelectedLooks() {
+            this.selectedLookIds = [];
+        },
+
         async activateLook(lookId) {
             try {
                 const result = await api("POST", "/api/controller/activate", {
@@ -241,38 +515,11 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        async doBlackout() {
-            await api("POST", "/api/controller/blackout", {
-                fade_time: this.defaultFadeTime,
-            });
-            await this.refresh();
-        },
-
-        isLookActive(lookId) {
-            return this.activeLookIds.includes(lookId) && !this.blackout;
-        },
-
-        isLookSelected(lookId) {
-            return this.selectedLookIds.includes(lookId);
-        },
-
-        toggleLookSelection(lookId) {
-            if (this.isLookSelected(lookId)) {
-                this.selectedLookIds = this.selectedLookIds.filter(id => id !== lookId);
-            } else {
-                this.selectedLookIds = [...this.selectedLookIds, lookId];
-            }
-        },
-
-        clearSelectedLooks() {
-            this.selectedLookIds = [];
-        },
-
         openTargetEditor(look) {
             this.targetLookId = look.id;
             this.targetDeviceIps = Array.isArray(look.device_ips)
                 ? this.lookDeviceIps(look)
-                : this.devices.map(d => d.ip);
+                : this.devices.map(device => device.ip);
             this.targetModal = true;
         },
 
@@ -291,7 +538,7 @@ document.addEventListener("alpine:init", () => {
         async saveTargetEditor() {
             const look = this.targetEditLook();
             if (!look) return;
-            const currentIps = this.devices.map(d => d.ip);
+            const currentIps = this.devices.map(device => device.ip);
             const deviceIps = this.targetDeviceIps.filter(ip => currentIps.includes(ip));
             try {
                 const saved = await api("POST", "/api/looks/save", {
@@ -301,9 +548,7 @@ document.addEventListener("alpine:init", () => {
                 const idx = this.looks.findIndex(item => item.id === saved.id);
                 if (idx >= 0) this.looks.splice(idx, 1, saved);
                 this.targetModal = false;
-                document.dispatchEvent(new CustomEvent('primus:looks-changed', {
-                    detail: { look: saved },
-                }));
+                document.dispatchEvent(new CustomEvent('primus:looks-changed', { detail: { look: saved } }));
             } catch (e) {
                 Alpine.store("app").showApiError('Target update failed', e);
             }
@@ -321,153 +566,6 @@ document.addEventListener("alpine:init", () => {
             } catch (e) {
                 Alpine.store("app").showApiError('Delete Look failed', e);
             }
-        },
-
-        // ── Transport ──
-        async go() {
-            await api("POST", "/api/cues/go");
-            await this.refresh();
-        },
-
-        async stop() {
-            await api("POST", "/api/cues/stop");
-            await this.refresh();
-        },
-
-        async goToCue(number) {
-            await api("POST", "/api/cues/goto", { number });
-            await this.refresh();
-        },
-
-        // ── Cue management ──
-        nextCueNumber() {
-            if (this.cues.length === 0) return 1;
-            return Math.max(...this.cues.map(c => c.number)) + 1;
-        },
-
-        openAddCue() {
-            this.addLookId = this.looks.length ? this.looks[0].id : "";
-            this.addFadeTime = 2.0;
-            this.addAutoFollow = false;
-            this.addFollowDelay = 5.0;
-            this.addTargetMode = "look";
-            this.addGroupId = this.deviceGroups.length ? this.deviceGroups[0].id : "";
-            this.addDeviceIps = [];
-            this.addModal = true;
-        },
-
-        async addCue() {
-            if (!this.addLookId) return;
-            const look = this.looks.find(l => l.id === this.addLookId);
-            const cue = {
-                number: this.nextCueNumber(),
-                look_id: this.addLookId,
-                name: look ? look.name : "Cue",
-                fade_time: this.addFadeTime,
-                auto_follow: this.addAutoFollow,
-                follow_delay: this.addFollowDelay,
-                target_mode: this.addTargetMode,
-            };
-            if (this.addTargetMode === "all") {
-                cue.target_mode = "all";
-            } else if (this.addTargetMode === "group" && this.addGroupId) {
-                cue.device_group_id = this.addGroupId;
-            } else if (this.addTargetMode === "devices" && this.addDeviceIps.length) {
-                cue.device_ips = [...this.addDeviceIps];
-            }
-            this.cues.push(cue);
-            try {
-                await this.saveCues();
-            } catch (e) {
-                this.cues.pop();
-                console.error("Failed to save cue:", e);
-                return;
-            }
-            this.addModal = false;
-        },
-
-        async removeCue(idx) {
-            this.cues.splice(idx, 1);
-            this.cues.forEach((c, i) => c.number = i + 1);
-            await this.saveCues();
-        },
-
-        async moveCue(idx, dir) {
-            const newIdx = idx + dir;
-            if (newIdx < 0 || newIdx >= this.cues.length) return;
-            const temp = this.cues[idx];
-            this.cues[idx] = this.cues[newIdx];
-            this.cues[newIdx] = temp;
-            this.cues.forEach((c, i) => c.number = i + 1);
-            await this.saveCues();
-        },
-
-        async updateCueField(idx, field, value) {
-            this.cues[idx][field] = value;
-            await this.saveCues();
-        },
-
-        async saveCues() {
-            await api("POST", "/api/cues", { cues: this.cues });
-        },
-
-        isActive(idx) { return this.playing && idx === this.currentIndex; },
-        isStandby(idx) {
-            if (!this.playing) return idx === 0;
-            return idx === this.currentIndex + 1;
-        },
-
-        cueTargetLabel(cue) {
-            if (cue.target_mode === 'all') return 'All';
-            if (cue.device_group_id) {
-                const g = this.deviceGroups.find(g => g.id === cue.device_group_id);
-                return g ? g.name : '(deleted group)';
-            }
-            if (cue.device_ips && cue.device_ips.length) {
-                return cue.device_ips.length + ' device' + (cue.device_ips.length > 1 ? 's' : '');
-            }
-            const look = this.looks.find(l => l.id === cue.look_id);
-            return look ? this.lookTargetLabel(look) : 'Look target';
-        },
-
-        addTargetSummary() {
-            if (this.addTargetMode === 'look') {
-                const look = this.selectedAddLook();
-                if (!look) return 'No Look selected.';
-                return 'Cue will use this Look target: ' + this.lookTargetLabel(look) + '.';
-            }
-            if (this.addTargetMode === 'group') {
-                const group = this.deviceGroups.find(g => g.id === this.addGroupId);
-                if (!group) return 'No group selected.';
-                const count = (group.device_ips || []).length;
-                return 'Cue will target group ' + group.name + ' (' + count + ' device' + (count === 1 ? '' : 's') + ').';
-            }
-            if (this.addTargetMode === 'devices') {
-                const count = this.addDeviceIps.length;
-                if (!count) return 'No devices selected yet.';
-                return 'Cue will target ' + count + ' selected device' + (count === 1 ? '' : 's') + '.';
-            }
-            return 'Cue will target all available devices.';
-        },
-
-        toggleDeviceIp(ip) {
-            const idx = this.addDeviceIps.indexOf(ip);
-            if (idx >= 0) {
-                this.addDeviceIps.splice(idx, 1);
-            } else {
-                this.addDeviceIps.push(ip);
-            }
-        },
-
-        nextCueName() {
-            let nextIdx;
-            if (!this.playing) {
-                nextIdx = 0;
-            } else {
-                nextIdx = this.currentIndex + 1;
-                if (nextIdx >= this.cues.length) nextIdx = 0;
-            }
-            return this.cues[nextIdx] ? this.cues[nextIdx].name : '-';
         },
     }));
 });

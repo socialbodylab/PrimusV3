@@ -227,6 +227,10 @@ body {
     overflow-y: auto;
 }
 
+.panel[x-show="false"] {
+    display: none !important;
+}
+
 /* ── DEVICE SIDEBAR ────────────────────────────────────── */
 
 .device-card {
@@ -1570,6 +1574,278 @@ input[type="color"] {
 .text-sm { font-size: 12px; }
 .text-muted { color: var(--text-muted); }
 .hidden { display: none !important; }
+
+/* ── Cue Controller Board ─────────────────────────────── */
+
+.cue-controller-panel {
+    padding: 18px;
+}
+
+.cue-controller-header,
+.cue-board-header,
+.cue-assignment-editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cue-controller-header {
+    margin-bottom: 14px;
+}
+
+.cue-controller-title {
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1.05;
+    margin: 0;
+}
+
+.cue-controller-subtitle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.cue-controller-actions,
+.cue-assignment-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cue-board-header {
+    margin: 8px 0 12px;
+}
+
+.cue-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 180px));
+    justify-content: start;
+    gap: 12px;
+}
+
+.cue-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 8px;
+    aspect-ratio: 1;
+    width: 100%;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: linear-gradient(180deg, var(--bg-secondary), var(--bg-tertiary));
+    cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 0 rgba(0,0,0,0.65);
+    transition: transform 0.08s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.cue-card:hover,
+.cue-card:focus-visible {
+    border-color: var(--accent-dim);
+    outline: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 0 0 2px rgba(0, 122, 204, 0.2), 0 2px 0 rgba(0,0,0,0.65);
+}
+
+.cue-card:active {
+    transform: translateY(2px);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.55);
+}
+
+.cue-card-active {
+    border-color: var(--accent);
+    background: rgba(0, 122, 204, 0.18);
+    box-shadow: inset 0 0 0 1px rgba(0, 191, 255, 0.25);
+}
+
+.cue-card-topline,
+.cue-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.cue-card-number {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    color: var(--accent);
+    font-weight: 800;
+}
+
+.cue-card-state {
+    padding: 2px 6px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+.cue-card-edit {
+    padding: 3px 7px;
+    line-height: 1;
+}
+
+.cue-card-main {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 54px;
+}
+
+.cue-card-name {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+}
+
+.cue-card-summary {
+    color: var(--text-secondary);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.cue-assignment-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-height: 38px;
+    align-content: flex-start;
+}
+
+.cue-assignment-pill {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+    max-width: 100%;
+    min-height: 30px;
+    padding: 3px 7px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 11px;
+}
+
+.cue-assignment-target {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.cue-card-meta {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-top: auto;
+}
+
+.cue-empty-state {
+    padding: 18px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+}
+
+.look-thumb-strip {
+    height: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    margin-bottom: 6px;
+}
+
+.cue-modal {
+    width: min(860px, calc(100vw - 32px));
+    max-width: 860px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+}
+
+.cue-modal-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 130px;
+    gap: 10px;
+    align-items: end;
+}
+
+.cue-assignment-editor {
+    margin-top: 12px;
+}
+
+.cue-assignment-editor-header {
+    margin-bottom: 8px;
+}
+
+.cue-assignment-row {
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+}
+
+.cue-assignment-look-grid {
+    display: grid;
+    grid-template-columns: 74px minmax(180px, 1fr) minmax(160px, 0.75fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.cue-assignment-preview {
+    width: 74px;
+    height: 54px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+}
+
+.cue-assignment-blackout {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.blackout-preview {
+    background: #000;
+    border-color: var(--danger);
+}
+
+.cue-assignment-actions {
+    margin-top: 8px;
+}
+
+@media (max-width: 1050px) {
+    .cue-modal-grid,
+    .cue-assignment-look-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .cue-controller-header,
+    .cue-board-header,
+    .cue-controller-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .cue-controller-title {
+        font-size: 28px;
+    }
+}
 
 /* ── Look Controller: Control Panel ── */
 .fade-slider {

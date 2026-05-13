@@ -46,7 +46,7 @@ document.addEventListener("alpine:init", () => {
         modes: ["mixer", "controller", "firmware"],
         modeLabels: {
             mixer: "Look Mixer",
-            controller: "Look Controller",
+            controller: "Cue Controller",
             firmware: "Firmware",
         },
         state: null,
