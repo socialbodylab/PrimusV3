@@ -1,0 +1,25 @@
+{
+  "id": "25a5ba9a-a68a-4b30-81fb-49324146ca88",
+  "name": "Signal Static Long",
+  "group": "noise",
+  "output_type": "long_strip",
+  "effect": "static_noise",
+  "start_color": [
+    12,
+    0,
+    24
+  ],
+  "end_color": [
+    230,
+    90,
+    255
+  ],
+  "speed": 1.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 3.5,
+  "created": "2026-05-13T20:00:05+00:00",
+  "modified": "2026-05-13T20:00:05+00:00"
+}

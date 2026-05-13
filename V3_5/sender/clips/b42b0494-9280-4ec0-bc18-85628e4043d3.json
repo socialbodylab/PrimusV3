@@ -1,0 +1,25 @@
+{
+  "id": "b42b0494-9280-4ec0-bc18-85628e4043d3",
+  "name": "Ribbon Aurora Noise",
+  "group": "noise",
+  "output_type": "extra_long_strip",
+  "effect": "noise",
+  "start_color": [
+    14,
+    24,
+    65
+  ],
+  "end_color": [
+    45,
+    255,
+    160
+  ],
+  "speed": 0.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 11.0,
+  "created": "2026-05-13T20:00:13+00:00",
+  "modified": "2026-05-13T20:00:13+00:00"
+}
