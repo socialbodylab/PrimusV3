@@ -504,11 +504,14 @@
                 <div class="transport-field">
                     <label class="form-label">Duration</label>
                     <input class="form-input" type="number" min="1" max="600" step="1"
-                           x-model.number="look.total_duration">
+                           :value="look.total_duration"
+                           @input.debounce.120ms="updateLookDuration($event.target.value)"
+                           @change="updateLookDuration($event.target.value)">
                 </div>
                 <div class="transport-field">
                     <label class="form-label">Playback</label>
-                    <select class="form-select" x-model="look.playback">
+                    <select class="form-select" :value="look.playback"
+                            @change="updateLookPlayback($event.target.value)">
                         <option value="loop">Loop</option>
                         <option value="boomerang">Boomerang</option>
                         <option value="once">Once</option>
@@ -518,7 +521,8 @@
                     <label class="form-label">Speed</label>
                     <div class="flex items-center gap-1">
                         <input type="range" class="form-range" min="0.1" max="4" step="0.1"
-                               x-model.number="look.speed">
+                               :value="look.speed || 1"
+                               @input.debounce.120ms="updateLookSpeed($event.target.value)">
                         <span class="text-sm" x-text="(look.speed || 1).toFixed(1) + 'x'"></span>
                     </div>
                 </div>
@@ -584,18 +588,21 @@
                     <div class="timeline-track"
                          :class="{ 'drag-over': _dropIndicator?.trackIdx === ti }"
                          :style="'--pps:' + pixelsPerSecond + 'px'"
-                         @click="selectTrack(ti); clickTimeline($event)"
+                         @click="selectTrack(ti); clearSelectedSegment(); clickTimeline($event)"
                          @dragover="selectTrack(ti); onTrackDragOver($event, ti)"
                          @dragleave="onTrackDragLeave($event, ti)"
                          @drop="selectTrack(ti); onTrackDrop($event, ti)">
                     <template x-for="(seg, si) in track.segments" :key="seg.id || si">
                         <div class="timeline-segment"
-                             :class="{ 'segment-active': playTime >= seg.start_time && playTime < seg.start_time + seg.duration }"
+                             :class="{
+                                'segment-active': playTime >= seg.start_time && playTime < seg.start_time + seg.duration,
+                                'segment-selected': isSelectedSegment(ti, si)
+                             }"
                              :style="segmentStyle(seg)"
                              :title="seg.clip_name + ' (' + seg.duration.toFixed(1) + 's)'"
                              @mousedown="startDrag($event, ti, si, 'move')"
                              @dblclick.stop="openEditSegment(ti, si)"
-                             @click.stop>
+                             @click.stop="selectSegment(ti, si)">
                             <span class="segment-label" x-text="seg.clip_name"></span>
                             <div class="segment-resize-handle"
                                  @mousedown.stop="startDrag($event, ti, si, 'resize-end')"></div>
@@ -681,24 +688,30 @@
                         <div class="form-group">
                             <label class="form-label">Duration (s)</label>
                             <div class="flex items-center gap-2">
-                                <input type="range" class="form-range" min="0.5" max="60" step="0.5"
-                                       x-model.number="editData.duration">
+                                    <input type="range" class="form-range" min="0.5" step="0.5"
+                                        :max="editDurationMax()"
+                                        :value="editData.duration"
+                                        @input="updateEditDuration($event.target.value)">
                                 <span class="text-sm" x-text="editData.duration.toFixed(1) + 's'"></span>
                             </div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Fade In (s)</label>
                             <div class="flex items-center gap-2">
-                                <input type="range" class="form-range" min="0" max="10" step="0.1"
-                                       x-model.number="editData.fade_in">
+                                    <input type="range" class="form-range" min="0" step="0.1"
+                                        :max="editFadeMax('fade_in')"
+                                        :value="editData.fade_in"
+                                        @input="updateEditFade('fade_in', $event.target.value)">
                                 <span class="text-sm" x-text="editData.fade_in.toFixed(1) + 's'"></span>
                             </div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Fade Out (s)</label>
                             <div class="flex items-center gap-2">
-                                <input type="range" class="form-range" min="0" max="10" step="0.1"
-                                       x-model.number="editData.fade_out">
+                                    <input type="range" class="form-range" min="0" step="0.1"
+                                        :max="editFadeMax('fade_out')"
+                                        :value="editData.fade_out"
+                                        @input="updateEditFade('fade_out', $event.target.value)">
                                 <span class="text-sm" x-text="editData.fade_out.toFixed(1) + 's'"></span>
                             </div>
                         </div>

@@ -25,6 +25,8 @@ document.addEventListener("alpine:init", () => {
         savedLooks: [],
         pixelsPerSecond: 80,
         selectedTrackIdx: 0,
+        selectedSegmentTrack: -1,
+        selectedSegmentIdx: -1,
         editModal: false,
         editTrack: -1,
         editSeg: -1,
@@ -204,9 +206,15 @@ document.addEventListener("alpine:init", () => {
                     } else if (e.code === 'Home') {
                         e.preventDefault();
                         this.reset();
-                    } else if ((e.code === 'Delete' || e.code === 'Backspace') && this.editModal) {
-                        this.removeSegment(this.editTrack, this.editSeg);
-                        this.editModal = false;
+                    } else if (e.code === 'Delete' || e.code === 'Backspace') {
+                        if (this.editModal) {
+                            e.preventDefault();
+                            this.removeSegment(this.editTrack, this.editSeg);
+                            this.editModal = false;
+                        } else if (this.hasSelectedSegment()) {
+                            e.preventDefault();
+                            this.deleteSelectedSegment();
+                        }
                     }
                 }
             });
@@ -569,6 +577,7 @@ document.addEventListener("alpine:init", () => {
             this.playTime = 0;
             this.transportTime = 0;
             this.selectedTrackIdx = 0;
+            this.clearSelectedSegment();
             this._mixerFrameDirty = true;
         },
 
@@ -576,6 +585,27 @@ document.addEventListener("alpine:init", () => {
             const count = this.look?.tracks?.length || 0;
             if (trackIdx < 0 || trackIdx >= count) return;
             this.selectedTrackIdx = trackIdx;
+        },
+
+        selectSegment(trackIdx, segIdx) {
+            const seg = this.look?.tracks?.[trackIdx]?.segments?.[segIdx];
+            if (!seg) return;
+            this.selectTrack(trackIdx);
+            this.selectedSegmentTrack = trackIdx;
+            this.selectedSegmentIdx = segIdx;
+        },
+
+        clearSelectedSegment() {
+            this.selectedSegmentTrack = -1;
+            this.selectedSegmentIdx = -1;
+        },
+
+        isSelectedSegment(trackIdx, segIdx) {
+            return this.selectedSegmentTrack === trackIdx && this.selectedSegmentIdx === segIdx;
+        },
+
+        hasSelectedSegment() {
+            return !!this.look?.tracks?.[this.selectedSegmentTrack]?.segments?.[this.selectedSegmentIdx];
         },
 
         timelineClipGroups() {
@@ -634,10 +664,11 @@ document.addEventListener("alpine:init", () => {
                 end_color: clip.end_color,
                 start_time: lastEnd,
                 duration: clip.duration || 5.0,
-                fade_in: 0.5,
-                fade_out: 0.5,
+                fade_in: 0.0,
+                fade_out: 0.0,
                 speed_override: null,
             });
+            this.selectSegment(trackIdx, track.segments.length - 1);
             const newEnd = lastEnd + (clip.duration || 5.0);
             if (newEnd > this.look.total_duration) {
                 this.look.total_duration = Math.ceil(newEnd);
@@ -647,22 +678,36 @@ document.addEventListener("alpine:init", () => {
         },
 
         removeSegment(trackIdx, segIdx) {
-            this.look.tracks[trackIdx]?.segments.splice(segIdx, 1);
+            const segments = this.look?.tracks?.[trackIdx]?.segments;
+            if (!segments || segIdx < 0 || segIdx >= segments.length) return;
+            segments.splice(segIdx, 1);
+            if (this.selectedSegmentTrack === trackIdx) {
+                if (this.selectedSegmentIdx === segIdx) {
+                    this.clearSelectedSegment();
+                } else if (this.selectedSegmentIdx > segIdx) {
+                    this.selectedSegmentIdx -= 1;
+                }
+            }
             this._mixerFrameDirty = true;
             if (this.previewing) this._sendPreview();
         },
 
+        deleteSelectedSegment() {
+            if (!this.hasSelectedSegment()) return;
+            this.removeSegment(this.selectedSegmentTrack, this.selectedSegmentIdx);
+        },
+
         openEditSegment(trackIdx, segIdx) {
-            this.selectTrack(trackIdx);
+            this.selectSegment(trackIdx, segIdx);
             const seg = this.look.tracks[trackIdx]?.segments[segIdx];
             if (!seg) return;
             this.editTrack = trackIdx;
             this.editSeg = segIdx;
             this.editData = {
-                start_time: seg.start_time,
-                duration: seg.duration,
-                fade_in: seg.fade_in,
-                fade_out: seg.fade_out,
+                start_time: Number(seg.start_time) || 0,
+                duration: Number(seg.duration) || 5.0,
+                fade_in: Number(seg.fade_in) || 0,
+                fade_out: Number(seg.fade_out) || 0,
                 speed_override: seg.speed_override,
             };
             const track = this.look.tracks[trackIdx];
@@ -687,14 +732,52 @@ document.addEventListener("alpine:init", () => {
             this.editModal = true;
         },
 
+        editDurationMax() {
+            if (!this.editData) return 60;
+            const start = Number(this.editData.start_time) || 0;
+            return Math.max(0.1, this.lookDuration() - start);
+        },
+
+        editFadeMax(field) {
+            if (!this.editData) return 0;
+            const duration = Math.max(0.1, Number(this.editData.duration) || 0.1);
+            const other = field === 'fade_in' ? this.editData.fade_out : this.editData.fade_in;
+            return Math.max(0, duration - (Number(other) || 0));
+        },
+
+        clampEditFade(field) {
+            if (!this.editData) return;
+            const value = Number(this.editData[field]) || 0;
+            this.editData[field] = Math.max(0, Math.min(value, this.editFadeMax(field)));
+        },
+
+        updateEditDuration(value) {
+            if (!this.editData) return;
+            const duration = Number(value);
+            if (!Number.isFinite(duration)) return;
+            this.editData.duration = Math.max(0.1, Math.min(duration, this.editDurationMax()));
+            this.clampEditFade('fade_in');
+            this.clampEditFade('fade_out');
+        },
+
+        updateEditFade(field, value) {
+            if (!this.editData || !['fade_in', 'fade_out'].includes(field)) return;
+            const fade = Number(value);
+            if (!Number.isFinite(fade)) return;
+            this.editData[field] = fade;
+            this.clampEditFade(field);
+        },
+
         applyEditSegment() {
             const seg = this.look.tracks[this.editTrack]?.segments[this.editSeg];
             if (!seg || !this.editData) return;
-            const dur = this.look?.total_duration || 10;
-            seg.start_time = Math.max(0, Math.min(this.editData.start_time, dur - 0.1));
-            seg.duration = Math.max(0.1, Math.min(this.editData.duration, dur - seg.start_time));
-            seg.fade_in = Math.max(0, Math.min(this.editData.fade_in, seg.duration / 2));
-            seg.fade_out = Math.max(0, Math.min(this.editData.fade_out, seg.duration / 2));
+            const dur = this.lookDuration();
+            seg.start_time = Math.max(0, Math.min(Number(this.editData.start_time) || 0, dur - 0.1));
+            seg.duration = Math.max(0.1, Math.min(Number(this.editData.duration) || 0.1, dur - seg.start_time));
+            const fadeIn = Math.max(0, Number(this.editData.fade_in) || 0);
+            const fadeOut = Math.max(0, Number(this.editData.fade_out) || 0);
+            seg.fade_in = Math.min(fadeIn, seg.duration);
+            seg.fade_out = Math.min(fadeOut, Math.max(0, seg.duration - seg.fade_in));
             seg.speed_override = this.editData.speed_override;
             this._mixerFrameDirty = true;
             this.editModal = false;
@@ -730,7 +813,7 @@ document.addEventListener("alpine:init", () => {
 
         startDrag(event, trackIdx, segIdx, mode) {
             event.preventDefault();
-            this.selectTrack(trackIdx);
+            this.selectSegment(trackIdx, segIdx);
             const seg = this.look.tracks[trackIdx]?.segments[segIdx];
             if (!seg) return;
             this._drag = {
@@ -808,7 +891,7 @@ document.addEventListener("alpine:init", () => {
             const rect = container.getBoundingClientRect();
             const x = event.clientX - rect.left + container.scrollLeft;
             const t = x / this.pixelsPerSecond;
-            const dur = this.look?.total_duration || 10;
+            const dur = this.lookDuration();
             this.playTime = Math.max(0, Math.min(t, dur));
             this.transportTime = this.playTime;
             if (this.playing) {
@@ -837,7 +920,7 @@ document.addEventListener("alpine:init", () => {
             const onMove = (e) => {
                 const rect = this._playheadDrag.container.getBoundingClientRect();
                 const x = e.clientX - rect.left + this._playheadDrag.container.scrollLeft;
-                const dur = this.look?.total_duration || 10;
+                const dur = this.lookDuration();
                 this.playTime = Math.max(0, Math.min(x / this.pixelsPerSecond, dur));
                 this.transportTime = this.playTime;
                 this._updateMixerTime(this.playTime, false, this.transportTime);
@@ -873,13 +956,11 @@ document.addEventListener("alpine:init", () => {
 
         _sendPreview() {
             if (!this.previewing || !this.look) return;
-            // Reset sequence counter — start_mixer_preview on the server resets
-            // its own counter, so subsequent update calls start fresh.
-            this._mixerUpdateSeq = 0;
             const payload = { ...this.look };
             payload.play_time = this.playTime;
             payload.transport_time = this.transportTime;
             payload.playing = this.playing;
+            payload.seq = ++this._mixerUpdateSeq;
             const filter = Alpine.store("app").mixerPreviewDevices;
             if (filter) payload.device_filter = filter;
             api("POST", "/api/mixer/preview", payload);
@@ -896,6 +977,74 @@ document.addEventListener("alpine:init", () => {
             api("POST", "/api/mixer/update", body);
         },
 
+        lookDuration() {
+            const duration = Number(this.look?.total_duration);
+            return Number.isFinite(duration) && duration > 0 ? duration : 10;
+        },
+
+        wrapTimelineTime(transportTime = this.transportTime) {
+            const duration = this.lookDuration();
+            const t = Math.max(0, Number(transportTime) || 0);
+            if (this.look?.playback === "once") {
+                return Math.min(t, duration);
+            }
+            if (this.look?.playback === "boomerang") {
+                const cycle = t % (duration * 2);
+                return cycle <= duration ? cycle : duration * 2 - cycle;
+            }
+            return t % duration;
+        },
+
+        normalizeTimelineTiming() {
+            if (!this.look) return;
+            const duration = this.lookDuration();
+            this.look.total_duration = duration;
+            this.playTime = this.wrapTimelineTime(this.transportTime);
+            this._mixerFrameDirty = true;
+        },
+
+        restartPlaybackClock() {
+            if (!this.playing) return;
+            if (this._playInterval) {
+                clearInterval(this._playInterval);
+                this._playInterval = null;
+            }
+            this._startPlaybackInterval();
+        },
+
+        onLookTimingChanged() {
+            if (!this.look) return;
+            this.normalizeTimelineTiming();
+            this.restartPlaybackClock();
+            if (this.previewing) {
+                this._sendPreview();
+            } else {
+                this._updateMixerTime(this.playTime, this.playing, this.transportTime);
+            }
+        },
+
+        updateLookDuration(value) {
+            if (!this.look) return;
+            const duration = Number(value);
+            if (!Number.isFinite(duration) || duration <= 0) return;
+            this.look.total_duration = Math.max(1, Math.min(600, duration));
+            this.onLookTimingChanged();
+        },
+
+        updateLookPlayback(value) {
+            if (!this.look || !["loop", "boomerang", "once"].includes(value)) return;
+            this.look.playback = value;
+            this.onLookTimingChanged();
+        },
+
+        updateLookSpeed(value) {
+            if (!this.look) return;
+            const speed = Number(value);
+            if (!Number.isFinite(speed) || speed <= 0) return;
+            this.look.speed = Math.max(0.1, Math.min(4, speed));
+            this.onLookTimingChanged();
+        },
+
         segmentStyle(seg) {
             const left = seg.start_time * this.pixelsPerSecond;
             const width = Math.max(seg.duration * this.pixelsPerSecond, 20);
@@ -906,7 +1055,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         timelineWidth() {
-            return (this.look?.total_duration || 10) * this.pixelsPerSecond;
+            return this.lookDuration() * this.pixelsPerSecond;
         },
 
         crossfadeZones(trackIdx) {
@@ -929,7 +1078,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         rulerTicks() {
-            const dur = this.look?.total_duration || 10;
+            const dur = this.lookDuration();
             const pps = this.pixelsPerSecond;
             const ticks = [];
             const step = 0.25;
@@ -961,23 +1110,23 @@ document.addEventListener("alpine:init", () => {
         play() {
             if (this.playing) return;
             this.playing = true;
-            const start = performance.now() - this.transportTime * 1000 / (this.look?.speed || 1);
+            this._startPlaybackInterval();
+            this._updateMixerTime(this.playTime, true, this.transportTime);
+        },
+
+        _startPlaybackInterval() {
+            const speed = this.look?.speed || 1;
+            const start = performance.now() - this.transportTime * 1000 / speed;
             this._playInterval = setInterval(() => {
                 const globalSpeed = this.look?.speed || 1;
                 const elapsed = (performance.now() - start) / 1000 * globalSpeed;
-                const dur = this.look?.total_duration || 10;
+                const dur = this.lookDuration();
                 this.transportTime = elapsed;
-                if (this.look?.playback === "loop") {
-                    this.playTime = elapsed % dur;
-                } else if (this.look?.playback === "boomerang") {
-                    const cyc = elapsed % (dur * 2);
-                    this.playTime = cyc <= dur ? cyc : dur * 2 - cyc;
-                } else {
-                    this.playTime = Math.min(elapsed, dur);
-                    if (elapsed >= dur) this.stop();
+                this.playTime = this.wrapTimelineTime(elapsed);
+                if (this.look?.playback === "once" && elapsed >= dur) {
+                    this.stop();
                 }
             }, 33);
-            this._updateMixerTime(this.playTime, true, this.transportTime);
         },
 
         stop() {
@@ -1097,10 +1246,11 @@ document.addEventListener("alpine:init", () => {
                 end_color: data.end_color,
                 start_time: Math.max(0, dropTime),
                 duration: segDuration,
-                fade_in: 0.5,
-                fade_out: 0.5,
+                fade_in: 0.0,
+                fade_out: 0.0,
                 speed_override: null,
             });
+            this.selectSegment(trackIdx, track.segments.length - 1);
 
             // Extend total duration if segment overflows
             const newEnd = dropTime + segDuration;
@@ -1189,6 +1339,7 @@ document.addEventListener("alpine:init", () => {
                 this.playTime = 0;
                 this.transportTime = 0;
                 this.selectedTrackIdx = 0;
+                this.clearSelectedSegment();
                 this._mixerFrameDirty = true;
             }
         },

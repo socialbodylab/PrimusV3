@@ -392,8 +392,14 @@ class Handler(BaseHTTPRequestHandler):
                 play_time = float(look.pop("play_time", 0.0))
                 transport_time = float(look.pop("transport_time", play_time))
                 playing = bool(look.pop("playing", False))
+                seq = look.pop("seq", None)
+                if seq is not None:
+                    try:
+                        seq = int(seq)
+                    except (TypeError, ValueError):
+                        seq = None
                 self.controller_state.start_mixer_preview(
-                    look, device_filter, play_time, playing, transport_time)
+                    look, device_filter, play_time, playing, transport_time, seq=seq)
                 self._ok()
             else:
                 self._respond(400, "application/json", b'{"error":"invalid look"}')

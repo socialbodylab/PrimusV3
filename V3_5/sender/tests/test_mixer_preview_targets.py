@@ -70,6 +70,26 @@ class MixerPreviewTargetTests(unittest.TestCase):
         self.assertEqual(playback["connected_count"], 2)
         self.assertEqual(playback["target_label"], "All devices (2 connected)")
 
+    def test_preview_start_sequence_ignores_stale_update(self):
+        state = self.make_state()
+        state.start_mixer_preview(
+            {"outputs": [], "tracks": [{"segments": []}]},
+            play_time=2.0,
+            transport_time=8.0,
+            playing=False,
+            seq=10,
+        )
+
+        state.update_mixer_preview(play_time=1.0, transport_time=1.0, seq=9)
+        with state.lock:
+            self.assertEqual(state._mixer_preview_play_time, 2.0)
+            self.assertEqual(state._mixer_preview_transport_time, 8.0)
+
+        state.update_mixer_preview(play_time=3.0, transport_time=9.0, seq=11)
+        with state.lock:
+            self.assertEqual(state._mixer_preview_play_time, 3.0)
+            self.assertEqual(state._mixer_preview_transport_time, 9.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1096,6 +1096,11 @@ input[type="color"] {
     box-shadow: 0 0 6px rgba(0, 191, 255, 0.4);
 }
 
+.segment-selected {
+    border-color: #fff !important;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.7), 0 0 10px rgba(0, 191, 255, 0.35);
+}
+
 .clip-palette-btn {
     display: flex;
     flex-direction: column;

@@ -1112,7 +1112,7 @@ class ControllerState:
 
     def start_mixer_preview(self, look, device_filter=None,
                             play_time=0.0, playing=False,
-                            transport_time=None):
+                            transport_time=None, seq=None):
         """Start previewing a look from the mixer on connected devices.
         play_time: wrapped playhead time shown in the timeline.
         transport_time: unwrapped timeline time for live playback.
@@ -1128,6 +1128,8 @@ class ControllerState:
             self._mixer_preview_start_mono = time.monotonic()
             self._mixer_preview_playing = playing
             self._mixer_preview_device_filter = self._normalize_mixer_device_filter(device_filter)
+            if seq is not None:
+                self._mixer_update_last_seq = seq
             self._set_playback_source_unlocked(self.SOURCE_MIXER)
 
     def update_mixer_preview(self, play_time=None, playing=None,
