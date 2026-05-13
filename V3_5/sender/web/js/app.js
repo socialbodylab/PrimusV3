@@ -43,10 +43,11 @@ document.addEventListener("alpine:init", () => {
     // --- App store: mode, polling ---
     Alpine.store("app", {
         mode: "mixer",
-        modes: ["mixer", "controller"],
+        modes: ["mixer", "controller", "firmware"],
         modeLabels: {
             mixer: "Look Mixer",
             controller: "Look Controller",
+            firmware: "Firmware",
         },
         state: null,
         polling: null,
@@ -284,6 +285,11 @@ document.addEventListener("alpine:init", () => {
 
         canConfigureIp(dev) {
             return !!dev?.capabilities?.ip_config;
+        },
+
+        hardwareLabel(entity) {
+            const label = entity?.hardware_label || entity?.hardware_profile || 'Unknown hardware';
+            return String(label).replace('V3.1', 'V3');
         },
 
         capabilityItems(entity) {

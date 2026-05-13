@@ -30,9 +30,11 @@ Examples:
 
 ```sh
 ./V3_5/Arduino/upload.sh --ports
+./V3_5/Arduino/upload.sh --ports-json
 ./V3_5/Arduino/upload.sh -v1 --compile
 ./V3_5/Arduino/upload.sh -v3 --auto
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v3 --name "StageLeft" --auto
 ./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ./V3_5/Arduino/upload.sh -v2 --baud 230400 /dev/cu.usbserial-XXXX
@@ -49,9 +51,11 @@ Examples:
 | `-v3` | Build for the V3.1 Reverse TFT profile. Long form: `--board v3`. Legacy aliases: `--board v3_1`, `--board v31`, `--board v3_1_reverse_tft`. This is the default when no board flag is supplied. |
 | `--compile` | Compile only. Do not upload. This is the Arduino IDE Verify-style path. |
 | `--install` | Install/check the libraries required by the selected board, then exit. |
+| `-name <name>`, `--name <name>`, `--device-name <name>` | Override `DEVICE_SHORT_NAME` for this build without editing `config.h`. Max 17 characters. If a receiver already has an NVS name from Rename, the stored name still takes precedence until changed/cleared. |
 | `-ssid <name>`, `--ssid <name>` | Override `DEFAULT_WIFI_SSID` for this build without editing `config.h`. |
 | `-pw <password>`, `--pw <password>`, `--password <password>` | Override `DEFAULT_WIFI_PASSWORD` for this build without editing `config.h`. |
 | `--ports`, `--list-ports` | List likely ESP32 serial ports and exit without compiling or uploading. |
+| `--ports-json`, `--list-ports-json` | List likely ESP32 serial ports as JSON for the sender web UI. |
 | `--auto`, `-auto` | Select the only detected ESP32-like serial port. Fails if no candidates or multiple candidates are found. |
 | `--all`, `-all`, `--all-ports` | Select every detected ESP32-like serial port and upload the selected profile to each one sequentially. If Arduino CLI identifies exact selected-board matches, only those exact matches are used; otherwise all ESP32-like candidates are used. |
 | `--baud <rate>` | Override the selected board's default upload speed. Alias: `--speed`. |
@@ -63,10 +67,26 @@ Common upload commands:
 ```sh
 ./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v3 --name "StageLeft" /dev/cu.usbmodemXXXX
 ./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
 ./V3_5/Arduino/upload.sh -v2 --all
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ```
+
+### Sender Firmware Tab
+
+The V3.5 sender web UI includes a Firmware tab when running from a source checkout. It wraps `upload.sh` through local JSON API jobs and keeps this script as the source of truth for board profiles, library installation, compile flags, WiFi overrides, and upload behavior.
+
+The UI is intentionally focused on the common flashing path:
+
+- Choose the firmware version (`v1`, `v2`, or `v3`).
+- Refresh available USB devices and select one detected receiver, or choose all available devices.
+- Independently enable a default device-name override, WiFi SSID/password overrides, both, or neither.
+- Compile or upload, then watch the output window.
+
+When enabled, the device-name override becomes the firmware default short name for fresh receivers. If the receiver already has a name stored through the Rename workflow, that stored NVS name takes precedence and can still be changed later from the controller. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance, but it is not part of the main Firmware tab workflow.
+
+Firmware jobs run one at a time because Arduino core installation, library installation, compile caches, and serial uploads can conflict when launched concurrently. The UI redacts WiFi passwords from job status and output. Packaged app support is intentionally out of scope for this first pass; source runs still use `python3 V3_5/sender/run.py`.
 
 ## Board Profile Responsibilities
 

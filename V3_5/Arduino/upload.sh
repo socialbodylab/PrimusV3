@@ -2,11 +2,13 @@
 # upload.sh — Compile & upload PrimusV3.5 receiver build profiles
 # Usage:
 #   ./upload.sh --ports                   # list likely ESP32 serial ports
+#   ./upload.sh --ports-json              # list likely ESP32 serial ports as JSON
 #   ./upload.sh -v3 --auto                # compile, then upload if exactly one ESP32-like port is connected
 #   ./upload.sh -v2 --all                 # compile, then upload selected profile to every detected ESP32-like port
 #   ./upload.sh -v1 --compile             # compile V1 only, like Arduino IDE Verify
 #   ./upload.sh -v2 /dev/cu.usb...        # compile, then upload V2 to an explicit port
 #   ./upload.sh -v2 -ssid PrimusRouter -pw router-password --auto # override WiFi defaults for this build
+#   ./upload.sh -v3 --name StageLeft --auto # override default device name for this build
 #   ./upload.sh -v1 /dev/cu.usb1 /dev/cu.usb2 # upload selected profile to explicit ports
 #   ./upload.sh -v2 --baud 115200 /dev/cu.usb... # override upload speed
 #   ./upload.sh --install                 # install libraries for selected board
@@ -30,15 +32,18 @@ UPLOAD_PORTS=()
 COMPILE_ONLY=false
 INSTALL_ONLY=false
 LIST_PORTS=false
+LIST_PORTS_JSON=false
 AUTO_PORT=false
 ALL_PORTS=false
 BAUD=921600
 BAUD_OVERRIDE=""
 WIFI_SSID_OVERRIDE=""
 WIFI_PASSWORD_OVERRIDE=""
+DEVICE_NAME_OVERRIDE=""
 WIFI_SSID_OVERRIDE_SET=false
 WIFI_PASSWORD_OVERRIDE_SET=false
-WIFI_OVERRIDE_HEADER=""
+DEVICE_NAME_OVERRIDE_SET=false
+BUILD_OVERRIDE_HEADER=""
 
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
 ok()    { printf "\033[1;32m[OK]\033[0m    %s\n" "$*"; }
@@ -51,6 +56,9 @@ upload.sh — Compile & upload PrimusV3.5 receiver build profiles
 Usage:
   ./upload.sh --ports
       List likely ESP32 serial ports detected by arduino-cli.
+
+    ./upload.sh --ports-json
+      List likely ESP32 serial ports as machine-readable JSON.
 
   ./upload.sh -v3 --auto
       Compile first, then upload when exactly one ESP32-like serial port is connected.
@@ -67,6 +75,9 @@ Usage:
   ./upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
       Compile with WiFi credential overrides for this build, then upload.
 
+    ./upload.sh -v3 --name "StageLeft" --auto
+      Compile with a default Art-Net short-name override for this build.
+
   Behavior:
     Upload commands always compile first, then upload. You do not need to run
     --compile before uploading; use --compile only when you want a verify-only pass.
@@ -79,11 +90,14 @@ Flags:
   --all-ports              Alias for --all.
   --ports, -ports          List likely ESP32 serial ports and exit.
   --list-ports             Alias for --ports.
+  --ports-json             List likely ESP32 serial ports as JSON and exit.
   --compile                Compile only; do not upload. Like Arduino IDE Verify.
   --install                Check/install required Arduino libraries and exit.
   -ssid, --ssid <name>     Override DEFAULT_WIFI_SSID for this build.
   -pw, --pw <password>     Override DEFAULT_WIFI_PASSWORD for this build.
   --password <password>    Alias for -pw.
+  -name, --name <name>     Override the default device short name for this build.
+  --device-name <name>     Alias for --name.
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
 EOF
@@ -123,6 +137,10 @@ while [[ $# -gt 0 ]]; do
       LIST_PORTS=true
       shift
       ;;
+    --ports-json|--list-ports-json)
+      LIST_PORTS_JSON=true
+      shift
+      ;;
     --compile)
       COMPILE_ONLY=true
       shift
@@ -147,6 +165,15 @@ while [[ $# -gt 0 ]]; do
       fi
       WIFI_PASSWORD_OVERRIDE="$2"
       WIFI_PASSWORD_OVERRIDE_SET=true
+      shift 2
+      ;;
+    -name|--name|--device-name)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a device name"
+        exit 1
+      fi
+      DEVICE_NAME_OVERRIDE="$2"
+      DEVICE_NAME_OVERRIDE_SET=true
       shift 2
       ;;
     --baud|--speed)
@@ -175,6 +202,11 @@ done
 
 if [[ "$AUTO_PORT" == true && "$ALL_PORTS" == true ]]; then
   err "Use either --auto or --all, not both."
+  exit 1
+fi
+
+if [[ "$LIST_PORTS" == true && "$LIST_PORTS_JSON" == true ]]; then
+  err "Use either --ports or --ports-json, not both."
   exit 1
 fi
 
@@ -239,6 +271,21 @@ if [[ "$WIFI_PASSWORD_OVERRIDE" == *$'\n'* || "$WIFI_PASSWORD_OVERRIDE" == *$'\r
   exit 1
 fi
 
+if [[ "$DEVICE_NAME_OVERRIDE_SET" == true && -z "$DEVICE_NAME_OVERRIDE" ]]; then
+  err "Device name override cannot be empty."
+  exit 1
+fi
+
+if [[ "$DEVICE_NAME_OVERRIDE" == *$'\n'* || "$DEVICE_NAME_OVERRIDE" == *$'\r'* ]]; then
+  err "Device name override cannot contain newlines."
+  exit 1
+fi
+
+if [[ ${#DEVICE_NAME_OVERRIDE} -gt 17 ]]; then
+  err "Device name override must be 17 characters or fewer."
+  exit 1
+fi
+
 c_string_literal() {
   local value="$1"
   value=${value//\\/\\\\}
@@ -246,25 +293,28 @@ c_string_literal() {
   printf '"%s"' "$value"
 }
 
-create_wifi_override_header() {
-  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true ]]; then
+create_build_override_header() {
+  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true ]]; then
     return
   fi
 
-  WIFI_OVERRIDE_HEADER="$(mktemp "/tmp/primus_wifi_overrides.XXXXXX")"
-  trap '[[ -n "${WIFI_OVERRIDE_HEADER:-}" ]] && rm -f "$WIFI_OVERRIDE_HEADER"' EXIT
+  BUILD_OVERRIDE_HEADER="$(mktemp "/tmp/primus_build_overrides.XXXXXX")"
+  trap '[[ -n "${BUILD_OVERRIDE_HEADER:-}" ]] && rm -f "$BUILD_OVERRIDE_HEADER"' EXIT
 
   {
     printf '#pragma once\n'
+    if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
+      printf '#define DEVICE_SHORT_NAME %s\n' "$(c_string_literal "$DEVICE_NAME_OVERRIDE")"
+    fi
     if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then
       printf '#define DEFAULT_WIFI_SSID %s\n' "$(c_string_literal "$WIFI_SSID_OVERRIDE")"
     fi
     if [[ "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
       printf '#define DEFAULT_WIFI_PASSWORD %s\n' "$(c_string_literal "$WIFI_PASSWORD_OVERRIDE")"
     fi
-  } > "$WIFI_OVERRIDE_HEADER"
+  } > "$BUILD_OVERRIDE_HEADER"
 
-  EXTRA_FLAGS="$EXTRA_FLAGS -include $WIFI_OVERRIDE_HEADER"
+  EXTRA_FLAGS="$EXTRA_FLAGS -include $BUILD_OVERRIDE_HEADER"
 }
 
 check_cli() {
@@ -397,6 +447,15 @@ records = [record for record in records if record["address"]]
 candidates = [record for record in records if record["candidate"]]
 others = [record for record in records if not record["candidate"]]
 
+if mode == "json":
+  print(json.dumps({
+    "target_fqbn": target_fqbn,
+    "ports": records,
+    "candidates": candidates,
+    "others": others,
+  }, separators=(",", ":")))
+  sys.exit(0)
+
 if mode == "all":
   if not candidates:
     print("No ESP32-like serial ports were detected.", file=sys.stderr)
@@ -448,6 +507,10 @@ list_ports() {
   port_parser list
 }
 
+list_ports_json() {
+  port_parser json
+}
+
 detect_auto_port() {
   port_parser auto
 }
@@ -475,6 +538,11 @@ check_cli
 
 if [[ "$LIST_PORTS" == true ]]; then
   list_ports
+  exit 0
+fi
+
+if [[ "$LIST_PORTS_JSON" == true ]]; then
+  list_ports_json
   exit 0
 fi
 
@@ -520,7 +588,11 @@ if [[ "$INSTALL_ONLY" == true ]]; then
   exit 0
 fi
 
-create_wifi_override_header
+create_build_override_header
+
+if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
+  info "Device name override: $DEVICE_NAME_OVERRIDE"
+fi
 
 if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then
   info "WiFi SSID override: $WIFI_SSID_OVERRIDE"

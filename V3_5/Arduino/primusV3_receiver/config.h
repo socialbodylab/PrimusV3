@@ -261,7 +261,9 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_PROTOCOL_VER    14
 
 // Device identity — reported in ArtPollReply
-#define DEVICE_SHORT_NAME  "PrimusV3"          // max 17 chars + null
+#ifndef DEVICE_SHORT_NAME
+  #define DEVICE_SHORT_NAME  "PrimusV3"        // max 17 chars + null
+#endif
 #define DEVICE_LONG_NAME   "PrimusV3.5 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3

@@ -276,6 +276,8 @@ The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. A
 | `GET /api/looks` | List all saved looks |
 | `GET /api/looks/:id` | Load a single look by ID |
 | `GET /api/cues` | Get cue list state (cues, current index, playing flag) |
+| `GET /api/firmware/status` | Source-checkout firmware upload availability plus current/last job state |
+| `GET /api/firmware/jobs/:id` | Poll a firmware upload job, including redacted output and structured results |
 
 ### POST Endpoints — Device Management
 
@@ -325,6 +327,19 @@ The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. A
 | `POST /api/cues/goto` | `{number: N}` | Jump to a specific cue number |
 | `POST /api/controller/activate` | `{look_id, fade_time}` | Activate a look directly with optional fade time |
 | `POST /api/controller/blackout` | `{fade_time}` | Fade to black with optional fade time |
+
+### POST Endpoints — Firmware Upload
+
+These endpoints are local sender helpers for source-checkout workflows. They wrap `V3_5/Arduino/upload.sh`, run one job at a time, and redact WiFi passwords from job output. The Firmware tab uses the simple flow of firmware version, selected device or all devices, independently optional device-name and WiFi overrides, then compile/upload with an output window. Packaged app support is not part of the first implementation.
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/firmware/jobs` | `{action:"list_ports", profile:"v3"}` | Run `upload.sh --board <profile> --ports-json` and return structured serial port data in the job result. |
+| `POST /api/firmware/jobs` | `{action:"install", profile:"v3"}` | Run `upload.sh --board <profile> --install`. |
+| `POST /api/firmware/jobs` | `{action:"compile", profile:"v3", device_name?, wifi_ssid?, wifi_password?}` | Run compile-only verification with optional default device-name and WiFi credential overrides. |
+| `POST /api/firmware/jobs` | `{action:"upload", profile:"v3", port_mode:"auto"\|"selected"\|"all", port?, device_name?, wifi_ssid?, wifi_password?}` | Compile, then upload by auto-detected port, explicit selected port, or all detected ESP32-like ports. |
+
+Firmware job responses include `{id, action, profile, status, command, output, result, error}`. `status` is `queued`, `running`, `succeeded`, or `failed`. Starting a new job while another is queued/running returns `409`.
 
 ### DELETE Endpoints
 

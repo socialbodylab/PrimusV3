@@ -12,6 +12,7 @@ V3_5/sender/
 ├── state.py                # Output tables, device state, playback source, Art-Net sends
 ├── artnet.py               # Art-Net packets, discovery, capability parsing, FPS telemetry
 ├── server.py               # HTTP API and static file server
+├── firmware.py             # Source-checkout firmware upload jobs for the web UI
 ├── effects.py              # Effects and pixel transforms
 ├── clips.py                # Clip persistence and preview computation
 ├── mixer.py                # Look timeline frame computation
@@ -129,6 +130,11 @@ Important device/control endpoints in `server.py`:
 | `POST /api/set_device_ip` | Static IP config. |
 | `POST /api/revert_device_dhcp` | Return device to DHCP. |
 | `POST /api/update` | Designer/output type/effect settings. |
+| `GET /api/firmware/status` | Firmware upload tooling availability and current/last job. |
+| `POST /api/firmware/jobs` | Start a source-checkout firmware job: list ports, install, compile, or upload. |
+| `GET /api/firmware/jobs/:id` | Poll a firmware job, including redacted output and structured port results. |
+
+Firmware upload jobs wrap `V3_5/Arduino/upload.sh` and are source-run only in the first pass. The Firmware tab presents the simple path: choose firmware version, refresh/select an available USB device or all devices, independently enable default device-name and/or WiFi overrides, then compile or upload while watching the output window. The API still supports the script's maintenance actions where useful. It returns `409` when another firmware job is running, `400` for invalid action/profile/port data, and `503` when the upload script, `bash`, `python3`, or `arduino-cli` is unavailable. WiFi passwords must not appear in API responses or web UI output.
 
 ## Web UI Files
 
@@ -141,7 +147,8 @@ V3_5/sender/web/
 └── js/
     ├── app.js
     ├── look-mixer.js
-    └── look-controller.js
+    ├── look-controller.js
+    └── firmware.js
 ```
 
 Device profile fields are surfaced in `index.html` and managed through the `conn` Alpine store in `app.js`.
@@ -151,6 +158,7 @@ Guidelines:
 - Keep the UI dependency-free and static.
 - Keep capability-aware controls disabled when the receiver does not advertise support.
 - Display profile metadata from API state rather than inferring board generation from IP/name.
+- Keep the Firmware tab visually aligned with the mixer/controller panels and use local API jobs instead of invoking upload commands from browser code.
 
 ## Adding Output Types
 

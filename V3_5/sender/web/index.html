@@ -9,6 +9,7 @@
 <script src="/js/app.js"></script>
 <script src="/js/look-mixer.js"></script>
 <script src="/js/look-controller.js"></script>
+<script src="/js/firmware.js"></script>
 </head>
 <body>
 
@@ -48,7 +49,7 @@
 <div class="main-content" x-data>
 
     <!-- ──── SIDEBAR: Devices ──── -->
-    <div class="sidebar">
+    <div class="sidebar" x-show="$store.app.mode !== 'firmware'">
         <div class="flex justify-between items-center mb-4">
             <span class="section-title" style="margin:0">Devices</span>
             <div class="btn-group">
@@ -99,7 +100,7 @@
                     <span class="device-state-badge"
                           :class="dev.connected ? 'device-state-live' : 'device-state-offline'"
                           x-text="dev.connected ? 'Live' : 'Offline'"></span>
-                    <span class="device-profile" x-text="dev.hardware_label || dev.hardware_profile || 'Unknown hardware'"></span>
+                    <span class="device-profile" x-text="$store.conn.hardwareLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                     <span class="device-fps"
                           x-show="dev.connected"
@@ -229,7 +230,7 @@
                     <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
                         <div class="device-name" x-text="node.short_name || node.ip"></div>
                         <div class="device-ip" x-text="node.ip"></div>
-                        <div class="device-ip" x-text="node.hardware_label || node.hardware_profile || 'Unknown hardware'"></div>
+                        <div class="device-ip" x-text="$store.conn.hardwareLabel(node)"></div>
                         <div class="device-capability-row">
                             <span class="device-capability-status"
                                   :class="$store.conn.capabilityStatusClass(node)"
@@ -1062,6 +1063,130 @@
                 </div>
             </div>
         </div>
+        </div>
+    </div>
+
+    <!-- ---- PANEL: Firmware ---- -->
+    <div class="panel" x-show="$store.app.mode === 'firmware'" x-data="firmwareUploader">
+        <div class="flex justify-between items-center mb-4 firmware-title-row">
+            <div>
+                <h2 class="section-title" style="margin:0">Firmware</h2>
+                <div class="text-sm text-muted" x-text="availabilityMessage"></div>
+            </div>
+            <div class="firmware-status-pill" :class="statusClass()">
+                <span x-text="jobLabel()"></span>
+            </div>
+        </div>
+
+        <div class="firmware-grid firmware-workflow-grid">
+            <div class="output-section firmware-section">
+                <div class="output-header">
+                    <span class="output-name">Device Version</span>
+                    <span class="text-sm text-muted" x-text="profileDetail()"></span>
+                </div>
+                <div class="sub-mode-toggle firmware-profile-toggle">
+                    <template x-for="item in profiles" :key="item.id">
+                        <button class="sub-mode-btn"
+                                :class="{ active: profile === item.id }"
+                                :disabled="running"
+                                @click="setProfile(item.id)">
+                            <span x-text="item.label"></span>
+                        </button>
+                    </template>
+                </div>
+                <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+            </div>
+
+            <div class="output-section firmware-section firmware-device-section">
+                <div class="output-header">
+                    <span class="output-name">Device</span>
+                    <button class="btn btn-sm" @click="scanPorts()" :disabled="!available || running">Refresh Devices</button>
+                </div>
+                <div class="firmware-target-summary" x-text="targetSummary()"></div>
+                <div class="firmware-port-list">
+                    <template x-if="candidatePorts.length === 0">
+                        <div class="firmware-empty-state">No firmware devices found. Refresh after connecting a receiver over USB.</div>
+                    </template>
+                    <button type="button" class="firmware-port-row firmware-port-all"
+                            :class="{ 'firmware-port-selected': portMode === 'all' }"
+                            x-show="candidatePorts.length > 0"
+                            :disabled="running || candidatePorts.length === 0"
+                            @click="selectAllDevices()">
+                        <span class="firmware-port-address">All Available Devices</span>
+                        <span class="firmware-port-board" x-text="candidatePorts.length + ' detected'"></span>
+                        <span class="firmware-port-badge">All</span>
+                        <span class="firmware-port-reason">Upload the selected firmware version to every detected ESP32-like port.</span>
+                    </button>
+                    <template x-for="port in candidatePorts" :key="port.address">
+                        <button type="button" class="firmware-port-row"
+                                :class="portRowClass(port)"
+                                :disabled="running"
+                                @click="selectPort(port)">
+                            <span class="firmware-port-address" x-text="port.address"></span>
+                            <span class="firmware-port-board" x-text="port.board"></span>
+                            <span class="firmware-port-badge" x-text="portBadge(port)"></span>
+                            <span class="firmware-port-reason" x-text="port.reason"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="output-section firmware-section">
+                <div class="output-header">
+                    <span class="output-name">Overrides</span>
+                </div>
+                <div class="firmware-override-toggles">
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="nameEnabled" :disabled="running">
+                        <span>Use custom name</span>
+                    </label>
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="wifiEnabled" :disabled="running">
+                        <span>Use custom credentials</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Device Name</label>
+                    <input class="form-input" type="text" maxlength="17"
+                           x-model="deviceName" :disabled="running || !nameEnabled"
+                           placeholder="PrimusV3" autocomplete="off">
+                </div>
+                <div class="firmware-form-grid">
+                    <div class="form-group">
+                        <label class="form-label">SSID</label>
+                        <input class="form-input" type="text" x-model="wifiSsid" :disabled="running || !wifiEnabled" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input class="form-input" type="password" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="firmware-empty-state" x-show="!nameEnabled && !wifiEnabled">Using firmware defaults from config.h.</div>
+            </div>
+
+            <div class="output-section firmware-section firmware-actions-section">
+                <div class="output-header">
+                    <span class="output-name">Compile / Upload</span>
+                    <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
+                </div>
+                <div class="firmware-actions">
+                    <button class="btn" @click="startJob('compile')" :disabled="!available || running">Compile</button>
+                    <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="output-section firmware-log-section">
+            <div class="output-header">
+                <span class="output-name">Output</span>
+                <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
+            </div>
+            <div class="firmware-log" x-show="activeJob" x-cloak>
+                <template x-for="(line, idx) in outputLines" :key="idx">
+                    <div class="firmware-log-line" x-text="line"></div>
+                </template>
+            </div>
+            <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
         </div>
     </div>
 

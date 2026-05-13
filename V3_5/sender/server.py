@@ -9,6 +9,7 @@ import mimetypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import clips
+from firmware import FirmwareRequestError, firmware_jobs
 import mixer
 from artnet import discover_artnet_nodes
 from paths import web_dir
@@ -46,6 +47,19 @@ class Handler(BaseHTTPRequestHandler):
         # API routes
         if path == "/api/state":
             self._json_response(self.controller_state.get_json())
+            return
+        if path == "/api/firmware/status":
+            self._json_response(firmware_jobs.status())
+            return
+        if path.startswith("/api/firmware/jobs/"):
+            job_id = path.split("/api/firmware/jobs/")[1]
+            if not _safe_id(job_id):
+                self._json_error(400, "invalid firmware job id")
+                return
+            try:
+                self._json_response(firmware_jobs.get_job(job_id))
+            except FirmwareRequestError as exc:
+                self._json_error(exc.code, exc.message)
             return
         if path == "/api/clips":
             params = self._query_params()
@@ -424,6 +438,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/device_groups":
             group = self.controller_state.save_device_group(data)
             self._json_response(group)
+
+        elif path == "/api/firmware/jobs":
+            try:
+                self._json_response(firmware_jobs.start_job(data))
+            except FirmwareRequestError as exc:
+                self._json_error(exc.code, exc.message)
 
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')

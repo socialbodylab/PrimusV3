@@ -1216,6 +1216,230 @@ input[type="color"] {
     color: var(--text-secondary);
 }
 
+/* -- FIRMWARE UPLOAD ------------------------------------------------ */
+
+.firmware-title-row {
+    gap: 12px;
+}
+
+.firmware-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.firmware-status-running { border-color: var(--warning); color: var(--warning); }
+.firmware-status-success { border-color: var(--success); color: var(--success); }
+.firmware-status-error { border-color: var(--danger); color: var(--danger); }
+.firmware-status-idle { border-color: var(--border); color: var(--text-secondary); }
+
+.firmware-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+.firmware-workflow-grid {
+    grid-template-columns: minmax(220px, 0.85fr) minmax(320px, 1.15fr);
+}
+
+.firmware-section {
+    min-height: 112px;
+}
+
+.firmware-device-section {
+    grid-column: auto;
+}
+
+.firmware-profile-toggle {
+    margin-bottom: 10px;
+}
+
+.firmware-profile-copy {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.firmware-port-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.firmware-port-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1.4fr) minmax(120px, 1fr) auto;
+    gap: 6px 10px;
+    width: 100%;
+    padding: 8px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-align: left;
+}
+
+.firmware-port-all {
+    background: var(--bg-tertiary);
+}
+
+.firmware-port-row:hover {
+    border-color: var(--accent-dim);
+}
+
+.firmware-port-row:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.firmware-port-candidate {
+    border-color: color-mix(in srgb, var(--accent-dim) 55%, var(--border));
+}
+
+.firmware-port-selected {
+    background: color-mix(in srgb, var(--accent-dim) 16%, var(--bg-primary));
+    border-color: var(--accent);
+}
+
+.firmware-port-address {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--accent);
+    overflow-wrap: anywhere;
+}
+
+.firmware-port-board,
+.firmware-port-reason {
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.firmware-port-badge {
+    justify-self: end;
+    align-self: start;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.firmware-port-reason {
+    grid-column: 1 / -1;
+}
+
+.firmware-inline-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.firmware-override-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-bottom: 10px;
+}
+
+.firmware-target-summary {
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.firmware-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.firmware-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.firmware-actions-section {
+    min-height: 120px;
+}
+
+.firmware-log-section {
+    margin-top: 12px;
+}
+
+.firmware-log {
+    min-height: 240px;
+    max-height: 420px;
+    overflow: auto;
+    padding: 10px;
+    background: #050505;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.firmware-log-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-secondary);
+}
+
+.firmware-log-line:first-child {
+    color: var(--accent);
+}
+
+.firmware-empty-state {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 8px 0;
+}
+
+@media (max-width: 900px) {
+    .firmware-workflow-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .firmware-title-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .firmware-port-row {
+        grid-template-columns: 1fr;
+    }
+
+    .firmware-device-section {
+        grid-column: auto;
+    }
+
+    .firmware-port-badge {
+        justify-self: start;
+    }
+}
+
 /* ── OUTPUT CONTROLS ───────────────────────────────────── */
 
 .output-section {

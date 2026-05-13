@@ -1,0 +1,234 @@
+document.addEventListener("alpine:init", () => {
+    Alpine.data("firmwareUploader", () => ({
+        profile: "v3",
+        profiles: [
+            { id: "v1", label: "V1", detail: "Huzzah32" },
+            { id: "v2", label: "V2", detail: "ESP32 Feather" },
+            { id: "v3", label: "V3", detail: "Reverse TFT" },
+        ],
+        available: false,
+        availabilityMessage: "Checking firmware tools...",
+        sourceOnly: true,
+        ports: [],
+        portMode: "selected",
+        selectedPort: "",
+        nameEnabled: false,
+        deviceName: "",
+        wifiEnabled: false,
+        wifiSsid: "",
+        wifiPassword: "",
+        activeJob: null,
+        polling: null,
+        notifiedJobId: null,
+
+        init() {
+            this.nameEnabled = false;
+            this.wifiEnabled = false;
+            this.wifiSsid = "";
+            this.wifiPassword = "";
+            this.deviceName = "";
+            this.refreshStatus();
+            document.addEventListener("primus:mode-changed", event => {
+                if (event.detail?.mode === "firmware") {
+                    this.refreshStatus();
+                }
+            });
+        },
+
+        get running() {
+            return ["queued", "running"].includes(this.activeJob?.status);
+        },
+
+        get terminal() {
+            return ["succeeded", "failed"].includes(this.activeJob?.status);
+        },
+
+        get outputLines() {
+            return this.activeJob?.output || [];
+        },
+
+        get candidatePorts() {
+            return this.ports.filter(port => port.candidate);
+        },
+
+        get selectedPortLabel() {
+            if (this.portMode === "all") return "All available devices";
+            const port = this.ports.find(item => item.address === this.selectedPort);
+            return port ? port.address : (this.selectedPort || "No device selected");
+        },
+
+        get canUpload() {
+            if (!this.available || this.running) return false;
+            if (this.portMode === "all") return this.candidatePorts.length > 0;
+            return !!this.selectedPort;
+        },
+
+        async refreshStatus() {
+            try {
+                const status = await api("GET", "/api/firmware/status");
+                this.available = !!status.available;
+                this.availabilityMessage = status.message || "Firmware upload status unknown.";
+                this.sourceOnly = status.source_only !== false;
+                if (status.current_job) {
+                    this.activeJob = status.current_job;
+                    this.startPolling();
+                } else if (!this.activeJob && status.last_job) {
+                    this.activeJob = status.last_job;
+                    this.consumeJobResult(status.last_job);
+                }
+            } catch (e) {
+                this.available = false;
+                this.availabilityMessage = e.message || "Firmware status unavailable.";
+            }
+        },
+
+        setProfile(profile) {
+            if (this.running) return;
+            this.profile = profile;
+            this.ports = [];
+            this.selectedPort = "";
+            this.portMode = "selected";
+        },
+
+        profileDetail() {
+            return this.profiles.find(item => item.id === this.profile)?.detail || "Receiver";
+        },
+
+        selectPort(port) {
+            if (this.running || !port?.address || !port.candidate) return;
+            this.selectedPort = port.address;
+            this.portMode = "selected";
+        },
+
+        selectAllDevices() {
+            if (this.running || this.candidatePorts.length === 0) return;
+            this.selectedPort = "";
+            this.portMode = "all";
+        },
+
+        portRowClass(port) {
+            return {
+                "firmware-port-candidate": !!port.candidate,
+                "firmware-port-selected": this.selectedPort === port.address,
+            };
+        },
+
+        portBadge(port) {
+            if (port.target_match) return "Profile match";
+            if (port.candidate) return "Candidate";
+            return "Other";
+        },
+
+        statusClass() {
+            if (this.running) return "firmware-status-running";
+            if (this.activeJob?.status === "failed" || !this.available) return "firmware-status-error";
+            if (this.activeJob?.status === "succeeded") return "firmware-status-success";
+            return "firmware-status-idle";
+        },
+
+        jobLabel() {
+            if (!this.activeJob) return "Ready";
+            const action = this.activeJob.action.replace("_", " ");
+            return action + " - " + this.activeJob.status;
+        },
+
+        targetSummary() {
+            if (this.running) return "Firmware job is running.";
+            if (!this.candidatePorts.length) return "Connect a receiver, then refresh devices.";
+            if (this.portMode === "all") return "All " + this.candidatePorts.length + " available device" + (this.candidatePorts.length === 1 ? "" : "s") + " selected.";
+            return this.selectedPort ? this.selectedPort + " selected." : "Choose a device or All Available Devices.";
+        },
+
+        scanPorts() {
+            return this.startJob("list_ports");
+        },
+
+        async startJob(action) {
+            if (this.running) return;
+            const body = { action, profile: this.profile };
+            if (action === "compile" || action === "upload") {
+                this.addDeviceNameField(body);
+                this.addWifiFields(body);
+            }
+            if (action === "upload") {
+                body.port_mode = this.portMode;
+                if (this.portMode !== "all") {
+                    body.port = this.selectedPort;
+                }
+            }
+            try {
+                this.activeJob = await api("POST", "/api/firmware/jobs", body);
+                this.notifiedJobId = null;
+                this.startPolling();
+                await this.pollJob();
+            } catch (e) {
+                Alpine.store("app").showApiError("Firmware job failed", e);
+            }
+        },
+
+        addWifiFields(body) {
+            if (!this.wifiEnabled) return;
+            if (this.wifiSsid) body.wifi_ssid = this.wifiSsid;
+            if (this.wifiPassword) body.wifi_password = this.wifiPassword;
+        },
+
+        addDeviceNameField(body) {
+            if (!this.nameEnabled) return;
+            const name = this.deviceName.trim();
+            if (name) body.device_name = name;
+        },
+
+        startPolling() {
+            if (this.polling || !this.activeJob) return;
+            this.polling = setInterval(() => this.pollJob(), 250);
+        },
+
+        stopPolling() {
+            if (this.polling) {
+                clearInterval(this.polling);
+                this.polling = null;
+            }
+        },
+
+        async pollJob() {
+            if (!this.activeJob?.id) return;
+            try {
+                const job = await api("GET", "/api/firmware/jobs/" + this.activeJob.id);
+                this.activeJob = job;
+                this.consumeJobResult(job);
+                if (["succeeded", "failed"].includes(job.status)) {
+                    this.stopPolling();
+                    this.notifyFinished(job);
+                }
+            } catch (e) {
+                this.stopPolling();
+                Alpine.store("app").showApiError("Firmware status failed", e);
+            }
+        },
+
+        consumeJobResult(job) {
+            if (job?.action !== "list_ports" || job.status !== "succeeded") return;
+            const ports = job.result?.ports || [];
+            this.ports = ports;
+            const selectedStillAvailable = this.candidatePorts.some(port => port.address === this.selectedPort);
+            if (this.portMode !== "all" && !selectedStillAvailable) {
+                this.selectedPort = this.candidatePorts[0]?.address || "";
+                this.portMode = "selected";
+            }
+            if (this.portMode === "all" && this.candidatePorts.length === 0) {
+                this.portMode = "selected";
+            }
+        },
+
+        notifyFinished(job) {
+            if (!job || this.notifiedJobId === job.id) return;
+            this.notifiedJobId = job.id;
+            if (job.status === "succeeded") {
+                const label = job.action === "list_ports" ? "Port scan" : "Firmware job";
+                Alpine.store("app").showNotice(label + " complete.", "success");
+            } else {
+                Alpine.store("app").showNotice(job.error || "Firmware job failed.", "error", 5000);
+            }
+        },
+    }));
+});
