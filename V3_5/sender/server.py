@@ -99,6 +99,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/cues":
             self._json_response(self.cue_list.get_json())
             return
+        if path.startswith("/api/"):
+            self._json_error(404, "not found")
+            return
 
         # Static files
         if path == "/" or path == "":

@@ -1,5 +1,5 @@
 /**
- * look-mixer.js — Look Mixer Alpine component.
+ * look-mixer.js — Look Designer Alpine component.
  * Unified view: Designer sub-mode (clip editing) + Timeline sub-mode (look composition).
  * Incorporates clip designer controls, inline clip library, and timeline editor.
  */
@@ -42,7 +42,7 @@ document.addEventListener("alpine:init", () => {
         clipSaveDuration: 5.0,
         loadedClips: {},   // oi -> {id, name} of clip loaded in that output
 
-        // ── Mixer preview rendering ──
+        // ── Look preview rendering ──
         _mixerPreviewInterval: null,
         _mixerPreviewPending: false,
         _lastMixerFrameTime: null,
@@ -86,8 +86,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         typeLabel(type) {
-            if (!type) return "None";
-            return type.split("_").map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+            return Alpine.store("app").outputTypeLabel(type);
         },
 
         effectLabel(effect) {
@@ -463,7 +462,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ══════════════════════════════════════════════════
-        //  MIXER PREVIEW RENDERING
+        //  LOOK PREVIEW RENDERING
         // ══════════════════════════════════════════════════
 
         _startMixerPreviewLoop() {

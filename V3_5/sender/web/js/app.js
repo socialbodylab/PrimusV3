@@ -1,5 +1,5 @@
 /**
- * app.js — Main Alpine.js stores and shared utilities for PrimusV3.5
+ * app.js — Main Alpine.js stores and shared utilities for Primus Central
  */
 
 // ── API helper ──────────────────────────────────────────
@@ -78,6 +78,22 @@ document.addEventListener("alpine:init", () => {
             if (match) return "Output " + match[1];
             if (raw) return raw;
             return Number.isInteger(idx) ? "Output " + idx : "Output";
+        },
+
+        outputTypeLabel(type) {
+            const labels = {
+                none: "None",
+                short_strip: "Short Strip",
+                long_strip: "Long Strip",
+                grid: "Grid",
+                small_grid: "Small Grid",
+                extra_long_strip: "Extra Long Strip",
+            };
+            if (labels[type]) return labels[type];
+            if (!type) return "None";
+            return String(type).split("_")
+                .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                .join(" ");
         },
 
         get mixerPreviewTarget() {
@@ -251,7 +267,7 @@ document.addEventListener("alpine:init", () => {
                     return;
                 }
             }
-            this.showNotice('Mixer preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
+            this.showNotice('Preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
         },
 
         async setMixerPreviewAll() {
@@ -266,7 +282,7 @@ document.addEventListener("alpine:init", () => {
                     return;
                 }
             }
-            this.showNotice('Mixer preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
+            this.showNotice('Preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
         },
     });
 

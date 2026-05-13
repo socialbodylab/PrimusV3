@@ -141,7 +141,7 @@
                 </div>
                 <div class="device-outputs">
                     <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
-                        <span class="output-badge" x-text="$store.app.outputLabel(o.name, oi) + ': ' + o.type"></span>
+                        <span class="output-badge" x-text="$store.app.outputLabel(o.name, oi) + ': ' + $store.app.outputTypeLabel(o.type)"></span>
                     </template>
                 </div>
                 <div class="device-footer-actions">
@@ -149,7 +149,7 @@
                         <input type="checkbox"
                                :checked="!$store.app.mixerPreviewDevices || $store.app.mixerPreviewDevices.includes(di)"
                                @change="$store.app.toggleMixerDevice(di)">
-                        <span class="text-sm">Mixer preview</span>
+                        <span class="text-sm">Include in preview</span>
                     </label>
                     <button class="btn btn-sm btn-danger device-remove-btn" @click="$store.conn.removeDevice(di)">Remove</button>
                 </div>
@@ -253,7 +253,7 @@
         </div>
     </div>
 
-    <!-- ──── PANEL: Look Mixer ──── -->
+    <!-- ──── PANEL: Look Designer ──── -->
     <div class="panel mixer-panel" x-show="$store.app.mode === 'mixer'" x-data="lookMixer">
         <!-- Sub-mode toggle -->
         <div class="flex justify-between items-center mb-4">
@@ -304,7 +304,7 @@
                                         :value="out.type"
                                         @change="updateOutputType(oi, $event.target.value)">
                                     <template x-for="t in outputTypes">
-                                        <option :value="t" x-text="t"></option>
+                                            <option :value="t" x-text="typeLabel(t)"></option>
                                     </template>
                                 </select>
                             </div>
@@ -424,7 +424,7 @@
                          @click="setLibFilter('')">All</div>
                     <template x-for="t in outputTypes.filter(t => t !== 'none')">
                         <div class="filter-pill" :class="{ active: libFilterType === t }"
-                             @click="setLibFilter(t)" x-text="t"></div>
+                             @click="setLibFilter(t)" x-text="typeLabel(t)"></div>
                     </template>
                 </div>
                 <div class="card-grid">
@@ -440,7 +440,7 @@
                             <div class="card-body">
                                 <div class="card-title" x-text="clip.name"></div>
                                 <div class="card-meta">
-                                    <span x-text="clip.output_type"></span> &middot;
+                                    <span x-text="typeLabel(clip.output_type)"></span> &middot;
                                     <span x-text="effectLabel(clip.effect)"></span>
                                 </div>
                             </div>
@@ -938,7 +938,7 @@
                     </template>
                     <p class="text-muted text-sm" x-show="cueForm.assignments.length === 0">Add at least one Look or Blackout item.</p>
                 </div>
-                <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet. Create Looks in the Look Mixer first, or add a Blackout cue.</p>
+                <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet. Create Looks in Look Designer first, or add a Blackout cue.</p>
                 <div class="modal-actions">
                     <button class="btn btn-danger" x-show="cueEditIndex >= 0" @click="deleteCueFromModal()">Delete Cue</button>
                     <button class="btn" @click="closeCueModal()">Cancel</button>

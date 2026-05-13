@@ -1,4 +1,4 @@
-/* PrimusV3.5 — Dark theme for performance/theatre context */
+/* Primus Central — Dark theme for performance/theatre context */
 
 :root {
     --bg-primary: #0f0f0f;
@@ -112,6 +112,64 @@ body {
     margin-left: 16px;
     font-size: 12px;
     color: var(--text-secondary);
+}
+
+@media (max-width: 760px) {
+    .navbar {
+        height: auto;
+        min-height: 48px;
+        flex-wrap: wrap;
+        row-gap: 4px;
+        padding: 6px 10px;
+    }
+
+    .navbar-brand {
+        margin-right: auto;
+    }
+
+    .navbar-status {
+        max-width: calc(100% - 132px);
+        margin-left: auto;
+    }
+
+    .playback-chip {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .playback-chip-meta {
+        display: none;
+    }
+
+    .navbar-tabs {
+        order: 2;
+        justify-content: flex-end;
+        width: 100%;
+        margin-left: 0;
+        overflow-x: auto;
+    }
+
+    .navbar-tab {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+
+    .notice-banner {
+        top: 86px;
+    }
+}
+
+@media (max-width: 480px) {
+    .navbar-status {
+        width: 100%;
+        max-width: 100%;
+        justify-content: flex-end;
+        margin-left: 0;
+    }
+
+    .notice-banner {
+        top: 116px;
+    }
 }
 
 .status-dot {
@@ -783,7 +841,7 @@ input[type="color"] {
     image-rendering: pixelated;
 }
 
-/* ── TIMELINE (Look Mixer) ─────────────────────────────── */
+/* ── TIMELINE (Look Designer) ──────────────────────────── */
 
 .timeline-wrapper {
     display: flex;
