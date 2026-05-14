@@ -17,3 +17,10 @@ sender/.primus_state.json
 # Packaging outputs
 V3_5/build/
 V3_5/dist/
+
+# Local Apple signing material
+*.certSigningRequest
+*.cer
+*.p12
+*.mobileprovision
+DeveloperIDApplication.key

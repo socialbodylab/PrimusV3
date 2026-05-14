@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 APP_NAME = "PrimusCentral"
+MACOS_BUNDLE_ID = "com.socialbodylab.PrimusCentral"
 MACOS_ICON_SOURCE = Path("assets") / "appIcon.png"
 MACOS_ICON_SPECS = (
     (16, 1),
@@ -108,6 +109,8 @@ def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
         cmd.append("--onefile")
     if icon_path is not None:
         cmd.extend(["--icon", str(icon_path)])
+    if args.target == "macos" and args.windowed:
+        cmd.extend(["--osx-bundle-identifier", args.bundle_id])
 
     v35_dir = sender_dir.parent
     for source, dest in _data_files(v35_dir, sender_dir):
@@ -116,6 +119,74 @@ def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
 
     cmd.append(str(sender_dir / "run.py"))
     return cmd
+
+
+def _run(cmd, cwd=None):
+    print(" ".join(str(part) for part in cmd))
+    subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def _require_tool(name):
+    if shutil.which(name) is None:
+        raise RuntimeError(f"Required tool not found: {name}")
+
+
+def _post_sign_macos_app(app_path, identity, entitlements_file=None):
+    _require_tool("codesign")
+    cmd = [
+        "codesign",
+        "--force",
+        "--deep",
+        "--strict",
+        "--options",
+        "runtime",
+        "--timestamp",
+    ]
+    if entitlements_file:
+        cmd.extend(["--entitlements", str(entitlements_file)])
+    cmd.extend(["--sign", identity, str(app_path)])
+    _run(cmd)
+    _run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)])
+
+
+def _notary_zip_path(app_path, build_dir):
+    return build_dir / "notary" / f"{app_path.stem}-notary.zip"
+
+
+def _make_notary_zip(app_path, build_dir):
+    _require_tool("ditto")
+    zip_path = _notary_zip_path(app_path, build_dir)
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    if zip_path.exists():
+        zip_path.unlink()
+    _run(["ditto", "-c", "-k", "--keepParent", str(app_path), str(zip_path)])
+    return zip_path
+
+
+def _staple_and_verify_macos_app(app_path):
+    _require_tool("xcrun")
+    _run(["xcrun", "stapler", "staple", str(app_path)])
+    _run(["xcrun", "stapler", "validate", str(app_path)])
+    if shutil.which("spctl") is not None:
+        _run(["spctl", "-a", "-vvv", "-t", "install", str(app_path)])
+
+
+def _notarize_macos_app(app_path, build_dir, notary_profile, timeout=None):
+    _require_tool("xcrun")
+    zip_path = _make_notary_zip(app_path, build_dir)
+    cmd = [
+        "xcrun",
+        "notarytool",
+        "submit",
+        str(zip_path),
+        "--keychain-profile",
+        notary_profile,
+        "--wait",
+    ]
+    if timeout:
+        cmd.extend(["--timeout", timeout])
+    _run(cmd)
+    _staple_and_verify_macos_app(app_path)
 
 
 def _output_path(args, dist_dir):
@@ -157,6 +228,40 @@ def main(argv=None):
         default=APP_NAME,
         help=f"App/executable name (default: {APP_NAME!r}).",
     )
+    parser.add_argument(
+        "--bundle-id",
+        default=MACOS_BUNDLE_ID,
+        help=f"macOS bundle identifier (default: {MACOS_BUNDLE_ID!r}).",
+    )
+    parser.add_argument(
+        "--sign-identity",
+        default=os.environ.get("PRIMUSV3_CODESIGN_IDENTITY"),
+        help="Developer ID code signing identity for macOS release builds. "
+        "May also be set with PRIMUSV3_CODESIGN_IDENTITY.",
+    )
+    parser.add_argument(
+        "--entitlements-file",
+        type=Path,
+        default=None,
+        help="Optional macOS entitlements file to pass to codesign.",
+    )
+    parser.add_argument(
+        "--notary-profile",
+        default=os.environ.get("PRIMUSV3_NOTARY_PROFILE"),
+        help="notarytool keychain profile for macOS notarization. "
+        "May also be set with PRIMUSV3_NOTARY_PROFILE.",
+    )
+    parser.add_argument(
+        "--notary-timeout",
+        default=os.environ.get("PRIMUSV3_NOTARY_TIMEOUT"),
+        help="Optional notarytool wait timeout, such as '45m' or '1h'. "
+        "Apple continues processing after this timeout.",
+    )
+    parser.add_argument(
+        "--staple-existing",
+        action="store_true",
+        help="Skip build and staple/verify the existing macOS app output.",
+    )
     args = parser.parse_args(argv)
 
     args.target = _platform_default() if args.target == "auto" else args.target
@@ -170,12 +275,37 @@ def main(argv=None):
     args.windowed = not args.console
     if args.onefile is None:
         args.onefile = args.target == "windows"
+    if args.notary_profile and (args.target != "macos" or args.console):
+        print("Notarization requires a windowed macOS .app build.")
+        return 1
+    if args.staple_existing and (args.target != "macos" or args.console):
+        print("Stapling requires a windowed macOS .app build.")
+        return 1
+    if args.notary_profile and not args.sign_identity:
+        print("Notarization requires --sign-identity or PRIMUSV3_CODESIGN_IDENTITY.")
+        return 1
+    if args.entitlements_file and not args.entitlements_file.exists():
+        print(f"Entitlements file not found: {args.entitlements_file}")
+        return 1
 
     v35_dir = Path(__file__).resolve().parent
     repo_root = v35_dir.parent
     sender_dir = v35_dir / "sender"
     build_dir = v35_dir / "build" / args.target
     dist_dir = v35_dir / "dist" / args.target
+    output_path = _output_path(args, dist_dir)
+
+    if args.staple_existing:
+        if not output_path.exists():
+            print(f"App output not found: {output_path}")
+            return 1
+        try:
+            _staple_and_verify_macos_app(output_path)
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+            print(f"macOS stapling failed: {exc}")
+            return exc.returncode if isinstance(exc, subprocess.CalledProcessError) else 1
+        print(f"Stapled and verified: {output_path}")
+        return 0
 
     if importlib.util.find_spec("PyInstaller") is None:
         print("PyInstaller is not installed. Install it with: python -m pip install pyinstaller")
@@ -189,14 +319,30 @@ def main(argv=None):
 
     cmd = _build_command(args, sender_dir, build_dir, dist_dir, icon_path=icon_path)
     print(f"Building {args.target} sender app with PyInstaller...")
-    print(" ".join(str(part) for part in cmd))
     try:
-        subprocess.run(cmd, cwd=repo_root, check=True)
+        _run(cmd, cwd=repo_root)
     except subprocess.CalledProcessError as exc:
         return exc.returncode
 
+    try:
+        if args.target == "macos" and args.windowed and args.sign_identity:
+            print()
+            print(f"Signing: {output_path}")
+            _post_sign_macos_app(output_path, args.sign_identity, args.entitlements_file)
+        if args.notary_profile:
+            print()
+            print(f"Notarizing: {output_path}")
+            _notarize_macos_app(output_path, build_dir, args.notary_profile, args.notary_timeout)
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"macOS signing/notarization failed: {exc}")
+        return exc.returncode if isinstance(exc, subprocess.CalledProcessError) else 1
+
     print()
-    print(f"Built: {_output_path(args, dist_dir)}")
+    print(f"Built: {output_path}")
+    if args.notary_profile:
+        print("The app was signed, notarized, and stapled.")
+    elif args.sign_identity:
+        print("The app was signed but not notarized.")
     if args.console:
         print("Run the executable from Terminal/Command Prompt to test console logging.")
     elif args.target == "macos":

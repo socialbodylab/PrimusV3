@@ -130,6 +130,69 @@ python3 V3_5/build_sender_app.py --console
 
 Windows defaults to a one-file `.exe`. Use `--onedir` if you prefer a folder-based build while debugging.
 
+## Sign And Notarize macOS Builds
+
+Direct GitHub distribution uses a Developer ID Application certificate, not a Mac App Store certificate. The current bundle identifier is:
+
+```text
+com.socialbodylab.PrimusCentral
+```
+
+The visible app name remains `PrimusCentral.app`; build-to-build tracking belongs in release notes and checksums, not in the app bundle name.
+
+One-time local setup:
+
+```bash
+xcrun notarytool store-credentials "PrimusCentral Notary" \
+	--apple-id "dev@puckettrand.com" \
+	--team-id "SAV2V7GXQ5"
+```
+
+When prompted, paste the app-specific password generated at `appleid.apple.com`. Do not store Apple passwords, private keys, `.p12` files, certificate signing requests, or notarization credentials in the repository.
+
+Build, sign, notarize, staple, and verify the macOS app:
+
+```bash
+python3 V3_5/build_sender_app.py \
+	--target macos \
+	--sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+	--notary-profile "PrimusCentral Notary"
+```
+
+If Apple notarization is slow, add an explicit wait timeout. Apple continues processing after the local command times out, and the submission can be checked later with `xcrun notarytool history` or `xcrun notarytool info`.
+
+```bash
+python3 V3_5/build_sender_app.py \
+	--target macos \
+	--sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+	--notary-profile "PrimusCentral Notary" \
+	--notary-timeout 1h
+```
+
+After a timed-out submission is accepted, staple and verify the existing app without rebuilding:
+
+```bash
+python3 V3_5/build_sender_app.py --target macos --staple-existing
+```
+
+The same values can be supplied through environment variables:
+
+```bash
+PRIMUSV3_CODESIGN_IDENTITY="Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+PRIMUSV3_NOTARY_PROFILE="PrimusCentral Notary" \
+python3 V3_5/build_sender_app.py --target macos
+```
+
+The build script passes the bundle identifier to PyInstaller, then signs the finished app with hardened runtime and timestamp, submits a notary zip with `notarytool`, staples the accepted ticket, validates the staple, and runs Gatekeeper verification with `spctl` when available.
+
+Manual verification commands:
+
+```bash
+codesign --verify --deep --strict --verbose=2 V3_5/dist/macos/PrimusCentral.app
+xcrun stapler validate V3_5/dist/macos/PrimusCentral.app
+spctl -a -vvv -t install V3_5/dist/macos/PrimusCentral.app
+```
+
 ## Verify The App
 
 1. Double-click `V3_5/dist/macos/PrimusCentral.app` or `V3_5\dist\windows\PrimusCentral.exe`.
@@ -141,4 +204,4 @@ Windows defaults to a one-file `.exe`. Use `--onedir` if you prefer a folder-bas
 
 ## Distribution Notes
 
-The first build is suitable for local testing. Sharing with other Macs will likely require code signing, and wider macOS distribution may require notarization. Windows distribution may require code signing to reduce SmartScreen warnings.
+Unsigned builds are suitable for local testing. Shared macOS releases should be Developer ID signed, notarized, and stapled. Windows distribution may require code signing to reduce SmartScreen warnings.
