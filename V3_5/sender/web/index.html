@@ -497,9 +497,9 @@
         <div>
 
         <div class="preview-control-row" x-show="look">
-            <button class="btn btn-preview" :class="{ 'btn-preview-live': previewing }"
+            <button class="btn btn-preview" :class="{ 'btn-preview-live': timelinePreviewLive }"
                 @click="togglePreview()"
-                x-text="previewing ? 'LIVE' : 'GO LIVE'"></button>
+                x-text="timelinePreviewLive ? 'LIVE' : 'GO LIVE'"></button>
         </div>
 
         <div class="transport look-transport-row" x-show="look">
@@ -1101,10 +1101,10 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Password</label>
-                        <input class="form-input" type="password" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="new-password">
+                        <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
                     </div>
                 </div>
-                <div class="firmware-empty-state" x-show="!nameEnabled && !wifiEnabled">Using firmware defaults from config.h.</div>
+                <div class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></div>
             </div>
 
             <div class="output-section firmware-section firmware-actions-section">
@@ -1113,7 +1113,7 @@
                     <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
                 </div>
                 <div class="firmware-actions">
-                    <button class="btn" @click="startJob('compile')" :disabled="!available || running">Compile</button>
+                    <button class="btn" @click="startJob('compile')" :disabled="!canCompile">Compile</button>
                     <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
                 </div>
             </div>
@@ -1124,6 +1124,7 @@
                 <span class="output-name">Output</span>
                 <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
             </div>
+            <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
             <div class="firmware-log" x-show="activeJob" x-cloak>
                 <template x-for="(line, idx) in outputLines" :key="idx">
                     <div class="firmware-log-line" x-text="line"></div>

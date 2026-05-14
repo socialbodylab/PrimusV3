@@ -46,6 +46,7 @@ class FirmwareCommand:
     command: list
     redacted_command: list
     secrets: list = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -61,6 +62,7 @@ class FirmwareJob:
     returncode: int = None
     error: str = ""
     result: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     output: list = field(default_factory=list)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
@@ -94,6 +96,7 @@ class FirmwareJob:
                 "returncode": self.returncode,
                 "error": self.error,
                 "result": dict(self.result or {}),
+                "metadata": dict(self.metadata or {}),
                 "output": list(self.output),
             }
 
@@ -248,9 +251,12 @@ class FirmwareJobManager:
                 action=command.action,
                 profile=command.profile,
                 command=command.redacted_command,
+                metadata=command.metadata,
                 created_at=time.time(),
             )
             job.append_output("$ " + " ".join(command.redacted_command))
+            for line in self._metadata_output_lines(command.metadata):
+                job.append_output(line)
             self._jobs[job.id] = job
             self._last_job_id = job.id
             self._trim_jobs_locked()
@@ -268,10 +274,21 @@ class FirmwareJobManager:
         profile = self._validate_choice(data.get("profile", "v3"), BOARD_PROFILES, "profile")
         if action == "setup_tools":
             command = ["firmware-tools", "setup"]
-            return FirmwareCommand(action=action, profile=profile, command=command, redacted_command=command)
+            return FirmwareCommand(
+                action=action,
+                profile=profile,
+                command=command,
+                redacted_command=command,
+                metadata=self._build_metadata(action, profile),
+            )
 
         command = ["bash", self.script_path, "--board", profile]
         secrets = []
+        device_name = ""
+        wifi_ssid = ""
+        wifi_password_set = False
+        port_mode = None
+        port = ""
 
         if action == "list_ports":
             command.append("--ports-json")
@@ -279,35 +296,102 @@ class FirmwareJobManager:
             command.append("--install")
         elif action == "compile":
             command.append("--compile")
-            self._append_device_name_arg(command, data)
-            self._append_wifi_args(command, data, secrets)
+            device_name = self._append_device_name_arg(command, data)
+            wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
         elif action == "upload":
             port_mode = self._validate_choice(data.get("port_mode", "auto"), PORT_MODES, "port_mode")
-            self._append_device_name_arg(command, data)
-            self._append_wifi_args(command, data, secrets)
+            device_name = self._append_device_name_arg(command, data)
+            wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
             if port_mode == "selected":
-                command.append(self._validate_string(data.get("port", ""), "port", required=True, max_length=256))
+                port = self._validate_string(data.get("port", ""), "port", required=True, max_length=256)
+                command.append(port)
             elif port_mode == "all":
                 command.append("--all")
             else:
                 command.append("--auto")
 
         redacted = redact_command(command)
-        return FirmwareCommand(action=action, profile=profile, command=command, redacted_command=redacted, secrets=secrets)
+        metadata = self._build_metadata(
+            action,
+            profile,
+            device_name=device_name,
+            wifi_ssid=wifi_ssid,
+            wifi_password_set=wifi_password_set,
+            port_mode=port_mode,
+            port=port,
+        )
+        return FirmwareCommand(
+            action=action,
+            profile=profile,
+            command=command,
+            redacted_command=redacted,
+            secrets=secrets,
+            metadata=metadata,
+        )
 
     def _append_device_name_arg(self, command, data):
         device_name = self._validate_string(data.get("device_name", ""), "device_name", required=False, max_length=17)
         if device_name:
             command.extend(["--name", device_name])
+        return device_name
 
     def _append_wifi_args(self, command, data, secrets):
         ssid = self._validate_string(data.get("wifi_ssid", ""), "wifi_ssid", required=False, max_length=64)
         password = self._validate_string(data.get("wifi_password", ""), "wifi_password", required=False, max_length=128)
+        if bool(ssid) != bool(password):
+            raise FirmwareRequestError(400, "wifi_ssid and wifi_password must be provided together")
         if ssid:
             command.extend(["-ssid", ssid])
         if password:
             command.extend(["-pw", password])
             secrets.append(password)
+        return ssid, bool(password)
+
+    def _build_metadata(self, action, profile, device_name="", wifi_ssid="", wifi_password_set=False,
+                        port_mode=None, port=""):
+        overrides = {
+            "device_name": device_name or None,
+            "wifi_ssid": wifi_ssid or None,
+            "wifi_password_set": bool(wifi_password_set),
+        }
+        metadata = {
+            "profile": profile,
+            "overrides": overrides,
+            "has_overrides": bool(overrides["device_name"] or overrides["wifi_ssid"] or overrides["wifi_password_set"]),
+        }
+        if action == "upload":
+            metadata["target"] = {
+                "port_mode": port_mode or "auto",
+                "port": port or None,
+            }
+        return metadata
+
+    def _metadata_output_lines(self, metadata):
+        if not metadata:
+            return []
+        lines = []
+        overrides = metadata.get("overrides") or {}
+        if metadata.get("has_overrides"):
+            parts = []
+            if overrides.get("device_name"):
+                parts.append(f"device name '{overrides['device_name']}'")
+            if overrides.get("wifi_ssid"):
+                parts.append(f"WiFi SSID '{overrides['wifi_ssid']}'")
+            if overrides.get("wifi_password_set"):
+                parts.append("WiFi password set")
+            lines.append("Overrides: " + "; ".join(parts))
+        else:
+            lines.append("Overrides: firmware defaults from config.h")
+        target = metadata.get("target") or {}
+        if target:
+            mode = target.get("port_mode") or "auto"
+            if mode == "selected" and target.get("port"):
+                lines.append(f"Upload target: {target['port']}")
+            elif mode == "all":
+                lines.append("Upload target: all detected ESP32-like ports")
+            else:
+                lines.append("Upload target: auto-detect one ESP32-like port")
+        return lines
 
     def _validate_choice(self, value, choices, name):
         text = str(value or "").strip()

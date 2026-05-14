@@ -74,10 +74,17 @@ class FirmwareJobTests(unittest.TestCase):
         ])
         self.assertNotIn("router-password", command.redacted_command)
         self.assertIn("********", command.redacted_command)
+        self.assertEqual(command.metadata["overrides"], {
+            "device_name": "StageLeft",
+            "wifi_ssid": "PrimusRouter",
+            "wifi_password_set": True,
+        })
+        self.assertTrue(command.metadata["has_overrides"])
 
         matching_password = manager.build_command({
             "action": "compile",
             "profile": "v3",
+            "wifi_ssid": "PrimusRouter",
             "wifi_password": "v3",
         })
         self.assertEqual(matching_password.redacted_command[3], "v3")
@@ -93,12 +100,76 @@ class FirmwareJobTests(unittest.TestCase):
             "port": "/dev/cu.usbserial-1234",
         })
         self.assertEqual(selected.command[-1], "/dev/cu.usbserial-1234")
+        self.assertEqual(selected.metadata["target"], {
+            "port_mode": "selected",
+            "port": "/dev/cu.usbserial-1234",
+        })
 
         auto = manager.build_command({"action": "upload", "profile": "v3", "port_mode": "auto"})
         self.assertEqual(auto.command[-1], "--auto")
+        self.assertEqual(auto.metadata["target"]["port_mode"], "auto")
 
         all_ports = manager.build_command({"action": "upload", "profile": "v3", "port_mode": "all"})
         self.assertEqual(all_ports.command[-1], "--all")
+        self.assertEqual(all_ports.metadata["target"]["port_mode"], "all")
+
+    def test_upload_overrides_are_repeatable_and_redacted_in_job_status(self):
+        class EmptyProcess:
+            stdout = iter(())
+
+            def wait(self):
+                return 0
+
+        manager = self.make_manager(popen_factory=lambda *args, **kwargs: EmptyProcess())
+        payload = {
+            "action": "upload",
+            "profile": "v3",
+            "port_mode": "selected",
+            "port": "/dev/cu.usbmodem1234",
+            "device_name": "StageLeft",
+            "wifi_ssid": "PrimusRouter",
+            "wifi_password": "router-password",
+        }
+
+        first = manager.start_job(payload)
+        for _ in range(100):
+            current = manager.get_job(first["id"])
+            if current["status"] == "succeeded":
+                break
+            time.sleep(0.01)
+        first_done = manager.get_job(first["id"])
+
+        second = manager.build_command(payload)
+
+        self.assertEqual(first_done["metadata"]["overrides"]["device_name"], "StageLeft")
+        self.assertEqual(first_done["metadata"]["overrides"]["wifi_ssid"], "PrimusRouter")
+        self.assertTrue(first_done["metadata"]["overrides"]["wifi_password_set"])
+        self.assertIn("Overrides: device name 'StageLeft'; WiFi SSID 'PrimusRouter'; WiFi password set", first_done["output"])
+        self.assertNotIn("router-password", "\n".join(first_done["output"]))
+        self.assertEqual(second.command, [
+            "bash",
+            "/tmp/upload.sh",
+            "--board",
+            "v3",
+            "--name",
+            "StageLeft",
+            "-ssid",
+            "PrimusRouter",
+            "-pw",
+            "router-password",
+            "/dev/cu.usbmodem1234",
+        ])
+
+    def test_wifi_override_requires_ssid_and_password(self):
+        manager = self.make_manager()
+
+        with self.assertRaises(firmware.FirmwareRequestError) as ssid_only_error:
+            manager.build_command({"action": "compile", "profile": "v3", "wifi_ssid": "PrimusRouter"})
+        self.assertEqual(ssid_only_error.exception.code, 400)
+
+        with self.assertRaises(firmware.FirmwareRequestError) as password_only_error:
+            manager.build_command({"action": "compile", "profile": "v3", "wifi_password": "router-password"})
+        self.assertEqual(password_only_error.exception.code, 400)
 
     def test_invalid_values_raise_request_errors(self):
         manager = self.make_manager()

@@ -1749,6 +1749,27 @@ input[type="color"] {
     gap: 10px;
 }
 
+.firmware-override-summary,
+.firmware-job-summary {
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.firmware-override-summary-active {
+    color: var(--accent);
+}
+
+.firmware-override-summary-error {
+    color: var(--danger);
+}
+
+.firmware-job-summary {
+    margin: 0 0 8px;
+    color: var(--text-secondary);
+}
+
 .firmware-actions {
     display: flex;
     flex-wrap: wrap;

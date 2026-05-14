@@ -51,9 +51,9 @@ Examples:
 | `-v3` | Build for the V3.1 Reverse TFT profile. Long form: `--board v3`. Legacy aliases: `--board v3_1`, `--board v31`, `--board v3_1_reverse_tft`. This is the default when no board flag is supplied. |
 | `--compile` | Compile only. Do not upload. This is the Arduino IDE Verify-style path. |
 | `--install` | Install/check the libraries required by the selected board, then exit. |
-| `-name <name>`, `--name <name>`, `--device-name <name>` | Override `DEVICE_SHORT_NAME` for this build without editing `config.h`. Max 17 characters. If a receiver already has an NVS name from Rename, the stored name still takes precedence until changed/cleared. |
-| `-ssid <name>`, `--ssid <name>` | Override `DEFAULT_WIFI_SSID` for this build without editing `config.h`. |
-| `-pw <password>`, `--pw <password>`, `--password <password>` | Override `DEFAULT_WIFI_PASSWORD` for this build without editing `config.h`. |
+| `-name <name>`, `--name <name>`, `--device-name <name>` | Override `DEVICE_SHORT_NAME` for this build without editing `config.h`. Max 17 characters. This is force-applied on boot and replaces any saved Rename/NVS short name. |
+| `-ssid <name>`, `--ssid <name>` | Override `DEFAULT_WIFI_SSID` for this build without editing `config.h`. The sender Firmware tab requires SSID and password overrides together. |
+| `-pw <password>`, `--pw <password>`, `--password <password>` | Override `DEFAULT_WIFI_PASSWORD` for this build without editing `config.h`. Passwords are redacted in sender job output. |
 | `--ports`, `--list-ports` | List likely ESP32 serial ports and exit without compiling or uploading. |
 | `--ports-json`, `--list-ports-json` | List likely ESP32 serial ports as JSON for the sender web UI. |
 | `--auto`, `-auto` | Select the only detected ESP32-like serial port. Fails if no candidates or multiple candidates are found. |
@@ -85,7 +85,7 @@ The UI is intentionally focused on the common flashing path:
 - Install firmware tools when Arduino CLI is missing.
 - Compile or upload, then watch the output window.
 
-When enabled, the device-name override becomes the firmware default short name for fresh receivers. If the receiver already has a name stored through the Rename workflow, that stored NVS name takes precedence and can still be changed later from the controller. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance.
+When enabled, the device-name override is treated as explicit overwrite intent: the receiver stores the compiled short name into NVS on boot, replacing any older name saved through the Rename workflow. WiFi credential overrides also compile a force flag that clears stale ESP32 station credentials before connecting with the supplied SSID/password. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance.
 
 Firmware jobs run one at a time because Arduino core installation, library installation, compile caches, and serial uploads can conflict when launched concurrently. The UI redacts WiFi passwords from job status and output.
 
@@ -217,6 +217,8 @@ The firmware stores mutable receiver settings in ESP32 NVS/preferences:
 - Static IP/DHCP settings
 
 V3.5 uses its own persistence namespace so it does not collide with older firmware assumptions.
+
+Firmware upload overrides have narrower force semantics than a full device reset. Supplying `--name` writes that name into the saved `shortName` key on boot. Supplying WiFi credentials clears stored ESP32 station credentials before `WiFi.begin(...)`, but it does not erase the Primus output-type or static IP settings. Add a separate refurbish/reset workflow if old nodes need all saved receiver settings cleared.
 
 ## Adding A Board Profile
 

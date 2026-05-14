@@ -133,13 +133,34 @@ document.addEventListener("alpine:init", () => {
             return Alpine.store("app").playback;
         },
 
+        get timelinePreviewLive() {
+            return this.previewing && this.playbackInfo.source === 'mixer';
+        },
+
+        clearLocalPreviewState() {
+            if (this.playing) {
+                this.playing = false;
+                if (this._playInterval) {
+                    clearInterval(this._playInterval);
+                    this._playInterval = null;
+                }
+            }
+            this.previewing = false;
+        },
+
+        syncPreviewStateWithPlayback() {
+            if (this.previewing && this.playbackInfo.source !== 'mixer') {
+                this.clearLocalPreviewState();
+            }
+        },
+
         mixerPanelStateClass() {
             if (this.subMode === 'designer') {
                 return this.playbackInfo.source === 'designer'
                     ? 'panel-owner-live'
                     : 'panel-owner-idle';
             }
-            if (this.previewing && this.playbackInfo.source === 'mixer') {
+            if (this.timelinePreviewLive) {
                 return 'panel-owner-live';
             }
             if (this.previewing || this.playbackInfo.source === 'mixer') {
@@ -154,7 +175,7 @@ document.addEventListener("alpine:init", () => {
                     ? 'Designer owns output'
                     : 'Designer is editing only';
             }
-            if (this.previewing && this.playbackInfo.source === 'mixer') {
+            if (this.timelinePreviewLive) {
                 return 'Timeline preview owns output';
             }
             if (this.previewing) {
@@ -170,7 +191,7 @@ document.addEventListener("alpine:init", () => {
                 }
                 return 'Designer changes are local while output is owned by ' + this.playbackInfo.label.toLowerCase() + '.';
             }
-            if (this.previewing && this.playbackInfo.source === 'mixer') {
+            if (this.timelinePreviewLive) {
                 return 'Timeline preview is ' + this.playbackInfo.activity.toLowerCase() + ' on ' + this.playbackInfo.target_label.toLowerCase() + '.';
             }
             if (this.previewing) {
@@ -196,6 +217,14 @@ document.addEventListener("alpine:init", () => {
             }
             this.newLook();
             this._startMixerPreviewLoop();
+            this.$watch('playbackInfo.source', () => this.syncPreviewStateWithPlayback());
+            document.addEventListener('primus:mode-changed', (event) => {
+                if (event.detail?.mode !== 'mixer') {
+                    this.clearLocalPreviewState();
+                } else {
+                    this.syncPreviewStateWithPlayback();
+                }
+            });
             document.addEventListener('keydown', (e) => {
                 if (Alpine.store('app').mode !== 'mixer') return;
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -936,7 +965,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         async togglePreview() {
-            if (this.previewing) {
+            if (this.timelinePreviewLive) {
                 this.stop();
                 await api("POST", "/api/mixer/stop_preview");
                 this.previewing = false;

@@ -70,8 +70,65 @@ document.addEventListener("alpine:init", () => {
 
         get canUpload() {
             if (!this.available || this.running) return false;
+            if (!this.overridesValid) return false;
             if (this.portMode === "all") return this.candidatePorts.length > 0;
             return !!this.selectedPort;
+        },
+
+        get canCompile() {
+            return this.available && !this.running && this.overridesValid;
+        },
+
+        get deviceNameOverride() {
+            if (!this.nameEnabled) return "";
+            return (this.deviceName || "").trim();
+        },
+
+        get wifiSsidOverride() {
+            if (!this.wifiEnabled) return "";
+            return (this.wifiSsid || "").trim();
+        },
+
+        get wifiPasswordOverrideSet() {
+            return this.wifiEnabled && !!this.wifiPassword;
+        },
+
+        get overrideValidationMessage() {
+            if (this.nameEnabled && !this.deviceNameOverride) return "Custom name is enabled but empty.";
+            if (this.wifiEnabled && !this.wifiSsidOverride && !this.wifiPassword) return "Custom credentials are enabled but empty.";
+            if (this.wifiEnabled && !this.wifiSsidOverride) return "Custom credentials need an SSID.";
+            if (this.wifiEnabled && !this.wifiPassword) return "Custom credentials need a password.";
+            return "";
+        },
+
+        get overridesValid() {
+            return !this.overrideValidationMessage;
+        },
+
+        get overrideSummaryClass() {
+            return {
+                "firmware-override-summary-error": !!this.overrideValidationMessage,
+                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.wifiEnabled),
+            };
+        },
+
+        overrideSummary() {
+            if (this.overrideValidationMessage) return this.overrideValidationMessage;
+            const parts = [];
+            if (this.deviceNameOverride) parts.push("Name: " + this.deviceNameOverride);
+            if (this.wifiSsidOverride) parts.push("SSID: " + this.wifiSsidOverride);
+            if (this.wifiPasswordOverrideSet) parts.push("Password: set");
+            return parts.length ? "This job will use " + parts.join("; ") + "." : "Using firmware defaults from config.h.";
+        },
+
+        jobOverrideSummary() {
+            const metadata = this.activeJob?.metadata || {};
+            const overrides = metadata.overrides || {};
+            const parts = [];
+            if (overrides.device_name) parts.push("Name: " + overrides.device_name);
+            if (overrides.wifi_ssid) parts.push("SSID: " + overrides.wifi_ssid);
+            if (overrides.wifi_password_set) parts.push("Password: set");
+            return parts.length ? "Overrides used: " + parts.join("; ") : "Overrides used: firmware defaults";
         },
 
         async refreshStatus() {
@@ -166,6 +223,10 @@ document.addEventListener("alpine:init", () => {
 
         async startJob(action) {
             if (this.running) return;
+            if ((action === "compile" || action === "upload") && !this.overridesValid) {
+                Alpine.store("app").showNotice(this.overrideValidationMessage, "error", 4000);
+                return;
+            }
             const body = { action, profile: this.profile };
             if (action === "compile" || action === "upload") {
                 this.addDeviceNameField(body);
@@ -189,7 +250,8 @@ document.addEventListener("alpine:init", () => {
 
         addWifiFields(body) {
             if (!this.wifiEnabled) return;
-            if (this.wifiSsid) body.wifi_ssid = this.wifiSsid;
+            const ssid = this.wifiSsidOverride;
+            if (ssid) body.wifi_ssid = ssid;
             if (this.wifiPassword) body.wifi_password = this.wifiPassword;
         },
 

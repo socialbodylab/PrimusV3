@@ -99,6 +99,32 @@ uint8_t storedIP[4]      = {0};
 uint8_t storedGateway[4] = {0};
 uint8_t storedSubnet[4]  = {0};
 
+void loadStoredDeviceName() {
+#ifdef PRIMUSV3_FORCE_DEVICE_NAME_OVERRIDE
+  strncpy(customShortName, DEVICE_SHORT_NAME, sizeof(customShortName) - 1);
+  customShortName[sizeof(customShortName) - 1] = '\0';
+  hasCustomName = customShortName[0] != '\0';
+  if (hasCustomName) {
+    prefs.putString("shortName", customShortName);
+    Serial.print("Firmware name override stored: \"");
+    Serial.print(customShortName);
+    Serial.println("\"");
+  }
+  return;
+#endif
+
+  if (prefs.isKey("shortName")) {
+    String stored = prefs.getString("shortName", "");
+    if (stored.length() > 0) {
+      stored.toCharArray(customShortName, sizeof(customShortName));
+      hasCustomName = true;
+      Serial.print("Loaded custom name: \"");
+      Serial.print(customShortName);
+      Serial.println("\"");
+    }
+  }
+}
+
 // ── Timing / FPS ─────────────────────────────────────────────────────
 unsigned long lastShowTime  = 0;
 unsigned long showDuration  = 2000;   // measured leds->show() time in µs
@@ -220,7 +246,19 @@ void syncConnectionIndicator() {
 }
 
 bool connectWifi() {
-  WiFi.begin(DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD);
+  WiFi.persistent(false);
+
+#ifdef PRIMUSV3_FORCE_WIFI_CREDENTIAL_OVERRIDE
+  static bool clearedStoredWifiCredentials = false;
+  if (!clearedStoredWifiCredentials) {
+    Serial.println("WiFi credential override active: clearing stored ESP32 station credentials.");
+    WiFi.disconnect(true, true);
+    delay(100);
+    clearedStoredWifiCredentials = true;
+  }
+#endif
+
+  WiFi.mode(WIFI_STA);
 
   if (useStaticIP) {
     IPAddress localIP(storedIP[0], storedIP[1], storedIP[2], storedIP[3]);
@@ -234,6 +272,9 @@ bool connectWifi() {
   }
 
   WiFi.setSleep(false);
+  Serial.print("WiFi SSID: ");
+  Serial.println(DEFAULT_WIFI_SSID);
+  WiFi.begin(DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD);
 
   Serial.print("Connecting to WiFi");
   int attempts = 0;
@@ -893,16 +934,7 @@ void setup() {
 #endif
 
   // Connect WiFi
-  if (prefs.isKey("shortName")) {
-    String stored = prefs.getString("shortName", "");
-    if (stored.length() > 0) {
-      stored.toCharArray(customShortName, sizeof(customShortName));
-      hasCustomName = true;
-      Serial.print("Loaded custom name: \"");
-      Serial.print(customShortName);
-      Serial.println("\"");
-    }
-  }
+  loadStoredDeviceName();
 
   // Load static IP config from NVS
   if (prefs.isKey("staticIP")) {

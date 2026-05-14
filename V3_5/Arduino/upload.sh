@@ -315,7 +315,11 @@ create_build_override_header() {
   {
     printf '#pragma once\n'
     if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_DEVICE_NAME_OVERRIDE 1\n'
       printf '#define DEVICE_SHORT_NAME %s\n' "$(c_string_literal "$DEVICE_NAME_OVERRIDE")"
+    fi
+    if [[ "$WIFI_SSID_OVERRIDE_SET" == true || "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_WIFI_CREDENTIAL_OVERRIDE 1\n'
     fi
     if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then
       printf '#define DEFAULT_WIFI_SSID %s\n' "$(c_string_literal "$WIFI_SSID_OVERRIDE")"
