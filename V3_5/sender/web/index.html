@@ -16,8 +16,16 @@
 <!-- ==================== NAVBAR ==================== -->
 <nav class="navbar">
     <div class="navbar-brand">Primus Central</div>
-    <div class="navbar-tabs">
-        <template x-data x-for="m in $store.app.modes">
+    <div class="navbar-tabs navbar-tabs-primary">
+        <template x-data x-for="m in ['mixer', 'controller']">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="$store.app.modeLabels[m]"></div>
+        </template>
+    </div>
+    <div class="navbar-tabs navbar-tabs-secondary">
+        <template x-data x-for="m in ['firmware']">
             <div class="navbar-tab"
                  :class="{ active: $store.app.mode === m }"
                  @click="$store.app.setMode(m)"
@@ -491,7 +499,7 @@
         <div class="preview-control-row" x-show="look">
             <button class="btn btn-preview" :class="{ 'btn-preview-live': previewing }"
                 @click="togglePreview()"
-                x-text="previewing ? 'Live' : 'Preview'"></button>
+                x-text="previewing ? 'LIVE' : 'GO LIVE'"></button>
         </div>
 
         <div class="transport look-transport-row" x-show="look">

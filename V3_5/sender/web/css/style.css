@@ -38,8 +38,10 @@ body {
 /* ── NAV BAR ───────────────────────────────────────────── */
 
 .navbar {
-    display: flex;
+    display: grid;
+    grid-template-columns: 244px auto minmax(16px, 1fr) auto auto;
     align-items: center;
+    column-gap: 0;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     padding: 0 16px;
@@ -53,15 +55,25 @@ body {
     font-weight: 700;
     font-size: 16px;
     color: var(--accent);
-    margin-right: 24px;
     white-space: nowrap;
 }
 
 .navbar-tabs {
     display: flex;
     gap: 2px;
-    flex: 0 0 auto;
-    margin-left: auto;
+}
+
+.navbar-tabs-primary {
+    justify-self: start;
+}
+
+.navbar-tabs-primary .navbar-tab:first-child {
+    padding-left: 0;
+}
+
+.navbar-tabs-secondary {
+    grid-column: 4;
+    justify-self: end;
 }
 
 .navbar-tab {
@@ -116,6 +128,7 @@ body {
 
 @media (max-width: 760px) {
     .navbar {
+        display: flex;
         height: auto;
         min-height: 48px;
         flex-wrap: wrap;
@@ -143,10 +156,21 @@ body {
 
     .navbar-tabs {
         order: 2;
-        justify-content: flex-end;
-        width: 100%;
+        width: auto;
         margin-left: 0;
         overflow-x: auto;
+    }
+
+    .navbar-tabs-primary {
+        justify-content: flex-start;
+    }
+
+    .navbar-tabs-primary .navbar-tab:first-child {
+        padding-left: 10px;
+    }
+
+    .navbar-tabs-secondary {
+        margin-left: auto;
     }
 
     .navbar-tab {
@@ -681,12 +705,14 @@ body {
 .btn-danger:hover { background: var(--danger); color: #fff; }
 
 .btn-preview {
-    min-width: 92px;
+    min-width: 136px;
     justify-content: center;
+    padding: 10px 22px;
     border-color: var(--warning);
     border-radius: 999px;
     background: color-mix(in srgb, var(--warning) 12%, var(--bg-tertiary));
     color: var(--warning);
+    font-size: 14px;
     font-weight: 700;
 }
 .btn-preview:hover {

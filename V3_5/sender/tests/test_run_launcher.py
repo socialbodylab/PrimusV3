@@ -49,6 +49,29 @@ class RunLauncherTests(unittest.TestCase):
         self.assertEqual(len(profile_args), 1)
         self.assertIn(os.path.join("profiles", "profile-"), profile_args[0])
 
+    def test_ui_lifecycle_monitor_shutdown_after_window_close(self):
+        class FakeServer:
+            ui_lifecycle_enabled = True
+            ui_lifecycle_started_at = 90.0
+            ui_last_heartbeat = 99.0
+            ui_close_requested_at = 100.0
+
+            def __init__(self):
+                self.shutdown_called = False
+
+            def shutdown(self):
+                self.shutdown_called = True
+                self.ui_lifecycle_enabled = False
+
+        server = FakeServer()
+        with mock.patch.object(run.time, "monotonic", return_value=103.0), \
+                mock.patch.object(run.time, "sleep"), \
+                mock.patch("builtins.print"):
+            run._ui_lifecycle_monitor(server)
+
+        self.assertTrue(server.shutdown_called)
+        self.assertFalse(server.ui_lifecycle_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

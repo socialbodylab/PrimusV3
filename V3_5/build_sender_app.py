@@ -9,12 +9,26 @@ Windows.
 import argparse
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 
 APP_NAME = "PrimusCentral"
+MACOS_ICON_SOURCE = Path("assets") / "appIcon.png"
+MACOS_ICON_SPECS = (
+    (16, 1),
+    (16, 2),
+    (32, 1),
+    (32, 2),
+    (128, 1),
+    (128, 2),
+    (256, 1),
+    (256, 2),
+    (512, 1),
+    (512, 2),
+)
 
 
 def _platform_default():
@@ -38,7 +52,39 @@ def _data_files(sender_dir):
     ]
 
 
-def _build_command(args, sender_dir, build_dir, dist_dir):
+def _prepare_macos_icon(v35_dir, build_dir, app_name):
+    source = v35_dir / MACOS_ICON_SOURCE
+    if not source.exists():
+        return None
+    if shutil.which("sips") is None or shutil.which("iconutil") is None:
+        raise RuntimeError("macOS icon tools sips and iconutil are required to build the app icon")
+
+    icon_dir = build_dir / "icons"
+    iconset_dir = icon_dir / f"{app_name}.iconset"
+    icon_path = icon_dir / f"{app_name}.icns"
+    if iconset_dir.exists():
+        shutil.rmtree(iconset_dir)
+    iconset_dir.mkdir(parents=True, exist_ok=True)
+
+    for point_size, scale in MACOS_ICON_SPECS:
+        pixel_size = point_size * scale
+        suffix = "" if scale == 1 else "@2x"
+        output = iconset_dir / f"icon_{point_size}x{point_size}{suffix}.png"
+        subprocess.run(
+            ["sips", "-z", str(pixel_size), str(pixel_size), str(source), "--out", str(output)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+    subprocess.run(
+        ["iconutil", "-c", "icns", str(iconset_dir), "-o", str(icon_path)],
+        check=True,
+    )
+    shutil.rmtree(iconset_dir)
+    return icon_path
+
+
+def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
     cmd = [
         sys.executable,
         "-m",
@@ -59,6 +105,8 @@ def _build_command(args, sender_dir, build_dir, dist_dir):
         cmd.append("--windowed")
     if args.onefile:
         cmd.append("--onefile")
+    if icon_path is not None:
+        cmd.extend(["--icon", str(icon_path)])
 
     for source, dest in _data_files(sender_dir):
         if source.exists():
@@ -131,7 +179,13 @@ def main(argv=None):
         print("PyInstaller is not installed. Install it with: python -m pip install pyinstaller")
         return 1
 
-    cmd = _build_command(args, sender_dir, build_dir, dist_dir)
+    try:
+        icon_path = _prepare_macos_icon(v35_dir, build_dir, args.name) if args.target == "macos" else None
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"Could not prepare macOS app icon: {exc}")
+        return 1
+
+    cmd = _build_command(args, sender_dir, build_dir, dist_dir, icon_path=icon_path)
     print(f"Building {args.target} sender app with PyInstaller...")
     print(" ".join(str(part) for part in cmd))
     try:

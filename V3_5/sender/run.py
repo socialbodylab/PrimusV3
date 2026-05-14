@@ -32,6 +32,9 @@ from server import create_server
 DEFAULT_HTTP_PORT = 8080
 DEDICATED_BROWSER_PROFILE_ROOT = "primusv35-browser-profiles"
 DEDICATED_BROWSER_PID_FILE = "browser.pid"
+UI_CLOSE_GRACE_SECONDS = 2.0
+UI_HEARTBEAT_TIMEOUT_SECONDS = 45.0
+UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
 
 
 def _handle_sigterm(signum, frame):
@@ -98,16 +101,46 @@ def _kill_existing():
                 break
 
 
-def _create_server_with_fallback(host, port, state, cue_list):
+def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabled=False):
     try:
-        return create_server(host, port, state, cue_list)
+        return create_server(host, port, state, cue_list,
+                             ui_lifecycle_enabled=ui_lifecycle_enabled)
     except OSError as exc:
         if port == 0:
             raise
         if exc.errno not in (errno.EADDRINUSE, 48, 98):
             raise
         print(f"Port {port} is busy; using an auto-selected port instead.")
-        return create_server(host, 0, state, cue_list)
+        return create_server(host, 0, state, cue_list,
+                             ui_lifecycle_enabled=ui_lifecycle_enabled)
+
+
+def _ui_lifecycle_monitor(server):
+    while getattr(server, "ui_lifecycle_enabled", False):
+        now = time.monotonic()
+        close_requested_at = getattr(server, "ui_close_requested_at", None)
+        last_heartbeat = getattr(server, "ui_last_heartbeat", None)
+        if (close_requested_at is not None
+                and (last_heartbeat is None or last_heartbeat < close_requested_at)
+                and now - close_requested_at >= UI_CLOSE_GRACE_SECONDS):
+            print("UI window closed; shutting down PrimusCentral.")
+            server.ui_lifecycle_enabled = False
+            server.shutdown()
+            return
+
+        if last_heartbeat is None:
+            baseline = getattr(server, "ui_lifecycle_started_at", now)
+            timeout = UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS
+        else:
+            baseline = last_heartbeat
+            timeout = UI_HEARTBEAT_TIMEOUT_SECONDS
+        if now - baseline >= timeout:
+            print("UI heartbeat stopped; shutting down PrimusCentral.")
+            server.ui_lifecycle_enabled = False
+            server.shutdown()
+            return
+
+        time.sleep(0.25)
 
 
 def _browser_profile_root():
@@ -256,6 +289,11 @@ def _terminate_dedicated_browser_processes(profile_root):
 
 
 def _cleanup_dedicated_browser_profiles(profile_root):
+    _remove_dedicated_browser_profiles(profile_root)
+    os.makedirs(profile_root, exist_ok=True)
+
+
+def _remove_dedicated_browser_profiles(profile_root):
     _terminate_dedicated_browser_processes(profile_root)
     try:
         shutil.rmtree(profile_root)
@@ -263,7 +301,6 @@ def _cleanup_dedicated_browser_profiles(profile_root):
         pass
     except OSError:
         pass
-    os.makedirs(profile_root, exist_ok=True)
 
 
 def _launch_dedicated_browser(url):
@@ -531,7 +568,11 @@ def main():
     print("Restoring saved devices...")
     state.restore_devices()
 
-    server = _create_server_with_fallback("127.0.0.1", args.port, state, cue_list)
+    ui_lifecycle_enabled = is_bundled() and not args.no_browser
+    browser_profile_root = _browser_profile_root() if not args.no_browser else None
+    server = _create_server_with_fallback(
+        "127.0.0.1", args.port, state, cue_list,
+        ui_lifecycle_enabled=ui_lifecycle_enabled)
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}"
 
@@ -541,6 +582,11 @@ def main():
     mc_thread = threading.Thread(
         target=_mixer_controller_loop, args=(state, cue_list), daemon=True)
     mc_thread.start()
+
+    if ui_lifecycle_enabled:
+        ui_thread = threading.Thread(
+            target=_ui_lifecycle_monitor, args=(server,), daemon=True)
+        ui_thread.start()
 
     print("PrimusV3.5 LED Controller")
     print(f"  URL: {url}")
@@ -556,9 +602,12 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        server.ui_lifecycle_enabled = False
         state.shutdown()
         fps_listener.stop()
         server.server_close()
+        if browser_profile_root:
+            _remove_dedicated_browser_profiles(browser_profile_root)
         print("Done.")
 
 

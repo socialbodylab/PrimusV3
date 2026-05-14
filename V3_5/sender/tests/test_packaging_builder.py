@@ -45,6 +45,22 @@ class PackagingBuilderTests(unittest.TestCase):
         self.assertIn("--add-data", cmd)
         self.assertEqual(cmd[-1], str(sender_dir / "run.py"))
 
+    def test_macos_command_uses_prepared_icon_when_available(self):
+        args = self.make_args(target="macos", windowed=True, onefile=False)
+        sender_dir = Path(V35_DIR) / "sender"
+        icon_path = Path("build") / "macos" / "icons" / "PrimusCentral.icns"
+
+        cmd = build_sender_app._build_command(
+            args,
+            sender_dir,
+            Path("build") / "macos",
+            Path("dist") / "macos",
+            icon_path=icon_path,
+        )
+
+        self.assertIn("--icon", cmd)
+        self.assertIn(str(icon_path), cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

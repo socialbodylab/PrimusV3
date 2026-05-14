@@ -54,6 +54,8 @@ document.addEventListener("alpine:init", () => {
         mixerPreviewDevices: null,
         notice: null,
         _noticeTimer: null,
+        runtime: null,
+        _lifecycleHeartbeat: null,
 
         get playback() {
             return this.state?.playback || {
@@ -150,6 +152,41 @@ document.addEventListener("alpine:init", () => {
                 const interval = document.hidden ? 1000 : 100;
                 this.polling = setInterval(() => this.fetchState(), interval);
             });
+            this.startRuntimeLifecycle();
+        },
+
+        async startRuntimeLifecycle() {
+            try {
+                this.runtime = await api("GET", "/api/runtime");
+            } catch (e) {
+                return;
+            }
+            if (!this.runtime?.ui_lifecycle) return;
+
+            const heartbeat = () => {
+                api("POST", "/api/ui/heartbeat", {}).catch(() => {});
+            };
+            heartbeat();
+            this._lifecycleHeartbeat = setInterval(heartbeat, 2000);
+
+            window.addEventListener('pagehide', () => {
+                if (this._lifecycleHeartbeat) {
+                    clearInterval(this._lifecycleHeartbeat);
+                    this._lifecycleHeartbeat = null;
+                }
+                const payload = JSON.stringify({ reason: 'pagehide' });
+                if (navigator.sendBeacon) {
+                    const body = new Blob([payload], { type: 'application/json' });
+                    navigator.sendBeacon('/api/ui/closed', body);
+                } else {
+                    fetch('/api/ui/closed', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: payload,
+                        keepalive: true,
+                    }).catch(() => {});
+                }
+            }, { once: true });
         },
 
         async fetchState() {

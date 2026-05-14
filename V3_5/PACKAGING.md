@@ -64,6 +64,28 @@ The unsigned macOS app bundle is written to:
 V3_5/dist/macos/PrimusCentral.app
 ```
 
+macOS builds generate the app icon from:
+
+```text
+V3_5/assets/appIcon.png
+```
+
+The generated `.icns` file is written under `V3_5/build/macos/icons/` and passed to PyInstaller automatically.
+
+Windows will need the same source image converted to `.ico`; `.icns` is macOS-only and should not be passed to PyInstaller for Windows builds. When Windows packaging is implemented/tested, keep using `V3_5/assets/appIcon.png` as the tracked source and generate the Windows icon into the ignored build tree, for example:
+
+```text
+V3_5\build\windows\icons\PrimusCentral.ico
+```
+
+Then pass it to PyInstaller with:
+
+```powershell
+--icon V3_5\build\windows\icons\PrimusCentral.ico
+```
+
+The `.ico` should include common Windows icon sizes: 16, 24, 32, 48, 64, 128, and 256 px. This conversion can use a build-only tool such as ImageMagick (`magick`) or Pillow; do not add either as a sender runtime dependency. If the Windows icon does not appear immediately after rebuilding, test with a fresh output filename or clear the Windows Explorer icon cache before assuming PyInstaller failed.
+
 Build a Windows executable on Windows:
 
 ```powershell
@@ -94,9 +116,10 @@ Windows defaults to a one-file `.exe`. Use `--onedir` if you prefer a folder-bas
 
 1. Double-click `V3_5/dist/macos/PrimusCentral.app` or `V3_5\dist\windows\PrimusCentral.exe`.
 2. Confirm the browser opens to the local sender UI.
-3. Confirm Art-Net discovery finds receiver nodes.
-4. Connect a node and test Hello, Rename, and live preview.
-5. Save a clip/look, quit, relaunch, and confirm data persists.
+3. On macOS, close the PrimusCentral browser window and confirm the app exits instead of leaving a blank browser process behind.
+4. Confirm Art-Net discovery finds receiver nodes.
+5. Connect a node and test Hello, Rename, and live preview.
+6. Save a clip/look, quit, relaunch, and confirm data persists.
 
 ## Distribution Notes
 

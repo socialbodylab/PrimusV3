@@ -6,6 +6,7 @@ import json
 import os
 import re
 import mimetypes
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import clips
@@ -45,6 +46,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
 
         # API routes
+        if path == "/api/runtime":
+            self._json_response({
+                "ui_lifecycle": bool(getattr(self.server, "ui_lifecycle_enabled", False)),
+            })
+            return
         if path == "/api/state":
             self._json_response(self.controller_state.get_json())
             return
@@ -119,7 +125,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path
 
-        if path == "/api/update":
+        if path == "/api/ui/heartbeat":
+            if getattr(self.server, "ui_lifecycle_enabled", False):
+                self.server.ui_last_heartbeat = time.monotonic()
+                self.server.ui_close_requested_at = None
+            self._ok()
+
+        elif path == "/api/ui/closed":
+            if getattr(self.server, "ui_lifecycle_enabled", False):
+                self.server.ui_close_requested_at = time.monotonic()
+            self._ok()
+
+        elif path == "/api/update":
             self.controller_state.update(data)
             self._ok()
 
@@ -546,8 +563,13 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def create_server(host, port, controller_state, cue_list):
+def create_server(host, port, controller_state, cue_list, ui_lifecycle_enabled=False):
     """Create and return an HTTPServer bound to host:port."""
     Handler.controller_state = controller_state
     Handler.cue_list = cue_list
-    return HTTPServer((host, port), Handler)
+    server = HTTPServer((host, port), Handler)
+    server.ui_lifecycle_enabled = bool(ui_lifecycle_enabled)
+    server.ui_lifecycle_started_at = time.monotonic()
+    server.ui_last_heartbeat = None
+    server.ui_close_requested_at = None
+    return server
