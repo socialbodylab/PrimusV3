@@ -287,6 +287,7 @@ class FirmwareJobManager:
         device_name = ""
         wifi_ssid = ""
         wifi_password_set = False
+        ip_override = None
         port_mode = None
         port = ""
 
@@ -298,10 +299,12 @@ class FirmwareJobManager:
             command.append("--compile")
             device_name = self._append_device_name_arg(command, data)
             wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
+            ip_override = self._append_ip_args(command, data)
         elif action == "upload":
             port_mode = self._validate_choice(data.get("port_mode", "auto"), PORT_MODES, "port_mode")
             device_name = self._append_device_name_arg(command, data)
             wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
+            ip_override = self._append_ip_args(command, data)
             if port_mode == "selected":
                 port = self._validate_string(data.get("port", ""), "port", required=True, max_length=256)
                 command.append(port)
@@ -317,6 +320,7 @@ class FirmwareJobManager:
             device_name=device_name,
             wifi_ssid=wifi_ssid,
             wifi_password_set=wifi_password_set,
+            ip_override=ip_override,
             port_mode=port_mode,
             port=port,
         )
@@ -347,17 +351,45 @@ class FirmwareJobManager:
             secrets.append(password)
         return ssid, bool(password)
 
+    def _append_ip_args(self, command, data):
+        mode = self._validate_choice(data.get("ip_mode", "keep"), {"keep", "static", "dhcp"}, "ip_mode")
+        if mode == "keep":
+            return None
+        if mode == "dhcp":
+            command.append("--dhcp")
+            return {"mode": "dhcp"}
+
+        static_ip = self._validate_ipv4_string(data.get("static_ip", ""), "static_ip")
+        gateway = self._validate_ipv4_string(data.get("gateway", ""), "gateway")
+        subnet = self._validate_ipv4_string(data.get("subnet", ""), "subnet")
+        command.extend(["--static-ip", static_ip, "--gateway", gateway, "--subnet", subnet])
+        return {
+            "mode": "static",
+            "static_ip": static_ip,
+            "gateway": gateway,
+            "subnet": subnet,
+        }
+
     def _build_metadata(self, action, profile, device_name="", wifi_ssid="", wifi_password_set=False,
-                        port_mode=None, port=""):
+                        ip_override=None, port_mode=None, port=""):
         overrides = {
             "device_name": device_name or None,
             "wifi_ssid": wifi_ssid or None,
             "wifi_password_set": bool(wifi_password_set),
+            "ip_mode": (ip_override or {}).get("mode", "keep"),
+            "static_ip": (ip_override or {}).get("static_ip"),
+            "gateway": (ip_override or {}).get("gateway"),
+            "subnet": (ip_override or {}).get("subnet"),
         }
         metadata = {
             "profile": profile,
             "overrides": overrides,
-            "has_overrides": bool(overrides["device_name"] or overrides["wifi_ssid"] or overrides["wifi_password_set"]),
+            "has_overrides": bool(
+                overrides["device_name"]
+                or overrides["wifi_ssid"]
+                or overrides["wifi_password_set"]
+                or overrides["ip_mode"] != "keep"
+            ),
         }
         if action == "upload":
             metadata["target"] = {
@@ -379,6 +411,13 @@ class FirmwareJobManager:
                 parts.append(f"WiFi SSID '{overrides['wifi_ssid']}'")
             if overrides.get("wifi_password_set"):
                 parts.append("WiFi password set")
+            if overrides.get("ip_mode") == "static":
+                parts.append(
+                    "static IP " + overrides.get("static_ip", "")
+                    + " gateway " + overrides.get("gateway", "")
+                    + " subnet " + overrides.get("subnet", ""))
+            elif overrides.get("ip_mode") == "dhcp":
+                parts.append("DHCP enabled")
             lines.append("Overrides: " + "; ".join(parts))
         else:
             lines.append("Overrides: firmware defaults from config.h")
@@ -407,6 +446,19 @@ class FirmwareJobManager:
             raise FirmwareRequestError(400, f"{name} is too long")
         if required and not text:
             raise FirmwareRequestError(400, f"{name} required")
+        return text
+
+    def _validate_ipv4_string(self, value, name):
+        text = self._validate_string(value, name, required=True, max_length=15)
+        parts = text.split(".")
+        if len(parts) != 4:
+            raise FirmwareRequestError(400, f"invalid {name}")
+        for part in parts:
+            if not part.isdigit():
+                raise FirmwareRequestError(400, f"invalid {name}")
+            octet = int(part, 10)
+            if octet < 0 or octet > 255:
+                raise FirmwareRequestError(400, f"invalid {name}")
         return text
 
     def _run_job(self, job, firmware_command):

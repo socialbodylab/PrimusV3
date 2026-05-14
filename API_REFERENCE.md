@@ -60,13 +60,26 @@ Key fields in the 239-byte reply:
 PrimusV3 sender discovery prefers the `PV3CAP1` capability tag in Node Report.
 Each output tuple is `port_index:type_id:universe`, where `type_id` matches the
 receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. V3.5 nodes
-also append `B:<profile>` where profile is `v1`, `v2`, or `v31`. Feature flags
-are appended as `F:<letters>`; current letters are `R` for remote rename via
-ArtAddress, `I` for remote IP configuration via ArtIPConfig, `O` for remote
-output configuration via ArtOutputConfig, and `H` for the identify flash used by
-`POST /api/hello_device`. Older nodes without this tag still fall back to the
-human-readable Long Name parser, and older PrimusV3 nodes without feature flags are
-treated as legacy-compatible for rename/hello/IP/output-config control.
+also append `B:<profile>` where profile is `v1`, `v2`, or `v31`, and `IP:D` or
+`IP:S` to report whether the receiver is currently using DHCP or saved static IP
+settings. Feature flags are appended as `F:<letters>`; current letters are `R`
+for remote rename via ArtAddress, `I` for remote IP configuration via
+ArtIPConfig, `O` for remote output configuration via ArtOutputConfig, and `H` for
+the identify flash used by `POST /api/hello_device`. Older nodes without this tag
+still fall back to the human-readable Long Name parser, and older PrimusV3 nodes
+without feature flags are treated as legacy-compatible for rename/hello/IP/output-config
+control.
+
+Example current V3.5 reports:
+
+```text
+#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|IP:D|F:RIOH
+#0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|IP:S|F:RIOH
+```
+
+The ArtPollReply IP-address field remains the source of truth for the node's
+current address. The compact `IP:` token is intentionally mode-only so the report
+stays within Art-Net's 64-byte Node Report limit.
 
 ### Discovery Tips
 
@@ -360,10 +373,15 @@ These endpoints are local sender helpers for firmware tool setup, compile, and u
 | `POST /api/firmware/jobs` | `{action:"setup_tools", profile:"v3"}` | Download Arduino CLI into the managed tools directory, configure ESP32 board support, and install receiver firmware libraries. |
 | `POST /api/firmware/jobs` | `{action:"list_ports", profile:"v3"}` | Run `upload.sh --board <profile> --ports-json` and return structured serial port data in the job result. |
 | `POST /api/firmware/jobs` | `{action:"install", profile:"v3"}` | Run `upload.sh --board <profile> --install`. |
-| `POST /api/firmware/jobs` | `{action:"compile", profile:"v3", device_name?, wifi_ssid?, wifi_password?}` | Run compile-only verification with optional default device-name and WiFi credential overrides. |
-| `POST /api/firmware/jobs` | `{action:"upload", profile:"v3", port_mode:"auto"\|"selected"\|"all", port?, device_name?, wifi_ssid?, wifi_password?}` | Compile, then upload by auto-detected port, explicit selected port, or all detected ESP32-like ports. |
+| `POST /api/firmware/jobs` | `{action:"compile", profile:"v3", device_name?, wifi_ssid?, wifi_password?, ip_mode?, static_ip?, gateway?, subnet?}` | Run compile-only verification with optional default device-name, WiFi credential, and static/DHCP IP overrides. |
+| `POST /api/firmware/jobs` | `{action:"upload", profile:"v3", port_mode:"auto"\|"selected"\|"all", port?, device_name?, wifi_ssid?, wifi_password?, ip_mode?, static_ip?, gateway?, subnet?}` | Compile, then upload by auto-detected port, explicit selected port, or all detected ESP32-like ports. |
 
-Firmware job responses include `{id, action, profile, status, command, output, result, error}`. `status` is `queued`, `running`, `succeeded`, or `failed`. Starting a new job while another is queued/running returns `409`.
+For firmware jobs, `ip_mode` is optional and defaults to `"keep"`. Use `"static"`
+with `static_ip`, `gateway`, and `subnet` to store static IP settings on receiver
+boot, or `"dhcp"` to clear saved static IP settings on boot. Firmware job
+responses include `{id, action, profile, status, command, metadata, output,
+result, error}`. `status` is `queued`, `running`, `succeeded`, or `failed`.
+Starting a new job while another is queued/running returns `409`.
 
 ### DELETE Endpoints
 

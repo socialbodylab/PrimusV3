@@ -374,6 +374,11 @@ body {
     border-color: var(--success);
 }
 
+.device-card.device-static-ip {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 .device-header {
     display: flex;
     justify-content: space-between;
@@ -465,6 +470,43 @@ body {
 .device-ip-button:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
+}
+
+.device-network-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.device-network-static {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.device-network-dhcp {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.device-network-pending {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.device-network-unknown {
+    color: var(--text-muted);
+    border-style: dashed;
 }
 
 .device-fps {
@@ -583,6 +625,12 @@ body {
     padding: 3px 6px;
     font-size: 12px;
     font-family: monospace;
+}
+
+.device-ip-config-note {
+    margin-top: 6px;
+    color: var(--text-secondary);
+    font-size: 11px;
 }
 
 .sidebar-note {
@@ -1747,6 +1795,47 @@ input[type="color"] {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 10px;
+}
+
+.firmware-ip-mode-row {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin: 8px 0 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.seg-btn {
+    appearance: none;
+    min-height: 30px;
+    padding: 5px 10px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    border: none;
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.seg-btn:last-child {
+    border-right: none;
+}
+
+.seg-btn:hover {
+    color: var(--text-primary);
+}
+
+.seg-btn.active {
+    background: var(--accent-dim);
+    color: #fff;
+}
+
+.seg-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
 }
 
 .firmware-override-summary,

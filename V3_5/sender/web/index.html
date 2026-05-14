@@ -85,7 +85,7 @@
             </div>
 
         <template x-for="(dev, di) in $store.conn.devices" :key="di">
-            <div class="device-card" :class="{ 'device-connected': dev.connected }">
+            <div class="device-card" :class="{ 'device-connected': dev.connected, 'device-static-ip': dev.ip_mode === 'static' && !dev.ip_config_pending }">
                 <div class="device-header">
                     <template x-if="$store.conn.renamingDevice !== di">
                         <span class="device-name" x-text="dev.name"
@@ -112,6 +112,10 @@
                             :title="$store.conn.ipConfigHint(dev)"
                             @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)"
                             x-text="dev.ip"></button>
+                      <span class="device-network-badge"
+                          :class="$store.conn.networkModeClass(dev)"
+                          :title="$store.conn.networkModeTitle(dev)"
+                          x-text="$store.conn.networkModeLabel(dev)"></span>
                     <span class="device-profile" x-text="$store.conn.hardwareLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                 </div>
@@ -145,7 +149,8 @@
                         <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(di)">Set Static IP</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(di)">Revert to DHCP</button>
                     </div>
-                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change.</div>
+                    <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
+                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Primus will rescan.</div>
                 </div>
                 <div class="device-outputs">
                     <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
@@ -1102,6 +1107,34 @@
                     <div class="form-group">
                         <label class="form-label">Password</label>
                         <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Firmware IP override mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'keep' }"
+                            :disabled="running"
+                            @click="ipMode = 'keep'">Keep IP Setting</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'static' }"
+                            :disabled="running"
+                            @click="ipMode = 'static'">Set Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'dhcp' }"
+                            :disabled="running"
+                            @click="ipMode = 'dhcp'">Use DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="ipMode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="running" autocomplete="off" placeholder="192.168.1.50">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="running" autocomplete="off" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
                     </div>
                 </div>
                 <div class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></div>

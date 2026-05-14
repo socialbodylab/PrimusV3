@@ -78,6 +78,10 @@ class FirmwareJobTests(unittest.TestCase):
             "device_name": "StageLeft",
             "wifi_ssid": "PrimusRouter",
             "wifi_password_set": True,
+            "ip_mode": "keep",
+            "static_ip": None,
+            "gateway": None,
+            "subnet": None,
         })
         self.assertTrue(command.metadata["has_overrides"])
 
@@ -160,6 +164,44 @@ class FirmwareJobTests(unittest.TestCase):
             "/dev/cu.usbmodem1234",
         ])
 
+    def test_compile_command_supports_static_ip_and_dhcp_overrides(self):
+        manager = self.make_manager()
+
+        static_command = manager.build_command({
+            "action": "compile",
+            "profile": "v1",
+            "ip_mode": "static",
+            "static_ip": "192.168.1.50",
+            "gateway": "192.168.1.1",
+            "subnet": "255.255.255.0",
+        })
+        self.assertEqual(static_command.command, [
+            "bash",
+            "/tmp/upload.sh",
+            "--board",
+            "v1",
+            "--compile",
+            "--static-ip",
+            "192.168.1.50",
+            "--gateway",
+            "192.168.1.1",
+            "--subnet",
+            "255.255.255.0",
+        ])
+        self.assertEqual(static_command.metadata["overrides"]["ip_mode"], "static")
+        self.assertEqual(static_command.metadata["overrides"]["static_ip"], "192.168.1.50")
+        self.assertTrue(static_command.metadata["has_overrides"])
+
+        dhcp_command = manager.build_command({
+            "action": "upload",
+            "profile": "v2",
+            "ip_mode": "dhcp",
+            "port_mode": "auto",
+        })
+        self.assertIn("--dhcp", dhcp_command.command)
+        self.assertEqual(dhcp_command.command[-1], "--auto")
+        self.assertEqual(dhcp_command.metadata["overrides"]["ip_mode"], "dhcp")
+
     def test_wifi_override_requires_ssid_and_password(self):
         manager = self.make_manager()
 
@@ -189,6 +231,17 @@ class FirmwareJobTests(unittest.TestCase):
         with self.assertRaises(firmware.FirmwareRequestError) as name_error:
             manager.build_command({"action": "compile", "profile": "v3", "device_name": "x" * 18})
         self.assertEqual(name_error.exception.code, 400)
+
+        with self.assertRaises(firmware.FirmwareRequestError) as ip_error:
+            manager.build_command({
+                "action": "compile",
+                "profile": "v3",
+                "ip_mode": "static",
+                "static_ip": "192.168.1.999",
+                "gateway": "192.168.1.1",
+                "subnet": "255.255.255.0",
+            })
+        self.assertEqual(ip_error.exception.code, 400)
 
     def test_setup_tools_job_bypasses_missing_upload_tools(self):
         def fake_installer(job, manager):

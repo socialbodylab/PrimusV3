@@ -51,9 +51,16 @@ BAUD_OVERRIDE=""
 WIFI_SSID_OVERRIDE=""
 WIFI_PASSWORD_OVERRIDE=""
 DEVICE_NAME_OVERRIDE=""
+STATIC_IP_OVERRIDE=""
+GATEWAY_OVERRIDE=""
+SUBNET_OVERRIDE=""
 WIFI_SSID_OVERRIDE_SET=false
 WIFI_PASSWORD_OVERRIDE_SET=false
 DEVICE_NAME_OVERRIDE_SET=false
+STATIC_IP_OVERRIDE_SET=false
+GATEWAY_OVERRIDE_SET=false
+SUBNET_OVERRIDE_SET=false
+DHCP_OVERRIDE_SET=false
 BUILD_OVERRIDE_HEADER=""
 
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
@@ -109,6 +116,10 @@ Flags:
   --password <password>    Alias for -pw.
   -name, --name <name>     Override the default device short name for this build.
   --device-name <name>     Alias for --name.
+  --static-ip <ip>         Store a static IP on boot for this build.
+  --gateway <ip>           Gateway to store with --static-ip.
+  --subnet <ip>            Subnet mask to store with --static-ip.
+  --dhcp                   Clear saved static IP settings on boot for this build.
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
 EOF
@@ -186,6 +197,37 @@ while [[ $# -gt 0 ]]; do
       DEVICE_NAME_OVERRIDE="$2"
       DEVICE_NAME_OVERRIDE_SET=true
       shift 2
+      ;;
+    --static-ip)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires an IP address"
+        exit 1
+      fi
+      STATIC_IP_OVERRIDE="$2"
+      STATIC_IP_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --gateway)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires an IP address"
+        exit 1
+      fi
+      GATEWAY_OVERRIDE="$2"
+      GATEWAY_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --subnet)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires an IP address"
+        exit 1
+      fi
+      SUBNET_OVERRIDE="$2"
+      SUBNET_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --dhcp)
+      DHCP_OVERRIDE_SET=true
+      shift
       ;;
     --baud|--speed)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
@@ -297,6 +339,51 @@ if [[ ${#DEVICE_NAME_OVERRIDE} -gt 17 ]]; then
   exit 1
 fi
 
+validate_ipv4() {
+  local label="$1"
+  local value="$2"
+  local parts=()
+  local part
+  IFS=. read -r -a parts <<< "$value"
+  if [[ ${#parts[@]} -ne 4 ]]; then
+    err "$label must be a dotted IPv4 address."
+    exit 1
+  fi
+  for part in "${parts[@]}"; do
+    if [[ ! "$part" =~ ^[0-9]+$ ]]; then
+      err "$label must contain numeric IPv4 octets."
+      exit 1
+    fi
+    local octet=$((10#$part))
+    if (( octet < 0 || octet > 255 )); then
+      err "$label octets must be between 0 and 255."
+      exit 1
+    fi
+  done
+}
+
+ipv4_c_octets() {
+  local value="$1"
+  local parts=()
+  IFS=. read -r -a parts <<< "$value"
+  printf '%s, %s, %s, %s' "$((10#${parts[0]}))" "$((10#${parts[1]}))" "$((10#${parts[2]}))" "$((10#${parts[3]}))"
+}
+
+if [[ "$DHCP_OVERRIDE_SET" == true && ( "$STATIC_IP_OVERRIDE_SET" == true || "$GATEWAY_OVERRIDE_SET" == true || "$SUBNET_OVERRIDE_SET" == true ) ]]; then
+  err "Use either --dhcp or --static-ip/--gateway/--subnet, not both."
+  exit 1
+fi
+
+if [[ "$STATIC_IP_OVERRIDE_SET" == true || "$GATEWAY_OVERRIDE_SET" == true || "$SUBNET_OVERRIDE_SET" == true ]]; then
+  if [[ "$STATIC_IP_OVERRIDE_SET" != true || "$GATEWAY_OVERRIDE_SET" != true || "$SUBNET_OVERRIDE_SET" != true ]]; then
+    err "Static IP override requires --static-ip, --gateway, and --subnet."
+    exit 1
+  fi
+  validate_ipv4 "Static IP override" "$STATIC_IP_OVERRIDE"
+  validate_ipv4 "Gateway override" "$GATEWAY_OVERRIDE"
+  validate_ipv4 "Subnet override" "$SUBNET_OVERRIDE"
+fi
+
 c_string_literal() {
   local value="$1"
   value=${value//\\/\\\\}
@@ -305,7 +392,7 @@ c_string_literal() {
 }
 
 create_build_override_header() {
-  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true ]]; then
+  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true ]]; then
     return
   fi
 
@@ -326,6 +413,15 @@ create_build_override_header() {
     fi
     if [[ "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
       printf '#define DEFAULT_WIFI_PASSWORD %s\n' "$(c_string_literal "$WIFI_PASSWORD_OVERRIDE")"
+    fi
+    if [[ "$STATIC_IP_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_STATIC_IP_OVERRIDE 1\n'
+      printf '#define PRIMUSV3_STATIC_IP_OCTETS %s\n' "$(ipv4_c_octets "$STATIC_IP_OVERRIDE")"
+      printf '#define PRIMUSV3_STATIC_GATEWAY_OCTETS %s\n' "$(ipv4_c_octets "$GATEWAY_OVERRIDE")"
+      printf '#define PRIMUSV3_STATIC_SUBNET_OCTETS %s\n' "$(ipv4_c_octets "$SUBNET_OVERRIDE")"
+    fi
+    if [[ "$DHCP_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_DHCP_OVERRIDE 1\n'
     fi
   } > "$BUILD_OVERRIDE_HEADER"
 
@@ -624,6 +720,12 @@ if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then
 fi
 if [[ "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
   info "WiFi password override: set"
+fi
+if [[ "$STATIC_IP_OVERRIDE_SET" == true ]]; then
+  info "Static IP override: $STATIC_IP_OVERRIDE gateway $GATEWAY_OVERRIDE subnet $SUBNET_OVERRIDE"
+fi
+if [[ "$DHCP_OVERRIDE_SET" == true ]]; then
+  info "DHCP override: clear saved static IP settings"
 fi
 
 if [[ "$COMPILE_ONLY" == true ]]; then

@@ -338,6 +338,8 @@ document.addEventListener("alpine:init", () => {
         ipConfigIp: "",
         ipConfigGateway: "",
         ipConfigSubnet: "255.255.255.0",
+        _ipRediscoveryTimer: null,
+        _ipRediscoveryUntil: 0,
         sidebarCollapsed: false,
 
         get devices() {
@@ -413,6 +415,86 @@ document.addEventListener("alpine:init", () => {
                 : 'Remote IP configuration is not advertised for this node';
         },
 
+        networkModeLabel(dev) {
+            if (dev?.ip_config_pending === 'static') return 'Restart for static';
+            if (dev?.ip_config_pending === 'dhcp') return 'Restart for DHCP';
+            if (dev?.ip_mode === 'static') return 'Static';
+            if (dev?.ip_mode === 'dhcp') return 'DHCP';
+            return 'IP Unknown';
+        },
+
+        networkModeClass(dev) {
+            return {
+                'device-network-static': dev?.ip_mode === 'static' && !dev?.ip_config_pending,
+                'device-network-dhcp': dev?.ip_mode === 'dhcp' && !dev?.ip_config_pending,
+                'device-network-pending': !!dev?.ip_config_pending,
+                'device-network-unknown': !dev?.ip_config_pending && dev?.ip_mode !== 'static' && dev?.ip_mode !== 'dhcp',
+            };
+        },
+
+        networkModeTitle(dev) {
+            if (dev?.ip_config_pending === 'static') return 'Restart this receiver; Primus will automatically pick up the static IP when it comes back online.';
+            if (dev?.ip_config_pending === 'dhcp') return 'Restart this receiver; Primus will automatically pick up the DHCP address when it comes back online.';
+            if (dev?.ip_mode === 'static') return 'Static IP' + (dev.static_ip ? ': ' + dev.static_ip : '');
+            if (dev?.ip_mode === 'dhcp') return 'DHCP assigned address';
+            return 'This receiver has not reported DHCP/static mode yet.';
+        },
+
+        hasPendingIpConfig() {
+            return this.devices.some(dev => !!dev.ip_config_pending);
+        },
+
+        isKnownDiscoveryNode(node) {
+            return this.devices.some(dev => dev.ip === node.ip);
+        },
+
+        filterNewDiscoveryNodes(nodes) {
+            return (nodes || []).filter(node => !this.isKnownDiscoveryNode(node));
+        },
+
+        isIpv4(value) {
+            const parts = String(value || '').trim().split('.');
+            return parts.length === 4 && parts.every(part => {
+                if (!/^\d+$/.test(part)) return false;
+                const octet = Number(part);
+                return octet >= 0 && octet <= 255;
+            });
+        },
+
+        scheduleRediscovery() {
+            if (this._ipRediscoveryTimer) clearTimeout(this._ipRediscoveryTimer);
+            this._ipRediscoveryUntil = Date.now() + 90000;
+            this.queueIpRediscovery(3000);
+        },
+
+        queueIpRediscovery(delay = 4000) {
+            if (this._ipRediscoveryTimer) clearTimeout(this._ipRediscoveryTimer);
+            this._ipRediscoveryTimer = setTimeout(() => this.runIpRediscovery(), delay);
+        },
+
+        async runIpRediscovery() {
+            this._ipRediscoveryTimer = null;
+            if (!this.hasPendingIpConfig()) return;
+            try {
+                const nodes = await api("POST", "/api/discover");
+                await Alpine.store("app").fetchState();
+                this.discovered = this.filterNewDiscoveryNodes(nodes);
+                if (this.hasPendingIpConfig() && Date.now() < this._ipRediscoveryUntil) {
+                    this.queueIpRediscovery(4000);
+                    return;
+                }
+                if (!this.hasPendingIpConfig()) {
+                    Alpine.store("app").showNotice('Network settings refreshed from receiver discovery.', 'success', 3200);
+                } else {
+                    Alpine.store("app").showNotice('Still waiting for the receiver to restart and report its new IP settings.', 'warn', 5000);
+                }
+            } catch (e) {
+                if (Date.now() < this._ipRediscoveryUntil) {
+                    this.queueIpRediscovery(5000);
+                }
+            }
+        },
+
         async connect(di) {
             try {
                 await api("POST", "/api/connect", { device: di });
@@ -441,12 +523,17 @@ document.addEventListener("alpine:init", () => {
         async discover() {
             this.discovering = true;
             try {
-                this.discovered = await api("POST", "/api/discover");
+                const nodes = await api("POST", "/api/discover");
+                await Alpine.store("app").fetchState();
+                this.discovered = this.filterNewDiscoveryNodes(nodes);
                 const count = this.discovered.length;
+                const total = nodes.length;
                 Alpine.store("app").showNotice(
                     count
-                        ? 'Discovery found ' + count + ' device' + (count === 1 ? '' : 's') + '.'
-                        : 'Discovery finished with no new devices found.',
+                        ? 'Discovery found ' + count + ' new device' + (count === 1 ? '' : 's') + '.'
+                        : total
+                        ? 'Discovery refreshed ' + total + ' known device' + (total === 1 ? '' : 's') + '.'
+                        : 'Discovery finished with no devices found.',
                     count ? 'success' : 'info'
                 );
             } catch (e) {
@@ -545,9 +632,9 @@ document.addEventListener("alpine:init", () => {
                 return;
             }
             this.ipConfigDevice = di;
-            this.ipConfigIp = dev?.ip || "";
-            this.ipConfigGateway = dev?.ip ? dev.ip.replace(/\.\d+$/, ".1") : "";
-            this.ipConfigSubnet = "255.255.255.0";
+            this.ipConfigIp = dev?.static_ip || dev?.ip || "";
+            this.ipConfigGateway = dev?.gateway || (dev?.ip ? dev.ip.replace(/\.\d+$/, ".1") : "");
+            this.ipConfigSubnet = dev?.subnet || "255.255.255.0";
         },
 
         closeIpConfig() {
@@ -563,10 +650,15 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").showNotice('Enter IP, gateway, and subnet before applying a static IP.', 'warn');
                 return;
             }
+            if (!this.isIpv4(ip) || !this.isIpv4(gw) || !this.isIpv4(sn)) {
+                Alpine.store("app").showNotice('Static IP, gateway, and subnet must be valid IPv4 addresses.', 'warn');
+                return;
+            }
             try {
                 await api("POST", "/api/set_device_ip", { device: di, ip: ip, gateway: gw, subnet: sn });
-                Alpine.store("app").showNotice(name + ' is rebooting with static IP ' + ip + '.', 'warn', 4500);
+                Alpine.store("app").showNotice('Restart ' + name + '; Primus will pick up static IP ' + ip + ' automatically when it comes back online.', 'warn', 7000);
                 this.ipConfigDevice = -1;
+                this.scheduleRediscovery();
             } catch (e) {
                 Alpine.store("app").showApiError('Static IP update failed', e);
             }
@@ -576,8 +668,9 @@ document.addEventListener("alpine:init", () => {
             const name = this.devices[di]?.name || 'device';
             try {
                 await api("POST", "/api/revert_device_dhcp", { device: di });
-                Alpine.store("app").showNotice(name + ' is rebooting and returning to DHCP.', 'warn', 4500);
+                Alpine.store("app").showNotice('Restart ' + name + '; Primus will pick up its DHCP address automatically when it comes back online.', 'warn', 7000);
                 this.ipConfigDevice = -1;
+                this.scheduleRediscovery();
             } catch (e) {
                 Alpine.store("app").showApiError('DHCP revert failed', e);
             }

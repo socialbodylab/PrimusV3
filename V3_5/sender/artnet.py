@@ -24,6 +24,7 @@ ARTNET_PORT = 6454
 NODE_CAPS_PREFIX = "PV3CAP1"
 NODE_CAPS_FEATURE_PREFIX = "F:"
 NODE_CAPS_BOARD_PREFIX = "B:"
+NODE_CAPS_IP_PREFIX = "IP:"
 
 BOARD_PROFILE_LABELS = {
     "v1": "V1 Huzzah32",
@@ -220,11 +221,12 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
         poll += struct.pack(">H", ARTNET_VERSION)
         poll += bytes([0x00, 0x00])
 
-        targets = {"255.255.255.255"}
-        targets.update(_get_all_broadcast_addresses())
-        for ip in (known_ips or []):
-            targets.add(ip)
-        for dest in targets:
+        destinations = _get_all_broadcast_addresses()
+        destinations.add("255.255.255.255")
+        for ip in known_ips or []:
+            if ip:
+                destinations.add(str(ip))
+        for dest in destinations:
             try:
                 sock.sendto(bytes(poll), (dest, ARTNET_PORT))
             except OSError:
@@ -258,6 +260,8 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
                 firmware_version = f"{raw[16]}.{raw[17]}"
             capabilities = parse_node_capabilities(node_report, short_name, long_name)
             capabilities["firmware_version"] = firmware_version
+            if capabilities.get("ip_mode") == "static" and not capabilities.get("static_ip"):
+                capabilities["static_ip"] = ip
 
             nodes[ip] = {
                 "ip": ip,
@@ -268,6 +272,10 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
                 "hardware_profile": capabilities.get("hardware_profile", "unknown"),
                 "hardware_label": capabilities.get("hardware_label", "Unknown hardware"),
                 "firmware_version": firmware_version,
+                "ip_mode": capabilities.get("ip_mode", "unknown"),
+                "static_ip": capabilities.get("static_ip"),
+                "gateway": capabilities.get("gateway"),
+                "subnet": capabilities.get("subnet"),
                 "num_ports": num_ports,
                 "universes": universes,
             }
@@ -315,6 +323,10 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
         "hardware_profile": "unknown",
         "hardware_label": "Unknown hardware",
         "firmware_version": None,
+        "ip_mode": "unknown",
+        "static_ip": None,
+        "gateway": None,
+        "subnet": None,
         "known": False,
         "rename": False,
         "hello": False,
@@ -333,6 +345,9 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
                 caps["hardware_profile"] = board_code or "unknown"
                 caps["hardware_label"] = BOARD_PROFILE_LABELS.get(
                     board_code, board_code or "Unknown hardware")
+                continue
+            if part.startswith(NODE_CAPS_IP_PREFIX):
+                _parse_ip_capability(part, caps)
                 continue
             if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
                 continue
@@ -372,6 +387,48 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             "output_config": True,
         })
     return caps
+
+
+def _parse_ip_capability(part, caps):
+    values = part[len(NODE_CAPS_IP_PREFIX):].split(":")
+    mode = values[0].strip().upper() if values else ""
+    if mode == "D":
+        caps["ip_mode"] = "dhcp"
+        caps["static_ip"] = None
+        caps["gateway"] = None
+        caps["subnet"] = None
+    elif mode == "S":
+        caps["ip_mode"] = "static"
+        if len(values) > 1 and _looks_like_ipv4(values[1]):
+            caps["static_ip"] = values[1]
+        if len(values) > 2 and _looks_like_ipv4(values[2]):
+            caps["gateway"] = values[2]
+        if len(values) > 3 and _looks_like_ipv4(values[3]):
+            caps["subnet"] = values[3]
+
+
+def _looks_like_ipv4(value):
+    try:
+        ipv4_octets(value)
+        return True
+    except ValueError:
+        return False
+
+
+def ipv4_octets(value, name="ip"):
+    text = str(value or "").strip()
+    parts = text.split(".")
+    if len(parts) != 4:
+        raise ValueError(f"invalid {name}: expected dotted IPv4 address")
+    octets = []
+    for part in parts:
+        if not part.isdigit():
+            raise ValueError(f"invalid {name}: expected numeric IPv4 octets")
+        octet = int(part, 10)
+        if octet < 0 or octet > 255:
+            raise ValueError(f"invalid {name}: IPv4 octets must be 0-255")
+        octets.append(octet)
+    return octets
 
 
 def _parse_capability_outputs(node_report, type_keys):
@@ -486,12 +543,14 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None):
     struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
     pkt[12] = mode
     if mode == 1 and static_ip and gateway and subnet:
-        for i, octet in enumerate(static_ip.split(".")):
-            pkt[13 + i] = int(octet)
-        for i, octet in enumerate(gateway.split(".")):
-            pkt[17 + i] = int(octet)
-        for i, octet in enumerate(subnet.split(".")):
-            pkt[21 + i] = int(octet)
+        for i, octet in enumerate(ipv4_octets(static_ip, "static_ip")):
+            pkt[13 + i] = octet
+        for i, octet in enumerate(ipv4_octets(gateway, "gateway")):
+            pkt[17 + i] = octet
+        for i, octet in enumerate(ipv4_octets(subnet, "subnet")):
+            pkt[21 + i] = octet
+    elif mode == 1:
+        raise ValueError("static IP mode requires ip, gateway, and subnet")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))

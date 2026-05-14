@@ -36,6 +36,8 @@ Examples:
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
 ./V3_5/Arduino/upload.sh -v3 --name "StageLeft" --auto
 ./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
+./V3_5/Arduino/upload.sh -v1 --static-ip 192.168.1.50 --gateway 192.168.1.1 --subnet 255.255.255.0 --auto
+./V3_5/Arduino/upload.sh -v1 --dhcp --auto
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ./V3_5/Arduino/upload.sh -v2 --baud 230400 /dev/cu.usbserial-XXXX
 ```
@@ -54,6 +56,10 @@ Examples:
 | `-name <name>`, `--name <name>`, `--device-name <name>` | Override `DEVICE_SHORT_NAME` for this build without editing `config.h`. Max 17 characters. This is force-applied on boot and replaces any saved Rename/NVS short name. |
 | `-ssid <name>`, `--ssid <name>` | Override `DEFAULT_WIFI_SSID` for this build without editing `config.h`. The sender Firmware tab requires SSID and password overrides together. |
 | `-pw <password>`, `--pw <password>`, `--password <password>` | Override `DEFAULT_WIFI_PASSWORD` for this build without editing `config.h`. Passwords are redacted in sender job output. |
+| `--static-ip <ip>` | Store a static IP in receiver Preferences on boot for this build. Must be used with `--gateway` and `--subnet`. |
+| `--gateway <ip>` | Gateway to store with `--static-ip`. |
+| `--subnet <ip>` | Subnet mask to store with `--static-ip`. |
+| `--dhcp` | Clear saved static IP settings in receiver Preferences on boot. Cannot be combined with `--static-ip`. |
 | `--ports`, `--list-ports` | List likely ESP32 serial ports and exit without compiling or uploading. |
 | `--ports-json`, `--list-ports-json` | List likely ESP32 serial ports as JSON for the sender web UI. |
 | `--auto`, `-auto` | Select the only detected ESP32-like serial port. Fails if no candidates or multiple candidates are found. |
@@ -69,6 +75,8 @@ Common upload commands:
 ./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX
 ./V3_5/Arduino/upload.sh -v3 --name "StageLeft" /dev/cu.usbmodemXXXX
 ./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
+./V3_5/Arduino/upload.sh -v1 --static-ip 192.168.1.50 --gateway 192.168.1.1 --subnet 255.255.255.0 /dev/cu.usbserial-XXXX
+./V3_5/Arduino/upload.sh -v1 --dhcp /dev/cu.usbserial-XXXX
 ./V3_5/Arduino/upload.sh -v2 --all
 ./V3_5/Arduino/upload.sh -v3 /dev/cu.usbmodemXXXX
 ```
@@ -81,11 +89,11 @@ The UI is intentionally focused on the common flashing path:
 
 - Choose the firmware version (`v1`, `v2`, or `v3`).
 - Refresh available USB devices and select one detected receiver, or choose all available devices.
-- Independently enable a default device-name override, WiFi SSID/password overrides, both, or neither.
+- Independently enable a default device-name override, WiFi SSID/password overrides, and static/DHCP IP overrides.
 - Install firmware tools when Arduino CLI is missing.
 - Compile or upload, then watch the output window.
 
-When enabled, the device-name override is treated as explicit overwrite intent: the receiver stores the compiled short name into NVS on boot, replacing any older name saved through the Rename workflow. WiFi credential overrides also compile a force flag that clears stale ESP32 station credentials before connecting with the supplied SSID/password. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance.
+When enabled, the device-name override is treated as explicit overwrite intent: the receiver stores the compiled short name into NVS on boot, replacing any older name saved through the Rename workflow. WiFi credential overrides also compile a force flag that clears stale ESP32 station credentials before connecting with the supplied SSID/password. Static IP overrides write the supplied IP/gateway/subnet into receiver Preferences on boot, while DHCP overrides clear saved static IP settings. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance.
 
 Firmware jobs run one at a time because Arduino core installation, library installation, compile caches, and serial uploads can conflict when launched concurrently. The UI redacts WiFi passwords from job status and output.
 
@@ -185,17 +193,20 @@ V3.5 receivers use standard Art-Net UDP 6454 plus existing Primus custom extensi
 
 ## Discovery Node Report
 
-The V3.5 Node Report keeps the V3.1 `PV3CAP1` shape and adds a parser-safe board segment:
+The V3.5 Node Report keeps the V3.1 `PV3CAP1` shape and adds parser-safe board and IP-mode segments:
 
 ```text
-PV3CAP1|port:type_id:universe|B:profile|F:features
+PV3CAP1|port:type_id:universe|B:profile|IP:D|F:features
+PV3CAP1|port:type_id:universe|B:profile|IP:S|F:features
 ```
 
 Example V1 report:
 
 ```text
-#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|F:RIOH
+#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|IP:S|F:RIOH
 ```
+
+`IP:D` means the receiver is using DHCP. `IP:S` means it has saved static IP settings; the ArtPollReply IP field remains the current address. Keep this token compact because Art-Net Node Report is limited to 64 bytes.
 
 Feature flags:
 
@@ -218,7 +229,7 @@ The firmware stores mutable receiver settings in ESP32 NVS/preferences:
 
 V3.5 uses its own persistence namespace so it does not collide with older firmware assumptions.
 
-Firmware upload overrides have narrower force semantics than a full device reset. Supplying `--name` writes that name into the saved `shortName` key on boot. Supplying WiFi credentials clears stored ESP32 station credentials before `WiFi.begin(...)`, but it does not erase the Primus output-type or static IP settings. Add a separate refurbish/reset workflow if old nodes need all saved receiver settings cleared.
+Firmware upload overrides have narrower force semantics than a full device reset. Supplying `--name` writes that name into the saved `shortName` key on boot. Supplying WiFi credentials clears stored ESP32 station credentials before `WiFi.begin(...)`. Supplying `--static-ip` writes static IP settings into Preferences, and supplying `--dhcp` removes those static IP Preferences keys. These overrides do not erase output-type settings. Add a separate refurbish/reset workflow if old nodes need all saved receiver settings cleared.
 
 ## Adding A Board Profile
 

@@ -18,6 +18,7 @@ from artnet import (
     send_output_config,
     send_art_address,
     send_ip_config,
+    ipv4_octets,
 )
 from paths import state_file
 
@@ -48,6 +49,10 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "hardware_profile": "unknown",
     "hardware_label": "Unknown hardware",
     "firmware_version": None,
+    "ip_mode": "unknown",
+    "static_ip": None,
+    "gateway": None,
+    "subnet": None,
     "known": False,
     "rename": False,
     "hello": False,
@@ -130,6 +135,11 @@ def _normalize_device_capabilities(capabilities=None):
     out["profile"] = str(out["profile"] or "generic")
     out["hardware_profile"] = str(out["hardware_profile"] or "unknown")
     out["hardware_label"] = str(out["hardware_label"] or "Unknown hardware")
+    out["ip_mode"] = str(out.get("ip_mode") or "unknown")
+    if out["ip_mode"] not in ("dhcp", "static", "unknown"):
+        out["ip_mode"] = "unknown"
+    for key in ("static_ip", "gateway", "subnet"):
+        out[key] = out.get(key) or None
     out["known"] = bool(out["known"])
     out["rename"] = bool(out["rename"])
     out["hello"] = bool(out["hello"])
@@ -163,6 +173,10 @@ def _save_devices(devices):
             "hardware_label": d.get("hardware_label", "Unknown hardware"),
             "firmware_version": d.get("firmware_version"),
             "capabilities": _normalize_device_capabilities(d.get("capabilities")),
+            "ip_mode": d.get("ip_mode", "unknown"),
+            "static_ip": d.get("static_ip"),
+            "gateway": d.get("gateway"),
+            "subnet": d.get("subnet"),
             "outputs": saved_outputs,
         })
     data["devices"] = saved_devices
@@ -283,7 +297,20 @@ def _capabilities_from_node(node_info):
     capabilities = dict(capabilities)
     if node_info.get("firmware_version") is not None:
         capabilities["firmware_version"] = node_info.get("firmware_version")
+    for key in ("ip_mode", "static_ip", "gateway", "subnet"):
+        if node_info.get(key) is not None:
+            capabilities[key] = node_info.get(key)
     return _normalize_device_capabilities(capabilities)
+
+
+def _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=None):
+    dev["ip_mode"] = capabilities.get("ip_mode", "unknown")
+    static_ip = capabilities.get("static_ip")
+    if dev["ip_mode"] == "static" and not static_ip:
+        static_ip = fallback_ip
+    dev["static_ip"] = static_ip
+    dev["gateway"] = capabilities.get("gateway")
+    dev["subnet"] = capabilities.get("subnet")
 
 
 def _output_configs_from_node(node_info):
@@ -385,7 +412,13 @@ class ControllerState:
         if not saved:
             return
         from artnet import discover_artnet_nodes
-        known_ips = [d["ip"] for d in saved]
+        known_ips = []
+        seen_ips = set()
+        for device in saved:
+            for ip in (device.get("ip"), device.get("static_ip")):
+                if ip and ip not in seen_ips:
+                    known_ips.append(ip)
+                    seen_ips.add(ip)
         nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0)
         node_map = {n["ip"]: n for n in nodes}
         nodes_by_name = {}
@@ -422,10 +455,57 @@ class ControllerState:
                     "hardware_label": sd.get("hardware_label", "Unknown hardware"),
                     "firmware_version": sd.get("firmware_version"),
                     "capabilities": sd.get("capabilities"),
+                    "ip_mode": sd.get("ip_mode"),
+                    "static_ip": sd.get("static_ip"),
+                    "gateway": sd.get("gateway"),
+                    "subnet": sd.get("subnet"),
                     "outputs": sd.get("outputs"),
                 }, auto_save=False)
         if refreshed:
             _save_devices(self.devices)
+
+    def discovery_targets(self):
+        """Return known receiver IPs worth probing during discovery."""
+        targets = []
+        seen = set()
+        with self.lock:
+            for dev in self.devices:
+                for ip in (dev.get("ip"), dev.get("static_ip")):
+                    if ip and ip not in seen:
+                        targets.append(ip)
+                        seen.add(ip)
+        return targets
+
+    def refresh_devices_from_nodes(self, nodes, auto_save=True):
+        """Refresh matching existing devices from discovery without adding new ones."""
+        refreshed = []
+        groups_changed = False
+        with self.lock:
+            for node_info in nodes or []:
+                idx = self._find_existing_device_index_unlocked(node_info)
+                if idx is None:
+                    continue
+                dev = self.devices[idx]
+                old_ip = dev.get("ip")
+                new_ip = node_info.get("ip")
+                ip_changed = bool(new_ip and new_ip != old_ip)
+                if ip_changed:
+                    dev["ip"] = new_ip
+                    dev["sender"].ip = new_ip
+                    groups_changed = self._replace_device_ip_references_unlocked(old_ip, new_ip) or groups_changed
+                updated = self._refresh_device_from_node_unlocked(dev, node_info)
+                if updated or ip_changed:
+                    refreshed.append({
+                        "device_index": idx,
+                        "name": dev.get("name"),
+                        "old_ip": old_ip,
+                        "ip": dev.get("ip"),
+                    })
+            if refreshed and auto_save:
+                _save_devices(self.devices)
+            if groups_changed and auto_save:
+                _save_device_groups(self.device_groups)
+        return refreshed
 
     def _playback_target_info_unlocked(self):
         total = len(self.devices)
@@ -593,6 +673,11 @@ class ControllerState:
                     "hardware_profile": dev.get("hardware_profile", "unknown"),
                     "hardware_label": dev.get("hardware_label", "Unknown hardware"),
                     "firmware_version": dev.get("firmware_version"),
+                    "ip_mode": dev.get("ip_mode", "unknown"),
+                    "static_ip": dev.get("static_ip"),
+                    "gateway": dev.get("gateway"),
+                    "subnet": dev.get("subnet"),
+                    "ip_config_pending": dev.get("ip_config_pending"),
                     "connected": dev["connected"],
                     "transport_error": dev.get("transport_error"),
                     "receiver_fps": rx["fps"] if rx else None,
@@ -762,12 +847,17 @@ class ControllerState:
             if idx is not None:
                 dev = self.devices[idx]
                 ip_changed = dev["ip"] != node_info["ip"]
+                groups_changed = False
                 if ip_changed:
+                    old_ip = dev["ip"]
                     dev["ip"] = node_info["ip"]
                     dev["sender"].ip = dev["ip"]
+                    groups_changed = self._replace_device_ip_references_unlocked(old_ip, dev["ip"])
                 updated = self._refresh_device_from_node_unlocked(dev, node_info)
                 if (updated or ip_changed) and auto_save:
                     _save_devices(self.devices)
+                if groups_changed and auto_save:
+                    _save_device_groups(self.device_groups)
                 return {
                     "status": "updated" if (updated or ip_changed) else "exists",
                     "device_index": idx,
@@ -795,8 +885,10 @@ class ControllerState:
                     "hardware_label", capabilities.get("hardware_label", "Unknown hardware")),
                 "firmware_version": node_info.get(
                     "firmware_version", capabilities.get("firmware_version")),
+                "ip_config_pending": None,
                 "outputs": [],
             }
+            _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
             dev["outputs"] = self._build_device_outputs_unlocked(
                 node_info, output_cfgs, base_u)
             self.devices.append(dev)
@@ -808,6 +900,8 @@ class ControllerState:
         node_ip = node_info.get("ip")
         for idx, dev in enumerate(self.devices):
             if dev["ip"] == node_ip:
+                return idx
+            if dev.get("ip_config_pending") == "static" and dev.get("static_ip") == node_ip:
                 return idx
 
         if not _node_has_discovery_metadata(node_info):
@@ -875,6 +969,8 @@ class ControllerState:
             "hardware_label", capabilities.get("hardware_label", "Unknown hardware"))
         dev["firmware_version"] = node_info.get(
             "firmware_version", capabilities.get("firmware_version"))
+        _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
+        dev["ip_config_pending"] = None
 
         output_cfgs = _output_configs_from_node(node_info)
         if output_cfgs:
@@ -888,6 +984,26 @@ class ControllerState:
                 node_info, output_cfgs, base_u, existing_outputs=dev.get("outputs", []))
         dev["sender"].ip = dev["ip"]
         return True
+
+    def _replace_device_ip_references_unlocked(self, old_ip, new_ip):
+        if not old_ip or not new_ip or old_ip == new_ip:
+            return False
+        changed = False
+        for group in self.device_groups:
+            ips = group.get("device_ips")
+            if not isinstance(ips, list) or old_ip not in ips:
+                continue
+            updated_ips = []
+            for ip in ips:
+                replacement = new_ip if ip == old_ip else ip
+                if replacement not in updated_ips:
+                    updated_ips.append(replacement)
+            group["device_ips"] = updated_ips
+            changed = True
+        if self._controller_device_ips is not None and old_ip in self._controller_device_ips:
+            self._controller_device_ips.discard(old_ip)
+            self._controller_device_ips.add(new_ip)
+        return changed
 
     def remove_device(self, di):
         with self.lock:
@@ -943,11 +1059,20 @@ class ControllerState:
                 return status
             dev = self.devices[di]
             try:
+                ipv4_octets(static_ip, "ip")
+                ipv4_octets(gateway, "gateway")
+                ipv4_octets(subnet, "subnet")
                 send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
-            except OSError as error:
+            except (OSError, ValueError) as error:
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
+            dev["ip_mode"] = "static"
+            dev["static_ip"] = static_ip
+            dev["gateway"] = gateway
+            dev["subnet"] = subnet
+            dev["ip_config_pending"] = "static"
             self._clear_transport_error_unlocked(dev)
+            _save_devices(self.devices)
             return {"ok": True}
 
     def revert_device_dhcp(self, di):
@@ -958,10 +1083,16 @@ class ControllerState:
             dev = self.devices[di]
             try:
                 send_ip_config(dev["ip"], 0)
-            except OSError as error:
+            except (OSError, ValueError) as error:
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
+            dev["ip_mode"] = "dhcp"
+            dev["static_ip"] = None
+            dev["gateway"] = None
+            dev["subnet"] = None
+            dev["ip_config_pending"] = "dhcp"
             self._clear_transport_error_unlocked(dev)
+            _save_devices(self.devices)
             return {"ok": True}
 
     def connect_all(self):

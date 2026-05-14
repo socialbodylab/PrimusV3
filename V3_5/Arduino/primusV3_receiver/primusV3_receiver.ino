@@ -125,6 +125,57 @@ void loadStoredDeviceName() {
   }
 }
 
+void printIpBytes(const uint8_t* bytes) {
+  Serial.print(bytes[0]); Serial.print(".");
+  Serial.print(bytes[1]); Serial.print(".");
+  Serial.print(bytes[2]); Serial.print(".");
+  Serial.print(bytes[3]);
+}
+
+void loadStoredNetworkConfig() {
+#ifdef PRIMUSV3_FORCE_DHCP_OVERRIDE
+  useStaticIP = false;
+  prefs.remove("staticIP");
+  prefs.remove("gateway");
+  prefs.remove("subnet");
+  Serial.println("Firmware DHCP override stored: saved static IP settings cleared.");
+  return;
+#endif
+
+#ifdef PRIMUSV3_FORCE_STATIC_IP_OVERRIDE
+  const uint8_t ipOverride[4] = { PRIMUSV3_STATIC_IP_OCTETS };
+  const uint8_t gatewayOverride[4] = { PRIMUSV3_STATIC_GATEWAY_OCTETS };
+  const uint8_t subnetOverride[4] = { PRIMUSV3_STATIC_SUBNET_OCTETS };
+  memcpy(storedIP, ipOverride, 4);
+  memcpy(storedGateway, gatewayOverride, 4);
+  memcpy(storedSubnet, subnetOverride, 4);
+  useStaticIP = true;
+  prefs.putBytes("staticIP", storedIP, 4);
+  prefs.putBytes("gateway", storedGateway, 4);
+  prefs.putBytes("subnet", storedSubnet, 4);
+  Serial.print("Firmware static IP override stored: ");
+  printIpBytes(storedIP);
+  Serial.print(" gateway ");
+  printIpBytes(storedGateway);
+  Serial.print(" subnet ");
+  printIpBytes(storedSubnet);
+  Serial.println();
+  return;
+#endif
+
+  if (prefs.isKey("staticIP")) {
+    size_t ipLen = prefs.getBytes("staticIP", storedIP, 4);
+    size_t gwLen = prefs.getBytes("gateway", storedGateway, 4);
+    size_t snLen = prefs.getBytes("subnet", storedSubnet, 4);
+    if (ipLen == 4 && gwLen == 4 && snLen == 4) {
+      useStaticIP = true;
+      Serial.print("Loaded static IP: ");
+      printIpBytes(storedIP);
+      Serial.println();
+    }
+  }
+}
+
 // ── Timing / FPS ─────────────────────────────────────────────────────
 unsigned long lastShowTime  = 0;
 unsigned long showDuration  = 2000;   // measured leds->show() time in µs
@@ -397,6 +448,10 @@ void sendArtPollReply(IPAddress dest) {
   }
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|IP:%c", useStaticIP ? 'S' : 'D');
+  }
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|F:RIOH");
   }
   strncpy((char*)&reply[108], reportBuf, 63);
@@ -573,10 +628,8 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
     prefs.putBytes("subnet", storedSubnet, 4);
 
     Serial.print("ArtIPConfig: static IP set to ");
-    Serial.print(storedIP[0]); Serial.print(".");
-    Serial.print(storedIP[1]); Serial.print(".");
-    Serial.print(storedIP[2]); Serial.print(".");
-    Serial.println(storedIP[3]);
+    printIpBytes(storedIP);
+    Serial.println();
     Serial.println("Rebooting...");
     broadcastArtPollReply();
     delay(200);
@@ -936,20 +989,7 @@ void setup() {
   // Connect WiFi
   loadStoredDeviceName();
 
-  // Load static IP config from NVS
-  if (prefs.isKey("staticIP")) {
-    size_t ipLen = prefs.getBytes("staticIP", storedIP, 4);
-    size_t gwLen = prefs.getBytes("gateway", storedGateway, 4);
-    size_t snLen = prefs.getBytes("subnet", storedSubnet, 4);
-    if (ipLen == 4 && gwLen == 4 && snLen == 4) {
-      useStaticIP = true;
-      Serial.print("Loaded static IP: ");
-      Serial.print(storedIP[0]); Serial.print(".");
-      Serial.print(storedIP[1]); Serial.print(".");
-      Serial.print(storedIP[2]); Serial.print(".");
-      Serial.println(storedIP[3]);
-    }
-  }
+  loadStoredNetworkConfig();
 
   // Set the TFT header to the custom name (or firmware default)
   setDisplayName(hasCustomName ? customShortName : DEVICE_SHORT_NAME);

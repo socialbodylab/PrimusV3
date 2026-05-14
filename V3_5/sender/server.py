@@ -177,8 +177,9 @@ class Handler(BaseHTTPRequestHandler):
             self._ok()
 
         elif path == "/api/discover":
-            known_ips = [d["ip"] for d in self.controller_state.devices]
+            known_ips = self.controller_state.discovery_targets()
             nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0)
+            self.controller_state.refresh_devices_from_nodes(nodes)
             self._json_response(nodes)
 
         elif path == "/api/add_discovered":
@@ -257,8 +258,9 @@ class Handler(BaseHTTPRequestHandler):
             if result.get("ok"):
                 self._ok()
             else:
-                code = 400 if result.get("error") == "invalid device index" else 409
-                self._json_error(code, result.get("error", "IP update failed"))
+                error = result.get("error", "IP update failed")
+                code = 400 if result.get("error") == "invalid device index" or "invalid" in error.lower() else 409
+                self._json_error(code, error)
 
         elif path == "/api/revert_device_dhcp":
             di = data.get("device", -1)

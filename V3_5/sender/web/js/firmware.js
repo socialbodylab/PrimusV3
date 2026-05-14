@@ -20,6 +20,10 @@ document.addEventListener("alpine:init", () => {
         wifiEnabled: false,
         wifiSsid: "",
         wifiPassword: "",
+        ipMode: "keep",
+        staticIp: "",
+        gateway: "",
+        subnet: "255.255.255.0",
         activeJob: null,
         polling: null,
         notifiedJobId: null,
@@ -30,6 +34,10 @@ document.addEventListener("alpine:init", () => {
             this.wifiSsid = "";
             this.wifiPassword = "";
             this.deviceName = "";
+            this.ipMode = "keep";
+            this.staticIp = "";
+            this.gateway = "";
+            this.subnet = "255.255.255.0";
             this.refreshStatus();
             document.addEventListener("primus:mode-changed", event => {
                 if (event.detail?.mode === "firmware") {
@@ -93,11 +101,29 @@ document.addEventListener("alpine:init", () => {
             return this.wifiEnabled && !!this.wifiPassword;
         },
 
+        get staticIpOverride() {
+            return (this.staticIp || "").trim();
+        },
+
+        get gatewayOverride() {
+            return (this.gateway || "").trim();
+        },
+
+        get subnetOverride() {
+            return (this.subnet || "").trim();
+        },
+
         get overrideValidationMessage() {
             if (this.nameEnabled && !this.deviceNameOverride) return "Custom name is enabled but empty.";
             if (this.wifiEnabled && !this.wifiSsidOverride && !this.wifiPassword) return "Custom credentials are enabled but empty.";
             if (this.wifiEnabled && !this.wifiSsidOverride) return "Custom credentials need an SSID.";
             if (this.wifiEnabled && !this.wifiPassword) return "Custom credentials need a password.";
+            if (this.ipMode === "static") {
+                if (!this.staticIpOverride || !this.gatewayOverride || !this.subnetOverride) return "Static IP needs IP, gateway, and subnet.";
+                if (!this.isIpv4(this.staticIpOverride)) return "Static IP is not a valid IPv4 address.";
+                if (!this.isIpv4(this.gatewayOverride)) return "Gateway is not a valid IPv4 address.";
+                if (!this.isIpv4(this.subnetOverride)) return "Subnet is not a valid IPv4 address.";
+            }
             return "";
         },
 
@@ -108,8 +134,17 @@ document.addEventListener("alpine:init", () => {
         get overrideSummaryClass() {
             return {
                 "firmware-override-summary-error": !!this.overrideValidationMessage,
-                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.wifiEnabled),
+                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.wifiEnabled || this.ipMode !== "keep"),
             };
+        },
+
+        isIpv4(value) {
+            const parts = String(value || "").trim().split(".");
+            return parts.length === 4 && parts.every(part => {
+                if (!/^\d+$/.test(part)) return false;
+                const octet = Number(part);
+                return octet >= 0 && octet <= 255;
+            });
         },
 
         overrideSummary() {
@@ -118,6 +153,11 @@ document.addEventListener("alpine:init", () => {
             if (this.deviceNameOverride) parts.push("Name: " + this.deviceNameOverride);
             if (this.wifiSsidOverride) parts.push("SSID: " + this.wifiSsidOverride);
             if (this.wifiPasswordOverrideSet) parts.push("Password: set");
+            if (this.ipMode === "static") {
+                parts.push("Static IP: " + this.staticIpOverride + " / " + this.gatewayOverride + " / " + this.subnetOverride);
+            } else if (this.ipMode === "dhcp") {
+                parts.push("IP: DHCP");
+            }
             return parts.length ? "This job will use " + parts.join("; ") + "." : "Using firmware defaults from config.h.";
         },
 
@@ -128,6 +168,11 @@ document.addEventListener("alpine:init", () => {
             if (overrides.device_name) parts.push("Name: " + overrides.device_name);
             if (overrides.wifi_ssid) parts.push("SSID: " + overrides.wifi_ssid);
             if (overrides.wifi_password_set) parts.push("Password: set");
+            if (overrides.ip_mode === "static") {
+                parts.push("Static IP: " + overrides.static_ip + " / " + overrides.gateway + " / " + overrides.subnet);
+            } else if (overrides.ip_mode === "dhcp") {
+                parts.push("IP: DHCP");
+            }
             return parts.length ? "Overrides used: " + parts.join("; ") : "Overrides used: firmware defaults";
         },
 
@@ -231,6 +276,7 @@ document.addEventListener("alpine:init", () => {
             if (action === "compile" || action === "upload") {
                 this.addDeviceNameField(body);
                 this.addWifiFields(body);
+                this.addIpFields(body);
             }
             if (action === "upload") {
                 body.port_mode = this.portMode;
@@ -259,6 +305,16 @@ document.addEventListener("alpine:init", () => {
             if (!this.nameEnabled) return;
             const name = this.deviceName.trim();
             if (name) body.device_name = name;
+        },
+
+        addIpFields(body) {
+            if (this.ipMode === "keep") return;
+            body.ip_mode = this.ipMode;
+            if (this.ipMode === "static") {
+                body.static_ip = this.staticIpOverride;
+                body.gateway = this.gatewayOverride;
+                body.subnet = this.subnetOverride;
+            }
         },
 
         startPolling() {

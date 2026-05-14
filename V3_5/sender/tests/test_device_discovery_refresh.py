@@ -28,7 +28,9 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
             "ip": "192.168.1.50",
             "short_name": "NewPrimus1",
             "long_name": "PrimusV3.5 LED Node | A0:Grid 8x4 A1:Long Strip",
-            "node_report": "#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|F:RIOH",
+            "node_report": "#0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|IP:S|F:RIOH",
+            "ip_mode": "static",
+            "static_ip": "192.168.1.50",
             "num_ports": 2,
             "universes": [0, 1],
         }, auto_save=False)
@@ -41,6 +43,8 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
         self.assertTrue(dev["capabilities"]["hello"])
         self.assertTrue(dev["capabilities"]["output_config"])
         self.assertEqual(dev["hardware_profile"], "v1")
+        self.assertEqual(dev["ip_mode"], "static")
+        self.assertEqual(dev["static_ip"], "192.168.1.50")
         self.assertEqual(dev["outputs"][0]["type"], "small_grid")
         self.assertEqual(dev["outputs"][0]["universe"], 0)
         self.assertEqual(dev["outputs"][1]["type"], "long_strip")
@@ -88,12 +92,13 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
             "ip": "192.168.1.2",
             "short_name": "NewPrimus1",
             "long_name": "PrimusV3.5 LED Node | A0:Short Strip A1:Long Strip ",
-            "node_report": "#0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|F:RIOH",
+            "node_report": "#0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|IP:D|F:RIOH",
             "capabilities": {
                 "profile": "pv3cap1",
                 "hardware_profile": "v31",
                 "hardware_label": "V3.1 Reverse TFT",
                 "firmware_version": "3.5",
+                "ip_mode": "dhcp",
                 "known": True,
                 "rename": True,
                 "hello": True,
@@ -115,8 +120,51 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
         self.assertEqual(dev["sender"].ip, "192.168.1.2")
         self.assertTrue(dev["capabilities"]["rename"])
         self.assertTrue(dev["capabilities"]["hello"])
+        self.assertEqual(dev["ip_mode"], "dhcp")
         self.assertEqual(dev["outputs"][0]["type"], "short_strip")
         self.assertEqual(dev["outputs"][1]["type"], "long_strip")
+
+    def test_pending_static_ip_is_refreshed_without_readding_device(self):
+        state = ControllerState(None)
+        state.add_device_from_node({
+            "ip": "192.168.1.6",
+            "short_name": "StageLeft",
+            "long_name": "PrimusV3.5 LED Node | A0:Short Strip A1:Long Strip ",
+            "node_report": "#0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|IP:D|F:RIOH",
+            "num_ports": 2,
+            "universes": [0, 1],
+        }, auto_save=False)
+        state.devices[0]["ip_config_pending"] = "static"
+        state.devices[0]["ip_mode"] = "static"
+        state.devices[0]["static_ip"] = "192.168.1.50"
+        state.device_groups = [{
+            "id": "group-a",
+            "name": "Stage Group",
+            "device_ips": ["192.168.1.6"],
+        }]
+        state._controller_device_ips = {"192.168.1.6"}
+
+        self.assertEqual(state.discovery_targets(), ["192.168.1.6", "192.168.1.50"])
+
+        refreshed = state.refresh_devices_from_nodes([{
+            "ip": "192.168.1.50",
+            "short_name": "StageLeft",
+            "long_name": "PrimusV3.5 LED Node | A0:Short Strip A1:Long Strip ",
+            "node_report": "#0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|IP:S|F:RIOH",
+            "num_ports": 2,
+            "universes": [0, 1],
+        }], auto_save=False)
+
+        self.assertEqual(refreshed[0]["old_ip"], "192.168.1.6")
+        self.assertEqual(len(state.devices), 1)
+        dev = state.devices[0]
+        self.assertEqual(dev["ip"], "192.168.1.50")
+        self.assertEqual(dev["sender"].ip, "192.168.1.50")
+        self.assertIsNone(dev["ip_config_pending"])
+        self.assertEqual(dev["ip_mode"], "static")
+        self.assertEqual(dev["static_ip"], "192.168.1.50")
+        self.assertEqual(state.device_groups[0]["device_ips"], ["192.168.1.50"])
+        self.assertEqual(state._controller_device_ips, {"192.168.1.50"})
 
     def test_restore_devices_follows_saved_name_to_new_ip(self):
         saved = [{
