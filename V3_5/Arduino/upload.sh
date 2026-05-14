@@ -19,11 +19,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SKETCH_DIR="$SCRIPT_DIR/primusV3_receiver"
 
+if [[ -n "${ARDUINO_CLI:-}" && -x "$ARDUINO_CLI" ]]; then
+  PATH="$(dirname "$ARDUINO_CLI"):$PATH"
+fi
+
+if [[ -n "${PRIMUSV3_PYTHON_BIN_DIR:-}" && -d "$PRIMUSV3_PYTHON_BIN_DIR" ]]; then
+  PATH="$PRIMUSV3_PYTHON_BIN_DIR:$PATH"
+fi
+
 for local_bin in "$REPO_ROOT/.tools/arduino-cli/bin" "$REPO_ROOT/.tools/python-bin"; do
   if [[ -d "$local_bin" ]]; then
     PATH="$local_bin:$PATH"
   fi
 done
+if [[ -n "${ARDUINO_CLI:-}" && -x "$ARDUINO_CLI" ]]; then
+  PATH="$(dirname "$ARDUINO_CLI"):$PATH"
+fi
 export PATH
 
 BOARD_PROFILE="v3"
@@ -322,10 +333,20 @@ check_cli() {
     err "arduino-cli not found. Install Arduino CLI: https://arduino.github.io/arduino-cli/latest/installation/"
     exit 1
   fi
-  if ! command -v python3 &>/dev/null; then
+  if needs_python3 && ! command -v python3 &>/dev/null; then
     err "python3 not found. It is required to parse arduino-cli board output."
     exit 1
   fi
+}
+
+needs_python3() {
+  if [[ "$LIST_PORTS" == true || "$LIST_PORTS_JSON" == true || "$AUTO_PORT" == true || "$ALL_PORTS" == true ]]; then
+    return 0
+  fi
+  if [[ "$COMPILE_ONLY" == false && "$INSTALL_ONLY" == false && ${#EXPLICIT_PORTS[@]} -eq 0 ]]; then
+    return 0
+  fi
+  return 1
 }
 
 port_parser() {

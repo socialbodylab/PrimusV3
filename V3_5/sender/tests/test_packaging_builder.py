@@ -43,6 +43,7 @@ class PackagingBuilderTests(unittest.TestCase):
         self.assertIn("--windowed", cmd)
         self.assertIn("--onefile", cmd)
         self.assertIn("--add-data", cmd)
+        self.assertIn(build_sender_app._add_data_arg(Path(V35_DIR) / "Arduino", "Arduino"), cmd)
         self.assertEqual(cmd[-1], str(sender_dir / "run.py"))
 
     def test_macos_command_uses_prepared_icon_when_available(self):

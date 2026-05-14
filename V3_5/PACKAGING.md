@@ -22,6 +22,22 @@ Windows:
 
 The app copies bundled starter clips, looks, and `cues.json` there on first run. Existing user data is not overwritten on later launches or app updates.
 
+Firmware tool downloads are kept outside the app bundle in a managed tools directory.
+
+macOS:
+
+```text
+~/Library/Application Support/PrimusV3/V3_5/tools/
+```
+
+Windows:
+
+```text
+%APPDATA%\PrimusV3\V3_5\tools\
+```
+
+The Firmware panel can install Arduino CLI, ESP32 board support, and receiver firmware libraries into this directory on demand. The main app bundle includes the receiver firmware source and upload script, but not downloaded Arduino cores or caches. Arduino CLI config for this managed setup is stored at `tools/arduino-cli.yaml`.
+
 For local testing, set `PRIMUSV3_DATA_DIR` to force a specific writable data directory:
 
 ```bash
@@ -29,6 +45,8 @@ PRIMUSV3_DATA_DIR=/tmp/primus-data python3 V3_5/sender/run.py --no-browser
 ```
 
 Set `PRIMUSV3_USE_APP_DATA=1` to use the platform app data directory while running from source.
+
+Set `PRIMUSV3_TOOLS_DIR` to force a specific firmware tools directory while testing the installer.
 
 ## Build An App Or Executable
 

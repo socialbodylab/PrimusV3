@@ -9,6 +9,9 @@ document.addEventListener("alpine:init", () => {
         available: false,
         availabilityMessage: "Checking firmware tools...",
         sourceOnly: true,
+        toolStatus: "unknown",
+        canInstallTools: false,
+        toolsDir: "",
         ports: [],
         portMode: "selected",
         selectedPort: "",
@@ -37,6 +40,14 @@ document.addEventListener("alpine:init", () => {
 
         get running() {
             return ["queued", "running"].includes(this.activeJob?.status);
+        },
+
+        get installingTools() {
+            return this.running && this.activeJob?.action === "setup_tools";
+        },
+
+        get showInstallTools() {
+            return !this.available && !this.running && this.canInstallTools;
         },
 
         get terminal() {
@@ -69,6 +80,9 @@ document.addEventListener("alpine:init", () => {
                 this.available = !!status.available;
                 this.availabilityMessage = status.message || "Firmware upload status unknown.";
                 this.sourceOnly = status.source_only !== false;
+                this.toolStatus = status.tool_status || "unknown";
+                this.canInstallTools = !!status.can_install_tools;
+                this.toolsDir = status.tools_dir || "";
                 if (status.current_job) {
                     this.activeJob = status.current_job;
                     this.startPolling();
@@ -79,6 +93,7 @@ document.addEventListener("alpine:init", () => {
             } catch (e) {
                 this.available = false;
                 this.availabilityMessage = e.message || "Firmware status unavailable.";
+                this.canInstallTools = false;
             }
         },
 
@@ -128,12 +143,14 @@ document.addEventListener("alpine:init", () => {
 
         jobLabel() {
             if (!this.activeJob) return "Ready";
+            if (this.activeJob.action === "setup_tools") return "Firmware tools - " + this.activeJob.status;
             const action = this.activeJob.action.replace("_", " ");
             return action + " - " + this.activeJob.status;
         },
 
         targetSummary() {
             if (this.running) return "Firmware job is running.";
+            if (!this.available) return "Install firmware tools before scanning devices.";
             if (!this.candidatePorts.length) return "Connect a receiver, then refresh devices.";
             if (this.portMode === "all") return "All " + this.candidatePorts.length + " available device" + (this.candidatePorts.length === 1 ? "" : "s") + " selected.";
             return this.selectedPort ? this.selectedPort + " selected." : "Choose a device or All Available Devices.";
@@ -141,6 +158,10 @@ document.addEventListener("alpine:init", () => {
 
         scanPorts() {
             return this.startJob("list_ports");
+        },
+
+        installTools() {
+            return this.startJob("setup_tools");
         },
 
         async startJob(action) {
@@ -224,8 +245,11 @@ document.addEventListener("alpine:init", () => {
             if (!job || this.notifiedJobId === job.id) return;
             this.notifiedJobId = job.id;
             if (job.status === "succeeded") {
-                const label = job.action === "list_ports" ? "Port scan" : "Firmware job";
+                const label = job.action === "list_ports"
+                    ? "Port scan"
+                    : (job.action === "setup_tools" ? "Firmware tools setup" : "Firmware job");
                 Alpine.store("app").showNotice(label + " complete.", "success");
+                if (job.action === "setup_tools") this.refreshStatus();
             } else {
                 Alpine.store("app").showNotice(job.error || "Firmware job failed.", "error", 5000);
             }

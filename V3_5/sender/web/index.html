@@ -1003,10 +1003,22 @@
             <div>
                 <h2 class="section-title" style="margin:0">Firmware</h2>
                 <div class="text-sm text-muted" x-text="availabilityMessage"></div>
+                <div class="firmware-tools-path" x-show="toolsDir" x-text="toolsDir"></div>
             </div>
+            <button class="btn btn-primary firmware-install-tools"
+                    x-show="showInstallTools"
+                    @click="installTools()">Install Firmware Tools</button>
             <div class="firmware-status-pill" :class="statusClass()">
                 <span x-text="jobLabel()"></span>
             </div>
+        </div>
+
+        <div class="output-section firmware-tool-callout" x-show="showInstallTools" x-cloak>
+            <div class="output-header">
+                <span class="output-name">Firmware Tools Required</span>
+                <span class="text-sm text-muted">One-time setup</span>
+            </div>
+            <p class="text-sm text-muted">Download Arduino CLI, install ESP32 board support, and prepare the receiver firmware libraries before compiling or uploading.</p>
         </div>
 
         <div class="firmware-grid firmware-workflow-grid">

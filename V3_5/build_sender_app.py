@@ -43,8 +43,9 @@ def _add_data_arg(source, dest):
     return f"{source}{os.pathsep}{dest}"
 
 
-def _data_files(sender_dir):
+def _data_files(v35_dir, sender_dir):
     return [
+        (v35_dir / "Arduino", "Arduino"),
         (sender_dir / "web", "sender/web"),
         (sender_dir / "clips", "sender/clips"),
         (sender_dir / "looks", "sender/looks"),
@@ -108,7 +109,8 @@ def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
     if icon_path is not None:
         cmd.extend(["--icon", str(icon_path)])
 
-    for source, dest in _data_files(sender_dir):
+    v35_dir = sender_dir.parent
+    for source, dest in _data_files(v35_dir, sender_dir):
         if source.exists():
             cmd.extend(["--add-data", _add_data_arg(source, dest)])
 

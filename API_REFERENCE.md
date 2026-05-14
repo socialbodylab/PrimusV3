@@ -353,10 +353,11 @@ Cue payloads use the assignment model below. Older single-Look cues with top-lev
 
 ### POST Endpoints — Firmware Upload
 
-These endpoints are local sender helpers for source-checkout workflows. They wrap `V3_5/Arduino/upload.sh`, run one job at a time, and redact WiFi passwords from job output. The Firmware tab uses the simple flow of firmware version, selected device or all devices, independently optional device-name and WiFi overrides, then compile/upload with an output window. Packaged app support is not part of the first implementation.
+These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V3_5/Arduino/upload.sh`, run one job at a time, and redact WiFi passwords from job output. The Firmware tab uses the simple flow of firmware version, selected device or all devices, independently optional device-name and WiFi overrides, then compile/upload with an output window. If Arduino CLI is missing, the Firmware tab can start a one-time setup job that installs managed firmware tools outside the app bundle.
 
 | Route | Body | Description |
 |---|---|---|
+| `POST /api/firmware/jobs` | `{action:"setup_tools", profile:"v3"}` | Download Arduino CLI into the managed tools directory, configure ESP32 board support, and install receiver firmware libraries. |
 | `POST /api/firmware/jobs` | `{action:"list_ports", profile:"v3"}` | Run `upload.sh --board <profile> --ports-json` and return structured serial port data in the job result. |
 | `POST /api/firmware/jobs` | `{action:"install", profile:"v3"}` | Run `upload.sh --board <profile> --install`. |
 | `POST /api/firmware/jobs` | `{action:"compile", profile:"v3", device_name?, wifi_ssid?, wifi_password?}` | Run compile-only verification with optional default device-name and WiFi credential overrides. |

@@ -1601,6 +1601,24 @@ input[type="color"] {
 .firmware-status-error { border-color: var(--danger); color: var(--danger); }
 .firmware-status-idle { border-color: var(--border); color: var(--text-secondary); }
 
+.firmware-tools-path {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.firmware-install-tools {
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.firmware-tool-callout {
+    margin-bottom: 12px;
+    border-color: var(--warning);
+}
+
 .firmware-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

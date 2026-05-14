@@ -75,18 +75,21 @@ Common upload commands:
 
 ### Sender Firmware Tab
 
-The V3.5 sender web UI includes a Firmware tab when running from a source checkout. It wraps `upload.sh` through local JSON API jobs and keeps this script as the source of truth for board profiles, library installation, compile flags, WiFi overrides, and upload behavior.
+The V3.5 sender web UI includes a Firmware tab. It wraps `upload.sh` through local JSON API jobs and keeps this script as the source of truth for board profiles, library installation, compile flags, WiFi overrides, and upload behavior.
 
 The UI is intentionally focused on the common flashing path:
 
 - Choose the firmware version (`v1`, `v2`, or `v3`).
 - Refresh available USB devices and select one detected receiver, or choose all available devices.
 - Independently enable a default device-name override, WiFi SSID/password overrides, both, or neither.
+- Install firmware tools when Arduino CLI is missing.
 - Compile or upload, then watch the output window.
 
-When enabled, the device-name override becomes the firmware default short name for fresh receivers. If the receiver already has a name stored through the Rename workflow, that stored NVS name takes precedence and can still be changed later from the controller. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance, but it is not part of the main Firmware tab workflow.
+When enabled, the device-name override becomes the firmware default short name for fresh receivers. If the receiver already has a name stored through the Rename workflow, that stored NVS name takes precedence and can still be changed later from the controller. The upload script still handles ESP32 core/library checks during compile and upload. The standalone `--install` CLI flag remains available for command-line maintenance.
 
-Firmware jobs run one at a time because Arduino core installation, library installation, compile caches, and serial uploads can conflict when launched concurrently. The UI redacts WiFi passwords from job status and output. Packaged app support is intentionally out of scope for this first pass; source runs still use `python3 V3_5/sender/run.py`.
+Firmware jobs run one at a time because Arduino core installation, library installation, compile caches, and serial uploads can conflict when launched concurrently. The UI redacts WiFi passwords from job status and output.
+
+Packaged PrimusCentral builds include the receiver firmware source and `upload.sh`, but they do not bundle Arduino CLI, ESP32 board packages, or downloaded library caches. When the Firmware panel runs `setup_tools`, the sender downloads Arduino CLI into a managed tools directory, configures ESP32 board support with `arduino-cli.yaml` in that same directory, and runs `upload.sh --install` for the supported board profiles. Source checkouts still use `.tools/` by default; packaged apps use app data, for example `~/Library/Application Support/PrimusV3/V3_5/tools/` on macOS. Use `PRIMUSV3_TOOLS_DIR` to force a temporary tools directory for installer testing.
 
 ## Board Profile Responsibilities
 

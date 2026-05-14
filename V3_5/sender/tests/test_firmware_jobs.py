@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -9,6 +10,7 @@ if SENDER_DIR not in sys.path:
     sys.path.insert(0, SENDER_DIR)
 
 import firmware
+import paths
 
 
 def available_status():
@@ -19,7 +21,23 @@ def available_status():
         "bash": True,
         "python3": True,
         "arduino_cli": True,
+        "tool_status": "ready",
+        "can_install_tools": True,
         "source_only": True,
+    }
+
+
+def unavailable_status():
+    return {
+        "available": False,
+        "message": "missing firmware tools",
+        "script_path": "/tmp/upload.sh",
+        "bash": True,
+        "python3": True,
+        "arduino_cli": False,
+        "tool_status": "missing_cli",
+        "can_install_tools": True,
+        "source_only": False,
     }
 
 
@@ -100,6 +118,53 @@ class FirmwareJobTests(unittest.TestCase):
         with self.assertRaises(firmware.FirmwareRequestError) as name_error:
             manager.build_command({"action": "compile", "profile": "v3", "device_name": "x" * 18})
         self.assertEqual(name_error.exception.code, 400)
+
+    def test_setup_tools_job_bypasses_missing_upload_tools(self):
+        def fake_installer(job, manager):
+            job.append_output("installed fake tools")
+            return {"tools_dir": "/tmp/tools"}
+
+        manager = firmware.FirmwareJobManager(
+            script_path="/tmp/upload.sh",
+            availability_checker=unavailable_status,
+            tool_installer=fake_installer,
+        )
+        job = manager.start_job({"action": "setup_tools", "profile": "v3"})
+
+        for _ in range(100):
+            current = manager.get_job(job["id"])
+            if current["status"] == "succeeded":
+                break
+            time.sleep(0.01)
+        current = manager.get_job(job["id"])
+        self.assertEqual(current["status"], "succeeded")
+        self.assertEqual(current["result"]["tools_dir"], "/tmp/tools")
+        self.assertIn("installed fake tools", current["output"])
+
+    def test_managed_arduino_cli_is_added_to_job_environment(self):
+        old_tools_dir = os.environ.get(paths.TOOLS_DIR_ENV)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.environ[paths.TOOLS_DIR_ENV] = tmpdir
+                paths.ensure_tools_data()
+                cli_path = paths.arduino_cli_executable()
+                cli_bin_dir = paths.arduino_cli_bin_dir()
+                with open(cli_path, "w", encoding="utf-8") as cli_file:
+                    cli_file.write("#!/bin/sh\n")
+                os.chmod(cli_path, 0o755)
+
+                manager = firmware.FirmwareJobManager(script_path="/tmp/upload.sh")
+                env = manager._path_env()
+            finally:
+                if old_tools_dir is None:
+                    os.environ.pop(paths.TOOLS_DIR_ENV, None)
+                else:
+                    os.environ[paths.TOOLS_DIR_ENV] = old_tools_dir
+
+        self.assertEqual(env["ARDUINO_CLI"], cli_path)
+        self.assertIn(cli_bin_dir, env["PATH"])
+        self.assertIn("ARDUINO_CONFIG_FILE", env)
+        self.assertIn("ARDUINO_DIRECTORIES_DATA", env)
 
     def test_output_redaction_removes_ansi_and_password(self):
         cleaned = firmware.redact_text("\x1b[1;34msecret-password\x1b[0m done\n", ["secret-password"])

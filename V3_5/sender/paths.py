@@ -12,11 +12,20 @@ import sys
 
 
 DATA_DIR_ENV = "PRIMUSV3_DATA_DIR"
+TOOLS_DIR_ENV = "PRIMUSV3_TOOLS_DIR"
 USE_APP_DATA_ENV = "PRIMUSV3_USE_APP_DATA"
 
 
 def sender_dir():
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def v35_dir():
+    return os.path.abspath(os.path.join(sender_dir(), ".."))
+
+
+def repo_root():
+    return os.path.abspath(os.path.join(v35_dir(), ".."))
 
 
 def is_bundled():
@@ -47,6 +56,7 @@ def _resource_roots():
             bundle_root,
         ])
     roots.append(sender_dir())
+    roots.append(v35_dir())
     return _dedupe(roots)
 
 
@@ -62,7 +72,7 @@ def web_dir():
     return resource_path("web")
 
 
-def _default_app_data_dir():
+def _default_app_root_dir():
     if sys.platform == "darwin":
         base = os.path.expanduser("~/Library/Application Support")
     elif os.name == "nt":
@@ -73,7 +83,11 @@ def _default_app_data_dir():
         base = os.environ.get("XDG_DATA_HOME")
         if not base:
             base = os.path.expanduser("~/.local/share")
-    return os.path.join(base, "PrimusV3", "V3_5", "sender")
+    return os.path.join(base, "PrimusV3", "V3_5")
+
+
+def _default_app_data_dir():
+    return os.path.join(_default_app_root_dir(), "sender")
 
 
 def uses_app_data_dir():
@@ -95,6 +109,61 @@ def data_dir():
 
 def data_path(*parts):
     return os.path.join(data_dir(), *parts)
+
+
+def tools_dir():
+    override = os.environ.get(TOOLS_DIR_ENV)
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    if uses_app_data_dir():
+        return os.path.join(_default_app_root_dir(), "tools")
+    return os.path.join(repo_root(), ".tools")
+
+
+def tools_path(*parts):
+    return os.path.join(tools_dir(), *parts)
+
+
+def arduino_cli_tool_dir():
+    return tools_path("arduino-cli")
+
+
+def arduino_cli_bin_dir():
+    return os.path.join(arduino_cli_tool_dir(), "bin")
+
+
+def arduino_cli_executable():
+    exe = "arduino-cli.exe" if os.name == "nt" else "arduino-cli"
+    return os.path.join(arduino_cli_bin_dir(), exe)
+
+
+def python_shim_dir():
+    return tools_path("python-bin")
+
+
+def arduino_data_dir():
+    return tools_path("arduino-data")
+
+
+def arduino_downloads_dir():
+    return tools_path("arduino-downloads")
+
+
+def arduino_user_dir():
+    return tools_path("arduino-user")
+
+
+def arduino_config_file():
+    return tools_path("arduino-cli.yaml")
+
+
+def ensure_tools_data():
+    os.makedirs(tools_dir(), exist_ok=True)
+    os.makedirs(arduino_cli_bin_dir(), exist_ok=True)
+    os.makedirs(python_shim_dir(), exist_ok=True)
+    os.makedirs(arduino_data_dir(), exist_ok=True)
+    os.makedirs(arduino_downloads_dir(), exist_ok=True)
+    os.makedirs(arduino_user_dir(), exist_ok=True)
 
 
 def clips_dir():

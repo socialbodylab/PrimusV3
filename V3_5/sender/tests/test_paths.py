@@ -14,8 +14,10 @@ import paths
 class PathsTests(unittest.TestCase):
     def setUp(self):
         self._old_data_dir = os.environ.get(paths.DATA_DIR_ENV)
+        self._old_tools_dir = os.environ.get(paths.TOOLS_DIR_ENV)
         self._old_use_app_data = os.environ.get(paths.USE_APP_DATA_ENV)
         os.environ.pop(paths.DATA_DIR_ENV, None)
+        os.environ.pop(paths.TOOLS_DIR_ENV, None)
         os.environ.pop(paths.USE_APP_DATA_ENV, None)
 
     def tearDown(self):
@@ -23,6 +25,10 @@ class PathsTests(unittest.TestCase):
             os.environ.pop(paths.DATA_DIR_ENV, None)
         else:
             os.environ[paths.DATA_DIR_ENV] = self._old_data_dir
+        if self._old_tools_dir is None:
+            os.environ.pop(paths.TOOLS_DIR_ENV, None)
+        else:
+            os.environ[paths.TOOLS_DIR_ENV] = self._old_tools_dir
         if self._old_use_app_data is None:
             os.environ.pop(paths.USE_APP_DATA_ENV, None)
         else:
@@ -50,6 +56,16 @@ class PathsTests(unittest.TestCase):
             with open(paths.cues_file(), "r") as f:
                 cues_text = f.read()
             self.assertIn("cues", cues_text)
+
+    def test_env_tools_dir_controls_managed_firmware_tools(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ[paths.TOOLS_DIR_ENV] = tmpdir
+            paths.ensure_tools_data()
+
+            self.assertEqual(paths.tools_dir(), tmpdir)
+            self.assertTrue(os.path.isdir(paths.arduino_cli_bin_dir()))
+            self.assertTrue(os.path.isdir(paths.arduino_data_dir()))
+            self.assertTrue(paths.arduino_cli_executable().endswith("arduino-cli"))
 
     def test_runtime_seed_does_not_overwrite_existing_cues(self):
         with tempfile.TemporaryDirectory() as tmpdir:
