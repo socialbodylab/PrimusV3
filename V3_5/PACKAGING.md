@@ -48,6 +48,12 @@ Set `PRIMUSV3_USE_APP_DATA=1` to use the platform app data directory while runni
 
 Set `PRIMUSV3_TOOLS_DIR` to force a specific firmware tools directory while testing the installer.
 
+## macOS Network Settings
+
+The Settings tab can select the sender interface used for Art-Net discovery/output and can apply a static IP or revert DHCP for a macOS network service. Static/DHCP profiles are saved in the same `.primus_state.json` file as other sender state, under `sender_network`.
+
+Applying host network changes runs `/usr/sbin/networksetup` through AppleScript's administrator prompt. Primus Central does not store WiFi passwords, admin passwords, tokens, or other credentials. Packaged macOS builds should keep this behavior visible to the user; no extra runtime Python dependencies are required.
+
 ## Build An App Or Executable
 
 Build on the target OS. PyInstaller does not reliably cross-compile macOS apps from Windows or Windows executables from macOS.

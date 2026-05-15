@@ -10,6 +10,7 @@
 <script src="/js/look-mixer.js"></script>
 <script src="/js/look-controller.js"></script>
 <script src="/js/firmware.js"></script>
+<script src="/js/settings.js"></script>
 </head>
 <body>
 
@@ -25,7 +26,7 @@
         </template>
     </div>
     <div class="navbar-tabs navbar-tabs-secondary">
-        <template x-data x-for="m in ['firmware']">
+        <template x-data x-for="m in ['firmware', 'settings']">
             <div class="navbar-tab"
                  :class="{ active: $store.app.mode === m }"
                  @click="$store.app.setMode(m)"
@@ -40,6 +41,13 @@
             <span class="playback-chip-value" x-text="$store.app.playback.label"></span>
             <span class="playback-chip-meta" x-text="$store.app.playback.summary"></span>
         </div>
+        <button class="network-chip"
+                :class="$store.app.networkChipClass()"
+                :title="$store.app.networkChipTitle()"
+                @click="$store.app.setMode('settings')">
+            <span class="network-chip-label">Net</span>
+            <span class="network-chip-value" x-text="$store.app.networkChipLabel()"></span>
+        </button>
         <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
         <span x-text="$store.app.connectedDeviceSummary"></span>
     </div>
@@ -58,7 +66,7 @@
 
     <!-- ──── SIDEBAR: Devices ──── -->
     <div class="sidebar" :class="{ 'sidebar-collapsed': $store.conn.sidebarCollapsed }"
-         x-show="!['controller', 'firmware'].includes($store.app.mode)">
+            x-show="!['controller', 'firmware', 'settings'].includes($store.app.mode)">
         <div class="flex justify-between items-center mb-4">
             <span class="section-title" style="margin:0">Devices</span>
             <button class="btn btn-sm" @click="$store.conn.sidebarCollapsed = !$store.conn.sidebarCollapsed"
@@ -1164,6 +1172,214 @@
                 </template>
             </div>
             <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
+        </div>
+    </div>
+
+    <!-- ---- PANEL: Settings ---- -->
+    <div class="panel settings-panel" x-show="$store.app.mode === 'settings'" x-data="settingsPanel">
+        <div class="flex justify-between items-center mb-4 settings-title-row">
+            <div>
+                <h2 class="section-title" style="margin:0">Settings</h2>
+                <div class="text-sm text-muted" x-text="$store.app.networkChipTitle()"></div>
+            </div>
+            <button class="btn btn-sm" @click="refresh()" :disabled="loading" x-text="loading ? 'Refreshing...' : 'Refresh'"></button>
+        </div>
+
+        <template x-if="warnings.length">
+            <div class="output-section settings-warning-section">
+                <template x-for="warning in warnings" :key="warning">
+                    <div class="settings-warning-line" x-text="warning"></div>
+                </template>
+            </div>
+        </template>
+
+        <div class="settings-grid">
+            <div class="output-section settings-section settings-router-section">
+                <div class="output-header">
+                    <span class="output-name">Show Router Setup</span>
+                    <span class="settings-status-pill settings-pill-router" x-text="routerStatusLabel"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="routerSetupSummary()"></div>
+                <div class="settings-detail-grid settings-router-grid">
+                    <div>
+                        <span class="settings-detail-label">Connection</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.service || selectedInterface?.device || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Sender IP</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.source_ip || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.cidr || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.usable_range || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-primary" @click="selectInterface(selectedInterface)" :disabled="!selectedInterface?.id || applying">Use for Art-Net</button>
+                    <button class="btn" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Receivers</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-current-section">
+                <div class="output-header">
+                    <span class="output-name">Sender Route</span>
+                    <span class="settings-status-pill" :class="statusPillClass(selectedInterface)" x-text="selectedInterface?.is_preferred ? 'Preferred' : (selectedInterface?.is_default ? 'Default' : 'Status')"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="interfaceMeta(selectedInterface)"></div>
+                <div class="settings-detail-grid">
+                    <div>
+                        <span class="settings-detail-label">Type</span>
+                        <span class="settings-detail-value" x-text="typeLabel(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None' "></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">SSID</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.ssid || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-sm" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-sm btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Devices</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-interface-section">
+                <div class="output-header">
+                    <span class="output-name">Active Connections</span>
+                    <span class="text-sm text-muted" x-text="visibleInterfaces.length + ' active' + (hiddenInterfaceCount ? ', ' + hiddenInterfaceCount + ' hidden' : '')"></span>
+                </div>
+                <div class="settings-interface-list">
+                    <template x-if="visibleInterfaces.length === 0">
+                        <div class="firmware-empty-state">No active IPv4 connections found.</div>
+                    </template>
+                    <template x-for="iface in visibleInterfaces" :key="iface.id">
+                        <button type="button" class="settings-interface-row"
+                                :class="interfaceRowClass(iface)"
+                                @click="selectInterface(iface)">
+                            <span class="settings-interface-name" x-text="interfaceLabel(iface)"></span>
+                            <span class="settings-interface-meta" x-text="interfaceMeta(iface)"></span>
+                            <span class="settings-interface-badges">
+                                <span class="settings-status-pill" :class="statusPillClass(iface)" x-text="iface.connected ? 'Active' : 'Inactive'"></span>
+                                <span class="settings-status-pill settings-pill-controller" x-show="iface.is_controller">Controller</span>
+                                <span class="settings-status-pill settings-pill-preferred" x-show="iface.is_preferred">Preferred</span>
+                                <span class="settings-status-pill" x-show="iface.is_default">Default</span>
+                            </span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-profile-section">
+                <div class="output-header">
+                    <span class="output-name">Sender IP on Show Router</span>
+                    <span class="text-sm text-muted" x-text="scope === 'ssid' ? (profileSsid || 'SSID') : (selectedInterface?.service || 'Service')"></span>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Sender IP mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'static' }"
+                            :disabled="applying"
+                            @click="mode = 'static'">Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'dhcp' }"
+                            :disabled="applying"
+                            @click="mode = 'dhcp'">DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="mode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Sender Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="applying" autocomplete="off" placeholder="10.0.0.10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="applying" autocomplete="off" placeholder="10.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="applying" autocomplete="off" placeholder="255.255.255.0">
+                    </div>
+                </div>
+                <div class="settings-detail-grid settings-profile-network" x-show="mode === 'static'" x-cloak>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="profileNetworkLabel"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="profileUsableRange"></span>
+                    </div>
+                </div>
+                <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!validationMessage }" x-text="validationMessage || profileModeNote()"></div>
+                <div class="settings-actions-row">
+                    <button class="btn" @click="saveProfile()" :disabled="!canSaveProfile" x-text="saving ? 'Saving...' : 'Save Sender Profile'"></button>
+                    <button class="btn btn-primary" x-show="mode === 'static'" @click="applyStaticIp()" :disabled="!canApplyStatic" x-text="applying ? 'Applying...' : 'Apply to macOS'"></button>
+                    <button class="btn btn-danger" @click="revertDhcp()" :disabled="!canRevertDhcp" x-text="applying ? 'Applying...' : 'Revert to DHCP'"></button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-receiver-section">
+                <div class="output-header">
+                    <span class="output-name">Receiver Network</span>
+                    <span class="text-sm text-muted" x-text="receiverRangeCounts.inRange + ' in range, ' + receiverRangeCounts.outOfRange + ' different'"></span>
+                </div>
+                <div class="settings-receiver-list">
+                    <template x-if="$store.conn.devices.length === 0">
+                        <div class="firmware-empty-state">No receivers saved.</div>
+                    </template>
+                    <template x-for="dev in $store.conn.devices" :key="dev.ip">
+                        <div class="settings-receiver-row">
+                            <span class="settings-receiver-name" x-text="dev.name"></span>
+                            <span class="settings-receiver-meta" x-text="receiverSummary(dev)"></span>
+                            <span class="settings-status-pill" :class="receiverRangeClass(dev)" x-text="receiverRangeLabel(dev)"></span>
+                            <span class="device-network-badge"
+                                  :class="$store.conn.networkModeClass(dev)"
+                                  :title="$store.conn.networkModeTitle(dev)"
+                                  x-text="$store.conn.networkModeLabel(dev)"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <details class="output-section settings-section settings-controller-section settings-advanced-wifi">
+                <summary class="settings-advanced-summary">
+                    <span class="output-name">Advanced WiFi Router</span>
+                    <span class="settings-status-pill" :class="{ 'settings-pill-controller': controllerNetworkActive, 'settings-pill-muted': !controllerSsidValue }" x-text="controllerNetworkStatusLabel"></span>
+                </summary>
+                <div class="settings-current-main" x-text="controllerSsidValue || 'No controller SSID set'"></div>
+                <div class="settings-current-meta" x-text="'Current WiFi: ' + currentWifiLabel()"></div>
+                <div class="settings-controller-form">
+                    <div class="form-group">
+                        <label class="form-label">Controller SSID</label>
+                        <input class="form-input" type="text" x-model="controllerSsid" :disabled="applying" autocomplete="off" placeholder="PrimusController">
+                    </div>
+                    <div class="settings-actions-row settings-controller-actions">
+                        <button class="btn btn-primary" @click="saveControllerNetwork()" :disabled="!canSaveControllerNetwork">Save WiFi Router</button>
+                        <button class="btn" @click="useCurrentWifiAsController()" :disabled="!currentWifi?.ssid || applying">Use Current WiFi</button>
+                        <button class="btn btn-danger" @click="clearControllerWifi()" x-show="controllerConnection.ssid" :disabled="applying">Clear</button>
+                    </div>
+                </div>
+            </details>
         </div>
     </div>
 

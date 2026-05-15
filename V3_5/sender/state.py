@@ -378,6 +378,7 @@ class ControllerState:
         self.last_tick = self.start_time
         self.devices = []
         self.playback_source = self.SOURCE_IDLE
+        self.artnet_source_ip = None
 
         # Active Look — the animation being sent to all connected devices
         saved_types = _load_output_types()
@@ -475,6 +476,17 @@ class ControllerState:
                         targets.append(ip)
                         seen.add(ip)
         return targets
+
+    def set_artnet_source(self, source_ip=None):
+        """Set the local IPv4 address used for outgoing Art-Net sockets."""
+        source_ip = source_ip or None
+        with self.lock:
+            if self.artnet_source_ip == source_ip:
+                return
+            self.artnet_source_ip = source_ip
+            for dev in self.devices:
+                if hasattr(dev["sender"], "set_source_ip"):
+                    dev["sender"].set_source_ip(source_ip)
 
     def refresh_devices_from_nodes(self, nodes, auto_save=True):
         """Refresh matching existing devices from discovery without adding new ones."""
@@ -786,10 +798,17 @@ class ControllerState:
 
     def _ensure_sender_connected_unlocked(self, dev):
         dev["sender"].ip = dev["ip"]
+        if hasattr(dev["sender"], "set_source_ip"):
+            dev["sender"].set_source_ip(self.artnet_source_ip)
         if not dev["sender"].connected:
-            dev["sender"].connect()
+            try:
+                dev["sender"].connect()
+            except OSError as error:
+                self._mark_transport_error_unlocked(dev, error)
+                return False
         dev["connected"] = True
         self._clear_transport_error_unlocked(dev)
+        return True
 
     def _send_output_config(self, dev):
         caps = _normalize_device_capabilities(dev.get("capabilities"))
@@ -799,7 +818,7 @@ class ControllerState:
         types = [lo["type"] for lo in self.active_look["outputs"]]
         type_to_id = {name: i for i, name in enumerate(LOOK_OUTPUT_TYPES)}
         try:
-            send_output_config(dev["ip"], types, type_to_id)
+            send_output_config(dev["ip"], types, type_to_id, source_ip=self.artnet_source_ip)
         except OSError as error:
             self._mark_transport_error_unlocked(dev, error)
             return False
@@ -824,7 +843,11 @@ class ControllerState:
     def connect(self, di):
         with self.lock:
             dev = self.devices[di]
-            self._ensure_sender_connected_unlocked(dev)
+            if not self._ensure_sender_connected_unlocked(dev):
+                return {
+                    "ok": False,
+                    "error": dev.get("transport_error") or "sender connection failed",
+                }
             if self._send_output_config(dev):
                 return {"ok": True}
             return {
@@ -876,7 +899,7 @@ class ControllerState:
                 "ip": node_info["ip"],
                 "base_universe": base_u,
                 "connected": False,
-                "sender": ArtNetSender(node_info["ip"]),
+                "sender": ArtNetSender(node_info["ip"], source_ip=self.artnet_source_ip),
                 "transport_error": None,
                 "capabilities": capabilities,
                 "hardware_profile": node_info.get(
@@ -1043,7 +1066,7 @@ class ControllerState:
                 return status
             dev = self.devices[di]
             try:
-                send_art_address(dev["ip"], new_name)
+                send_art_address(dev["ip"], new_name, source_ip=self.artnet_source_ip)
             except OSError as error:
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
@@ -1062,7 +1085,7 @@ class ControllerState:
                 ipv4_octets(static_ip, "ip")
                 ipv4_octets(gateway, "gateway")
                 ipv4_octets(subnet, "subnet")
-                send_ip_config(dev["ip"], 1, static_ip, gateway, subnet)
+                send_ip_config(dev["ip"], 1, static_ip, gateway, subnet, source_ip=self.artnet_source_ip)
             except (OSError, ValueError) as error:
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
@@ -1082,7 +1105,7 @@ class ControllerState:
                 return status
             dev = self.devices[di]
             try:
-                send_ip_config(dev["ip"], 0)
+                send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip)
             except (OSError, ValueError) as error:
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
@@ -1099,8 +1122,8 @@ class ControllerState:
         results = []
         with self.lock:
             for idx, dev in enumerate(self.devices):
-                self._ensure_sender_connected_unlocked(dev)
-                ok = self._send_output_config(dev)
+                ok = self._ensure_sender_connected_unlocked(dev)
+                ok = self._send_output_config(dev) if ok else False
                 results.append({
                     "device_index": idx,
                     "ok": ok,
@@ -1153,7 +1176,8 @@ class ControllerState:
             dev = self.devices[di]
             if not dev.get("connected"):
                 return False
-            self._ensure_sender_connected_unlocked(dev)
+            if not self._ensure_sender_connected_unlocked(dev):
+                return False
             outputs_info = []
             for o in dev["outputs"]:
                 outputs_info.append((o["universe"], o["count"]))
@@ -1390,7 +1414,8 @@ class ControllerState:
                 if not dev.get("connected"):
                     continue
                 if not dev["sender"].connected:
-                    self._ensure_sender_connected_unlocked(dev)
+                    if not self._ensure_sender_connected_unlocked(dev):
+                        continue
                 if dev_filter is not None and di not in dev_filter:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:

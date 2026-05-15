@@ -126,6 +126,53 @@ body {
     color: var(--text-secondary);
 }
 
+.network-chip {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 220px;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font: inherit;
+    overflow: hidden;
+}
+
+.network-chip:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-dim);
+}
+
+.network-chip-preferred {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.network-chip-unavailable {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.network-chip-label {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.network-chip-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 @media (max-width: 760px) {
     .navbar {
         display: flex;
@@ -152,6 +199,10 @@ body {
 
     .playback-chip-meta {
         display: none;
+    }
+
+    .network-chip {
+        max-width: 100%;
     }
 
     .navbar-tabs {
@@ -1924,6 +1975,309 @@ input[type="color"] {
 
     .firmware-port-badge {
         justify-self: start;
+    }
+}
+
+/* ── SETTINGS ─────────────────────────────────────────── */
+
+.settings-title-row {
+    gap: 12px;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+.settings-section {
+    min-width: 0;
+}
+
+.settings-profile-section,
+.settings-receiver-section {
+    grid-column: span 1;
+}
+
+.settings-router-section,
+.settings-controller-section {
+    grid-column: 1 / -1;
+}
+
+.settings-router-section {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.settings-controller-section {
+    border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+}
+
+.settings-advanced-wifi {
+    background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
+}
+
+.settings-advanced-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.settings-advanced-summary::-webkit-details-marker {
+    display: none;
+}
+
+.settings-advanced-wifi[open] .settings-advanced-summary {
+    margin-bottom: 12px;
+}
+
+.settings-controller-form {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 12px;
+}
+
+.settings-controller-form .form-group {
+    margin-bottom: 0;
+}
+
+.settings-controller-actions {
+    margin-top: 0;
+}
+
+.settings-warning-section {
+    border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+    background: color-mix(in srgb, var(--warning) 8%, var(--bg-secondary));
+}
+
+.settings-warning-line {
+    color: var(--warning);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.settings-current-main {
+    font-size: 18px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settings-current-meta,
+.settings-interface-meta,
+.settings-receiver-meta {
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.settings-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.settings-router-grid,
+.settings-profile-network {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-detail-label {
+    display: block;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.settings-detail-value {
+    display: block;
+    color: var(--text-primary);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.settings-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.settings-interface-list,
+.settings-receiver-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.settings-interface-row {
+    appearance: none;
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.4fr) auto;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.settings-interface-row:hover {
+    border-color: var(--accent-dim);
+}
+
+.settings-interface-selected {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent-dim) 12%, var(--bg-primary));
+}
+
+.settings-interface-controller {
+    border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.settings-interface-router {
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.settings-interface-inactive {
+    opacity: 0.7;
+}
+
+.settings-interface-name,
+.settings-receiver-name {
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settings-interface-badges {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.settings-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 3px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.settings-pill-on {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.settings-pill-preferred {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.settings-pill-router {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.settings-pill-controller {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.settings-pill-warning {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+}
+
+.settings-pill-danger {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.settings-pill-muted {
+    color: var(--text-muted);
+    border-style: dashed;
+}
+
+.settings-profile-summary {
+    margin-top: 8px;
+    color: var(--accent);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.settings-summary-error {
+    color: var(--danger);
+}
+
+.settings-receiver-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+    min-height: 40px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.settings-receiver-row:last-child {
+    border-bottom: none;
+}
+
+@media (max-width: 980px) {
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .settings-title-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .settings-interface-row,
+    .settings-receiver-row {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-controller-form {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-controller-actions {
+        margin-top: 0;
+    }
+
+    .settings-interface-badges {
+        justify-content: flex-start;
+    }
+
+    .settings-detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-router-grid,
+    .settings-profile-network {
+        grid-template-columns: 1fr;
     }
 }
 

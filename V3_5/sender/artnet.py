@@ -43,15 +43,26 @@ FPS_MAGIC = b"PFP"
 class ArtNetSender:
     """Sends one Art-Net ArtDmx packet per output, per frame."""
 
-    def __init__(self, ip):
+    def __init__(self, ip, source_ip=None):
         self.ip = ip
+        self.source_ip = source_ip or None
         self.sock = None
         self.connected = False
         self.sequence = 1
         self.last_error = None
 
+    def set_source_ip(self, source_ip):
+        source_ip = source_ip or None
+        if self.source_ip == source_ip:
+            return
+        self.source_ip = source_ip
+        if self.connected:
+            self.disconnect()
+
     def connect(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if self.source_ip:
+            self.sock.bind((self.source_ip, 0))
         self.connected = True
         self.last_error = None
 
@@ -202,7 +213,33 @@ def _get_all_broadcast_addresses():
     return addrs
 
 
-def discover_artnet_nodes(known_ips=None, timeout=2.0):
+def _discovery_bind_addr(interface=None):
+    source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
+    return (source_ip or "", ARTNET_PORT)
+
+
+def _discovery_destinations(known_ips=None, interface=None):
+    destinations = set()
+    broadcast = (interface or {}).get("broadcast")
+    if broadcast:
+        destinations.add(broadcast)
+    elif interface:
+        source_ip = interface.get("source_ip") or interface.get("ipv4")
+        if source_ip:
+            parts = source_ip.split(".")
+            if len(parts) == 4:
+                parts[3] = "255"
+                destinations.add(".".join(parts))
+    else:
+        destinations.update(_get_all_broadcast_addresses())
+        destinations.add("255.255.255.255")
+    for ip in known_ips or []:
+        if ip:
+            destinations.add(str(ip))
+    return destinations
+
+
+def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
     """Send ArtPoll and collect ArtPollReply responses.
 
     known_ips: list of IP strings to unicast to in addition to broadcast.
@@ -213,7 +250,10 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(0.25)
-        sock.bind(("", ARTNET_PORT))
+        try:
+            sock.bind(_discovery_bind_addr(interface))
+        except OSError:
+            sock.bind(("", ARTNET_PORT))
 
         poll = bytearray()
         poll += ARTNET_HEADER
@@ -221,11 +261,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
         poll += struct.pack(">H", ARTNET_VERSION)
         poll += bytes([0x00, 0x00])
 
-        destinations = _get_all_broadcast_addresses()
-        destinations.add("255.255.255.255")
-        for ip in known_ips or []:
-            if ip:
-                destinations.add(str(ip))
+        destinations = _discovery_destinations(known_ips, interface)
         for dest in destinations:
             try:
                 sock.sendto(bytes(poll), (dest, ARTNET_PORT))
@@ -484,7 +520,17 @@ def parse_node_outputs(long_name, universes, output_types, node_report="", type_
 #  ART-NET NAMING — ArtAddress (opcode 0x6000)
 # ======================================================================
 
-def send_art_address(ip, short_name):
+def _send_udp_packet(ip, packet, source_ip=None):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        if source_ip:
+            sock.bind((source_ip, 0))
+        sock.sendto(bytes(packet), (ip, ARTNET_PORT))
+    finally:
+        sock.close()
+
+
+def send_art_address(ip, short_name, source_ip=None):
     pkt = bytearray(107)
     pkt[0:8] = ARTNET_HEADER
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_ADDRESS)
@@ -497,18 +543,14 @@ def send_art_address(ip, short_name):
         pkt[i] = 0x7F
     pkt[104] = 0x7F
     pkt[106] = 0x00
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
-    finally:
-        sock.close()
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
 
 
 # ======================================================================
 #  ART-NET OUTPUT CONFIG — ArtOutputConfig (opcode 0x8100)
 # ======================================================================
 
-def send_output_config(ip, output_types, type_to_id_map):
+def send_output_config(ip, output_types, type_to_id_map, source_ip=None):
     """Send ArtOutputConfig packet.
     output_types: list of type key strings.
     type_to_id_map: dict mapping type key -> firmware enum int.
@@ -521,18 +563,14 @@ def send_output_config(ip, output_types, type_to_id_map):
     pkt[12] = num
     for i, t in enumerate(output_types):
         pkt[13 + i] = type_to_id_map.get(t, 0)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
-    finally:
-        sock.close()
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
 
 
 # ======================================================================
 #  ART-NET IP CONFIG — ArtIPConfig (opcode 0x8200)
 # ======================================================================
 
-def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None):
+def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None):
     """Send ArtIPConfig packet.
     mode: 0 = DHCP, 1 = static.
     static_ip/gateway/subnet: dotted-quad strings (required when mode=1).
@@ -551,8 +589,4 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None):
             pkt[21 + i] = octet
     elif mode == 1:
         raise ValueError("static IP mode requires ip, gateway, and subnet")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
-    finally:
-        sock.close()
+    _send_udp_packet(ip, pkt, source_ip=source_ip)

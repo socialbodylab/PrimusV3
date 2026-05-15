@@ -43,14 +43,17 @@ document.addEventListener("alpine:init", () => {
     // --- App store: mode, polling ---
     Alpine.store("app", {
         mode: "mixer",
-        modes: ["mixer", "controller", "firmware"],
+        modes: ["mixer", "controller", "firmware", "settings"],
         modeLabels: {
             mixer: "Look Designer",
             controller: "Cue Controller",
             firmware: "Firmware",
+            settings: "Settings",
         },
         state: null,
+        network: null,
         polling: null,
+        networkPolling: null,
         mixerPreviewDevices: null,
         notice: null,
         _noticeTimer: null,
@@ -146,7 +149,9 @@ document.addEventListener("alpine:init", () => {
 
         init() {
             this.fetchState();
+            this.fetchNetworkStatus();
             this.polling = setInterval(() => this.fetchState(), 100);
+            this.networkPolling = setInterval(() => this.fetchNetworkStatus(), 15000);
             document.addEventListener('visibilitychange', () => {
                 clearInterval(this.polling);
                 const interval = document.hidden ? 1000 : 100;
@@ -194,6 +199,57 @@ document.addEventListener("alpine:init", () => {
                 this.state = await api("GET", "/api/state");
                 this._drawPreviews();
             } catch (e) { /* ignore */ }
+        },
+
+        async fetchNetworkStatus() {
+            try {
+                this.network = await api("GET", "/api/network/status");
+                return this.network;
+            } catch (e) {
+                return this.network;
+            }
+        },
+
+        networkPrimaryInterface() {
+            const net = this.network || {};
+            return net.selected_interface
+                || (net.interfaces || []).find(item => item.is_default)
+                || (net.interfaces || []).find(item => item.connected)
+                || null;
+        },
+
+        networkChipLabel() {
+            if (!this.network) return "Network";
+            if (!this.network.supported) return "Network unsupported";
+            const iface = this.networkPrimaryInterface();
+            if (!iface) return "No sender IP";
+            const method = iface.type === 'wifi' ? (iface.ssid || 'WiFi')
+                : iface.type === 'ethernet' ? 'Ethernet'
+                : (iface.service || iface.device || 'Network');
+            const prefix = iface.is_controller ? 'Controller ' : '';
+            return prefix + method + (iface.source_ip ? ' ' + iface.source_ip : '');
+        },
+
+        networkChipTitle() {
+            const iface = this.networkPrimaryInterface();
+            if (!this.network) return "Open network settings";
+            if (!this.network.supported) return this.network.warnings?.[0] || "Host network switching is unavailable.";
+            if (!iface) return "No active sender connection found.";
+            const parts = [iface.service || iface.device || "Network"];
+            if (iface.ssid) parts.push("SSID " + iface.ssid);
+            if (iface.source_ip) parts.push("IP " + iface.source_ip);
+            if (iface.is_controller) parts.push("controller network");
+            if (iface.is_preferred) parts.push("preferred for Art-Net");
+            else if (iface.is_default) parts.push("default route");
+            return parts.join(" · ");
+        },
+
+        networkChipClass() {
+            const iface = this.networkPrimaryInterface();
+            return {
+                'network-chip-unavailable': !this.network?.supported || !iface,
+                'network-chip-preferred': !!iface?.is_preferred || !!iface?.is_controller,
+            };
         },
 
         showNotice(message, level = 'info', timeout = 3200) {

@@ -1,12 +1,13 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 SENDER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SENDER_DIR not in sys.path:
     sys.path.insert(0, SENDER_DIR)
 
-from artnet import ArtNetSender, ipv4_octets, parse_node_capabilities, parse_node_outputs
+from artnet import ArtNetSender, ipv4_octets, parse_node_capabilities, parse_node_outputs, send_output_config
 from state import LOOK_OUTPUT_TYPES, OUTPUT_TYPES
 
 
@@ -16,6 +17,25 @@ class BrokenSocket:
 
     def sendto(self, packet, addr):
         raise BrokenPipeError("test socket closed")
+
+    def close(self):
+        self.closed = True
+
+
+class RecordingSocket:
+    instances = []
+
+    def __init__(self, *args, **kwargs):
+        self.bound = None
+        self.sent = []
+        self.closed = False
+        RecordingSocket.instances.append(self)
+
+    def bind(self, addr):
+        self.bound = addr
+
+    def sendto(self, packet, addr):
+        self.sent.append((packet, addr))
 
     def close(self):
         self.closed = True
@@ -105,6 +125,30 @@ class ArtNetCapabilityTests(unittest.TestCase):
         self.assertIsNone(sender.sock)
         self.assertTrue(sock.closed)
         self.assertIn("test socket closed", sender.last_error)
+
+    def test_sender_binds_source_ip_on_connect(self):
+        RecordingSocket.instances = []
+        with patch("artnet.socket.socket", RecordingSocket):
+            sender = ArtNetSender("192.168.1.2", source_ip="10.0.0.20")
+            sender.connect()
+
+        self.assertEqual(RecordingSocket.instances[0].bound, ("10.0.0.20", 0))
+        self.assertTrue(sender.connected)
+
+    def test_output_config_binds_source_ip_for_one_shot_send(self):
+        RecordingSocket.instances = []
+        with patch("artnet.socket.socket", RecordingSocket):
+            send_output_config(
+                "192.168.1.2",
+                ["short_strip"],
+                {"short_strip": 1},
+                source_ip="10.0.0.20",
+            )
+
+        sock = RecordingSocket.instances[0]
+        self.assertEqual(sock.bound, ("10.0.0.20", 0))
+        self.assertEqual(sock.sent[0][1], ("192.168.1.2", 6454))
+        self.assertTrue(sock.closed)
 
 
 if __name__ == "__main__":

@@ -148,8 +148,16 @@ Important device/control endpoints in `server.py`:
 | `GET /api/firmware/status` | Firmware upload tooling availability and current/last job. |
 | `POST /api/firmware/jobs` | Start a source-checkout firmware job: list ports, install, compile, or upload. |
 | `GET /api/firmware/jobs/:id` | Poll a firmware job, including redacted output and structured port results. |
+| `GET /api/network/status` | Sender host network interfaces, preferred/recommended Art-Net route, subnet/range summaries, and saved static/DHCP profiles. |
+| `POST /api/network/preferred_interface` | Select or clear the sender interface used for Art-Net discovery and output sockets. |
+| `POST /api/network/ssid_profile` | Save a sender static/DHCP profile for a WiFi SSID or wired service. |
+| `POST /api/network/controller_connection` | Tag or clear the WiFi SSID used by the controller/show router. |
+| `POST /api/network/apply_static_ip` | Apply a macOS static IP profile through an administrator prompt. |
+| `POST /api/network/set_dhcp` | Revert a macOS network service to DHCP through an administrator prompt. |
 
 Firmware upload jobs wrap `V3_5/Arduino/upload.sh` and are source-run only in the first pass. The Firmware tab presents the simple path: choose firmware version, refresh/select an available USB device or all devices, independently enable default device-name and/or WiFi overrides, then compile or upload while watching the output window. The API still supports the script's maintenance actions where useful. It returns `409` when another firmware job is running, `400` for invalid action/profile/port data, and `503` when the upload script, `bash`, `python3`, or `arduino-cli` is unavailable. WiFi passwords must not appear in API responses or web UI output.
+
+Sender network settings live in `network_settings.py` and persist under the `sender_network` key in `.primus_state.json`. Host IP apply/revert is macOS-only in the first implementation and uses stdlib `subprocess` with `/usr/sbin/networksetup`; no external Python packages are used. Art-Net discovery accepts the selected interface record, and `ArtNetSender` plus one-shot control helpers can bind outgoing UDP sockets to the selected source IP. Settings recommends active Ethernet/USB-Ethernet for the common show-router workflow, returns per-interface CIDR/usable-range summaries, and validates static sender profiles so the IP is a usable host and the gateway is in the same subnet. WiFi preferences and the controller/show-router network remain SSID-aware as an advanced path; placeholder SSID values such as `<redacted>` and `<data> 0x00` are ignored.
 
 ## Web UI Files
 
@@ -163,7 +171,8 @@ V3_5/sender/web/
     ├── app.js
     ├── look-mixer.js
     ├── look-controller.js
-    └── firmware.js
+    ├── firmware.js
+    └── settings.js
 ```
 
 Device profile fields are surfaced in `index.html` and managed through the `conn` Alpine store in `app.js`.

@@ -13,6 +13,16 @@ import clips
 from firmware import FirmwareRequestError, firmware_jobs
 import mixer
 from artnet import discover_artnet_nodes
+from network_settings import (
+    NetworkSettingsError,
+    apply_static_ip,
+    get_artnet_interface,
+    get_network_status,
+    save_profile,
+    set_controller_connection,
+    set_dhcp,
+    set_preferred_interface,
+)
 from paths import web_dir
 from state import OUTPUT_TYPES, ControllerState
 
@@ -38,6 +48,15 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps({"error": message}, separators=(",", ":")).encode()
         self._respond(code, "application/json", body)
 
+    def _json_network_error(self, exc):
+        self._json_error(exc.code, exc.message)
+
+    def _sync_artnet_source(self):
+        interface = get_artnet_interface()
+        source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
+        self.controller_state.set_artnet_source(source_ip)
+        return interface
+
     # ------------------------------------------------------------------
     #  GET
     # ------------------------------------------------------------------
@@ -53,6 +72,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             self._json_response(self.controller_state.get_json())
+            return
+        if path == "/api/network/status":
+            self._json_response(get_network_status())
             return
         if path == "/api/firmware/status":
             self._json_response(firmware_jobs.status())
@@ -144,7 +166,8 @@ class Handler(BaseHTTPRequestHandler):
             di = data.get("device", 0)
             if 0 <= di < len(self.controller_state.devices):
                 ip = self.controller_state.devices[di]["ip"]
-                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0)
+                interface = self._sync_artnet_source()
+                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface)
                 node = next((n for n in nodes if n["ip"] == ip), None)
                 if node:
                     self.controller_state.add_device_from_node(node)
@@ -165,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
         elif path == "/api/connect_all":
+            self._sync_artnet_source()
             results = self.controller_state.connect_all()
             failed = [r for r in results if not r.get("ok")]
             if failed:
@@ -178,11 +202,13 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/discover":
             known_ips = self.controller_state.discovery_targets()
-            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0)
+            interface = self._sync_artnet_source()
+            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
             self.controller_state.refresh_devices_from_nodes(nodes)
             self._json_response(nodes)
 
         elif path == "/api/add_discovered":
+            self._sync_artnet_source()
             result = self.controller_state.add_device_from_node(data)
             if result.get("device_index") is not None:
                 connect_result = self.controller_state.connect(result["device_index"])
@@ -197,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
                               b'{"error":"ip required"}')
                 return
             # Try unicast discovery first to get node info
-            nodes = discover_artnet_nodes(known_ips=[ip], timeout=2.0)
+            interface = self._sync_artnet_source()
+            nodes = discover_artnet_nodes(known_ips=[ip], timeout=2.0, interface=interface)
             node = next((n for n in nodes if n["ip"] == ip), None)
             if node:
                 result = self.controller_state.add_device_from_node(node)
@@ -222,6 +249,7 @@ class Handler(BaseHTTPRequestHandler):
             self._ok()
 
         elif path == "/api/rename_node":
+            self._sync_artnet_source()
             di = data.get("device", -1)
             new_name = str(data.get("name", ""))[:17]
             if not new_name:
@@ -235,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_error(code, result.get("error", "rename failed"))
 
         elif path == "/api/hello_device":
+            self._sync_artnet_source()
             di = data.get("device", -1)
             status = self.controller_state.device_capability_status(di, "hello")
             if not status.get("ok"):
@@ -247,6 +276,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_error(503, "Hello failed; reconnect the device and try again.")
 
         elif path == "/api/set_device_ip":
+            self._sync_artnet_source()
             di = data.get("device", -1)
             static_ip = str(data.get("ip", ""))
             gateway = str(data.get("gateway", ""))
@@ -263,6 +293,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_error(code, error)
 
         elif path == "/api/revert_device_dhcp":
+            self._sync_artnet_source()
             di = data.get("device", -1)
             result = self.controller_state.revert_device_dhcp(di)
             if result.get("ok"):
@@ -472,6 +503,52 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response(firmware_jobs.start_job(data))
             except FirmwareRequestError as exc:
                 self._json_error(exc.code, exc.message)
+
+        elif path == "/api/network/preferred_interface":
+            try:
+                result = set_preferred_interface(data)
+                interface = result.get("selected_interface")
+                source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
+                self.controller_state.set_artnet_source(source_ip)
+                self._json_response(result)
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
+
+        elif path == "/api/network/ssid_profile":
+            try:
+                self._json_response(save_profile(data))
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
+
+        elif path == "/api/network/controller_connection":
+            try:
+                result = set_controller_connection(data)
+                interface = result.get("selected_interface")
+                source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
+                self.controller_state.set_artnet_source(source_ip)
+                self._json_response(result)
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
+
+        elif path == "/api/network/apply_static_ip":
+            try:
+                result = apply_static_ip(data)
+                interface = result.get("selected_interface")
+                source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
+                self.controller_state.set_artnet_source(source_ip)
+                self._json_response(result)
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
+
+        elif path == "/api/network/set_dhcp":
+            try:
+                result = set_dhcp(data)
+                interface = result.get("selected_interface")
+                source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
+                self.controller_state.set_artnet_source(source_ip)
+                self._json_response(result)
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
 
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
