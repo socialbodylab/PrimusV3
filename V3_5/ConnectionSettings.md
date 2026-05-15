@@ -61,3 +61,23 @@ When Primus Central sees the tagged SSID active, that connection becomes the sel
 ## Platform Scope
 
 The first implementation applies host IP changes on macOS only. Other platforms report unsupported status for host network switching while keeping the rest of Primus Central available.
+
+## Settings API Methods
+
+The Settings tab is backed by JSON endpoints on the local Primus Central HTTP server. All methods return the same network status shape as `GET /api/network/status`, except errors, which return `{"error":"..."}`.
+
+| Method | Body | Purpose |
+| --- | --- | --- |
+| `GET /api/network/status` | none | Report supported platform, active IPv4 interfaces, selected and recommended show-router routes, saved profiles, and warnings. |
+| `POST /api/network/preferred_interface` | `{id}` or `{service, device}` | Use a specific sender connection/source IP for Art-Net discovery and output. |
+| `POST /api/network/preferred_interface` | `{mode:"auto"}` or `{}` | Clear the saved Art-Net route and return to automatic routing. |
+| `POST /api/network/controller_connection` | `{ssid, id?, service?, device?}` | Save the dedicated show-router WiFi SSID, optionally tied to the active WiFi adapter/source IP. |
+| `POST /api/network/controller_connection` | `{mode:"clear"}` | Clear the saved show-router WiFi tag. |
+| `POST /api/network/ssid_profile` | `{scope:"ssid/service", mode:"static", ip, gateway, subnet, ssid?, service?, device?}` | Save a static sender IP profile for a WiFi SSID or wired service. |
+| `POST /api/network/ssid_profile` | `{scope:"ssid/service", mode:"dhcp", ssid?, service?, device?}` | Save a DHCP profile for a WiFi SSID or wired service. |
+| `POST /api/network/apply_static_ip` | `{id?, service?, device?, ip, gateway, subnet}` | macOS-only: apply a static sender IP using `networksetup` through an administrator prompt, then save the profile. |
+| `POST /api/network/set_dhcp` | `{id?, service?, device?}` | macOS-only: return the selected macOS network service to DHCP and save that profile. |
+
+Selecting or clearing the preferred interface also updates the sender's Art-Net source binding in memory, so subsequent discovery, connect, rename, output configuration, and receiver IP configuration calls use the intended show-router side of the computer when possible.
+
+For sender profiles, `scope` must be either `"ssid"` for WiFi-network profiles or `"service"` for wired/macOS service profiles.

@@ -14,8 +14,10 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
 | **IP config** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
 | **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
+| **Sender HTTP API** | TCP / HTTP JSON | 8080 or auto-selected | Browser/tool → Sender |
+| **OSC cue control** | UDP / OSC | 53001 default | Show-control tool → Sender |
 
-Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing — any software that speaks Art-Net can drive these nodes directly.
+Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing is required to drive receiver nodes directly. The V3.5 sender also exposes a local HTTP JSON API for Primus Central and an inbound OSC listener for external cue triggers.
 
 ---
 
@@ -287,12 +289,15 @@ The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. A
 | Route | Description |
 |---|---|
 | `GET /` | HTML control interface (Alpine.js SPA) |
+| `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
+| `GET /api/network/status` | Sender host network interfaces, selected/recommended Art-Net route, saved Settings profiles, and show-router network summaries |
 | `GET /api/clips` | List all clips. Query params: `?type=short_strip`, `?search=fire`, `?sort=modified\|created\|name` |
 | `GET /api/clips/:id` | Load a single clip by ID |
 | `GET /api/looks` | List all saved looks |
 | `GET /api/looks/:id` | Load a single look by ID |
 | `GET /api/cues` | Get cue list state (cues, current index, playing flag) |
+| `GET /api/integrations/osc` | OSC listener settings, bound endpoint, recent message history, examples, and per-cue trigger hints |
 | `GET /api/firmware/status` | Source-checkout firmware upload availability plus current/last job state |
 | `GET /api/firmware/jobs/:id` | Poll a firmware upload job, including redacted output and structured results |
 
@@ -315,6 +320,60 @@ The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. A
 | `POST /api/revert_device_dhcp` | `{device: N}` | Revert device to DHCP — sends ArtIPConfig mode 0, device reboots, returns `409` if IP-config support is not advertised |
 | `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
 | `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
+
+### POST Endpoints — Sender Settings
+
+These endpoints back the Settings tab. They manage the sender computer's Art-Net source route and host network profile; receiver static/DHCP controls remain under the device endpoints above. Responses are the same shape as `GET /api/network/status` unless noted.
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/network/preferred_interface` | `{id}` or `{interface_id}` or `{service, device}` | Select the sender interface/source IP used for Art-Net discovery and output sockets. |
+| `POST /api/network/preferred_interface` | `{mode:"auto"}` or `{}` | Clear the preferred interface and return to automatic routing. |
+| `POST /api/network/controller_connection` | `{ssid, id?, service?, device?}` | Tag the dedicated show-router WiFi SSID. If an active WiFi interface is supplied, its source IP is remembered for that SSID. |
+| `POST /api/network/controller_connection` | `{mode:"clear"}` | Clear the saved controller/show-router SSID tag. |
+| `POST /api/network/ssid_profile` | `{scope:"ssid/service", mode:"static", ip, gateway, subnet, ssid?, service?, device?}` | Save a static sender IP profile for a WiFi SSID or wired service. `static_ip` is also accepted instead of `ip`. |
+| `POST /api/network/ssid_profile` | `{scope:"ssid/service", mode:"dhcp", ssid?, service?, device?}` | Save a DHCP sender profile for a WiFi SSID or wired service. |
+| `POST /api/network/apply_static_ip` | `{id?, interface_id?, service?, device?, ip, gateway, subnet}` | macOS-only: save and apply a static sender IP profile through `networksetup` with an administrator prompt. |
+| `POST /api/network/set_dhcp` | `{id?, interface_id?, service?, device?}` | macOS-only: set the selected macOS network service back to DHCP and save that profile. |
+
+`GET /api/network/status` returns:
+
+```json
+{
+  "supported": true,
+  "platform": "darwin",
+  "interfaces": [
+    {
+      "id": "en7:USB 10/100/1000 LAN",
+      "service": "USB 10/100/1000 LAN",
+      "device": "en7",
+      "type": "ethernet",
+      "ipv4": "192.168.1.10",
+      "source_ip": "192.168.1.10",
+      "subnet": "255.255.255.0",
+      "gateway": "192.168.1.1",
+      "network": {"cidr": "192.168.1.0/24", "usable_range": "192.168.1.1 - 192.168.1.254"},
+      "connected": true,
+      "is_default": false,
+      "is_preferred": true,
+      "is_controller": false,
+      "warnings": []
+    }
+  ],
+  "selected_interface": {},
+  "recommended_interface": {},
+  "selected_network": {},
+  "recommended_network": {},
+  "preferred": {},
+  "controller_connection": {},
+  "ssid_profiles": {},
+  "service_profiles": {},
+  "last_applied": {},
+  "warnings": []
+}
+```
+
+For `ssid_profile`, `scope` must be either `"ssid"` or `"service"`. Host IP apply/revert is currently macOS-only. Unsupported platforms return `supported:false` from status and `501` for host network changes. Validation errors return JSON as `{"error":"..."}` with an appropriate HTTP status.
 
 ### POST Endpoints — Clips
 
@@ -362,7 +421,58 @@ Cue payloads use the assignment model below. Older single-Look cues with top-lev
 | `POST /api/cues/stop` | `{}` | Stop cue playback |
 | `POST /api/cues/goto` | `{number: N}` | Jump to a specific cue number |
 | `POST /api/controller/activate` | `{look_id, fade_time}` | Activate a look directly with optional fade time |
+| `POST /api/controller/activate_many` | `{look_ids: [...], fade_time}` | Activate multiple looks directly with optional fade time |
+| `POST /api/controller/deactivate_look` | `{look_id}` | Remove one directly activated look from the active controller set |
 | `POST /api/controller/blackout` | `{fade_time}` | Fade to black with optional fade time |
+
+### HTTP Endpoints — OSC Integration
+
+The OSC integration endpoints configure and report on the sender's inbound UDP OSC listener. The listener defaults to `127.0.0.1:53001`, starts with the sender, and does not prevent the HTTP server from running if the OSC port cannot be bound.
+
+| Route | Body | Description |
+|---|---|---|
+| `GET /api/integrations/osc` | — | Return OSC settings, listener status, recent history, supported examples, and cue trigger hints. |
+| `POST /api/integrations/osc` | `{enabled, host, port}` | Persist OSC settings and restart the listener. `port:0` asks the OS for an available UDP port. |
+
+Example response:
+
+```json
+{
+  "settings": {"enabled": true, "host": "127.0.0.1", "port": 53001},
+  "enabled": true,
+  "running": true,
+  "last_error": "",
+  "bound": {"host": "127.0.0.1", "port": 53001},
+  "history": [
+    {"time": "12:26:02", "ok": true, "remote": "127.0.0.1:64817", "address": "/primus/blackout", "args": [0.1], "action": "blackout", "error": ""}
+  ],
+  "examples": [
+    {"address": "/primus/cue/go", "description": "Advance to the next cue"}
+  ],
+  "cue_triggers": [
+    {"number": 1, "name": "Opening Look", "slug": "opening-look", "primus_address": "/primus/cue/opening-look", "qlab_address": "/cue/opening-look/start"}
+  ]
+}
+```
+
+### Inbound OSC Cue Control
+
+OSC packets are received by the sender, not by receiver nodes. The parser supports ordinary OSC messages and simple bundles, with `int32`, `float32`, and string arguments for the cue commands below. Bundles are processed immediately in packet order; timetags are ignored in this first implementation.
+
+| OSC address | Arguments | Action |
+|---|---|---|
+| `/primus/cue/go` | none | Fire the next cue. |
+| `/cue/go` or `/go` | none | Fire the next cue using a shorter alias. |
+| `/primus/cue/goto` | integer cue number | Fire a cue by number. |
+| `/cue/goto` | integer cue number | Fire a cue by number using a shorter alias. |
+| `/primus/cue/name` | string cue name | Fire a cue by exact name, then unique slug fallback. |
+| `/cue/name` | string cue name | Fire a cue by name using a shorter alias. |
+| `/primus/cue/<slug>` | none | Fire a cue by number or slug. |
+| `/cue/<slug>/start` | none | Fire a cue by number or slug using a QLab-friendly path. |
+| `/primus/cue/stop`, `/cue/stop`, `/stop` | none | Stop cue playback and release controller output. |
+| `/primus/blackout`, `/blackout`, `/panic` | optional fade seconds | Fade or cut to blackout. |
+
+Cue lookup for name-based OSC triggers is exact case-insensitive name first, then unique slug fallback. A slug is the lowercase cue name with non-alphanumeric runs replaced by hyphens, so `Opening Look` becomes `opening-look`. Ambiguous names or slugs are rejected and appear in OSC history with `ok:false`.
 
 ### POST Endpoints — Firmware Upload
 
@@ -417,6 +527,21 @@ V1 and V2 boards have no TFT, so V3.5 firmware uses simple onboard connection in
 ---
 
 ## 10. Integration Strategies by Tool
+
+### QLab / OSC Show Control
+
+Primus Central receives OSC cue triggers on the sender computer. For QLab running on the same Mac, create a Network cue that sends OSC to `127.0.0.1:53001`. For QLab on another computer, bind the Primus OSC listener to the sender computer's show-network IP in the Cue Controller panel, then target that IP and port from QLab.
+
+Useful QLab Network cue messages:
+
+```text
+/cue/opening-look/start
+/primus/cue/goto 3
+/primus/cue/go
+/primus/blackout 0.5
+```
+
+Primus cue names are exposed as QLab-friendly slugs in `GET /api/integrations/osc` and in the Cue Controller panel.
 
 ### TouchDesigner
 

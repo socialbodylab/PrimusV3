@@ -25,6 +25,7 @@ from state import ControllerState, OUTPUT_TYPES, animation_loop
 from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
+from osc_control import OscControlServer
 from paths import ensure_runtime_data, is_bundled, log_path
 from server import create_server
 
@@ -101,10 +102,11 @@ def _kill_existing():
                 break
 
 
-def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabled=False):
+def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabled=False, osc_service=None):
     try:
         return create_server(host, port, state, cue_list,
-                             ui_lifecycle_enabled=ui_lifecycle_enabled)
+                             ui_lifecycle_enabled=ui_lifecycle_enabled,
+                             osc_service=osc_service)
     except OSError as exc:
         if port == 0:
             raise
@@ -112,7 +114,8 @@ def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabl
             raise
         print(f"Port {port} is busy; using an auto-selected port instead.")
         return create_server(host, 0, state, cue_list,
-                             ui_lifecycle_enabled=ui_lifecycle_enabled)
+                             ui_lifecycle_enabled=ui_lifecycle_enabled,
+                             osc_service=osc_service)
 
 
 def _ui_lifecycle_monitor(server):
@@ -563,6 +566,8 @@ def main():
 
     state = ControllerState(fps_listener)
     cue_list = CueList()
+    osc_service = OscControlServer(cue_list, state)
+    osc_service.start()
 
     # Restore previously saved devices
     print("Restoring saved devices...")
@@ -572,7 +577,8 @@ def main():
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
     server = _create_server_with_fallback(
         "127.0.0.1", args.port, state, cue_list,
-        ui_lifecycle_enabled=ui_lifecycle_enabled)
+        ui_lifecycle_enabled=ui_lifecycle_enabled,
+        osc_service=osc_service)
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}"
 
@@ -591,6 +597,15 @@ def main():
     print("PrimusV3.5 LED Controller")
     print(f"  URL: {url}")
     print(f"  Devices: {len(state.devices)}")
+    osc_status = osc_service.status()
+    if osc_status.get("enabled"):
+        bound = osc_status.get("bound") or {}
+        osc_host = bound.get("host") or osc_status.get("settings", {}).get("host")
+        osc_port = bound.get("port") or osc_status.get("settings", {}).get("port")
+        osc_label = f"listening on {osc_host}:{osc_port}" if osc_status.get("running") else f"not listening ({osc_status.get('last_error') or 'startup pending'})"
+        print(f"  OSC: {osc_label}")
+    else:
+        print("  OSC: disabled")
     if args.no_browser:
         print("  Browser: not opened (--no-browser)")
     else:
@@ -603,6 +618,7 @@ def main():
         print("\nShutting down...")
     finally:
         server.ui_lifecycle_enabled = False
+        osc_service.stop()
         state.shutdown()
         fps_listener.stop()
         server.server_close()

@@ -17,6 +17,7 @@ V3_5/sender/
 ├── clips.py                # Clip persistence and preview computation
 ├── mixer.py                # Look timeline frame computation
 ├── controller.py           # Cue list playback and crossfades
+├── osc_control.py          # Inbound OSC parser/listener for cue triggers
 ├── web/                    # Static Alpine.js UI
 └── tests/                  # Stdlib unittest smoke tests
 ```
@@ -32,7 +33,7 @@ python3 V3_5/sender/run.py
 python3 V3_5/sender/run.py --port 0
 ```
 
-`run.py` is the canonical entry point and defaults to `http://127.0.0.1:8080`, with auto-port fallback if 8080 is busy. Running it directly starts the server, replaces any previous V3.5 sender process, and opens the interface. Chromium-family browsers are launched with a fresh Primus-only app profile to avoid browser session-restore duplicate tabs; if no supported browser is available, startup falls back to the system default browser. `controller.py` contains cue-list logic and does not launch the interface.
+`run.py` is the canonical entry point and defaults to `http://127.0.0.1:8080`, with auto-port fallback if 8080 is busy. Running it directly starts the server, inbound OSC cue listener, replaces any previous V3.5 sender process, and opens the interface. Chromium-family browsers are launched with a fresh Primus-only app profile to avoid browser session-restore duplicate tabs; if no supported browser is available, startup falls back to the system default browser. `controller.py` contains cue-list logic and does not launch the interface.
 
 Run checks:
 
@@ -84,6 +85,8 @@ The phase-one UI hierarchy is Cues, then Looks, then Clips:
 `controller.py` normalizes both assignment-based cues and older one-Look cues. New cues should use `assignments`, where each item is either `{"action":"look", "look_id":"...", "target_mode":"look"}` or `{"action":"blackout"}`. Top-level `look_id` remains for compatibility when a cue has exactly one Look assignment.
 
 The Cue Controller web mode is a live manual button board. Entering it hides the network Devices sidebar, connects saved devices, and sends controller blackout before show operation begins. It does not expose sequential GO/NEXT controls, auto-follow setup, cue reordering, or a cue timeline; clicking a cue square directly fires that cue, and the only per-square control is Edit.
+
+Inbound OSC control is implemented in `osc_control.py` and defaults to `127.0.0.1:53001`. It is stdlib-only and supports `/primus/cue/go`, `/primus/cue/goto` with an integer argument, `/primus/cue/name` with a cue-name argument, `/cue/goto`, `/cue/name`, `/primus/cue/<slug>`, QLab-friendly `/cue/<slug>/start`, `/primus/cue/stop`, and `/primus/blackout` with an optional fade-time argument. Cue name lookup is exact case-insensitive first, then unique slug fallback, where a slug is lowercase words joined with hyphens.
 
 ### Device Records
 
@@ -145,6 +148,8 @@ Important device/control endpoints in `server.py`:
 | `GET /api/cues` / `POST /api/cues` | Read or replace the cue list. Cues should use assignment-based payloads. |
 | `POST /api/cues/go` / `POST /api/cues/goto` | Fire the next cue or a specific cue number through the controller source. |
 | `POST /api/controller/blackout` | Send controller blackout, used when entering Cue Controller mode. |
+| `GET /api/integrations/osc` | OSC listener settings, bound endpoint, recent message history, and cue trigger hints. |
+| `POST /api/integrations/osc` | Enable/disable or rebind the inbound OSC listener. |
 | `GET /api/firmware/status` | Firmware upload tooling availability and current/last job. |
 | `POST /api/firmware/jobs` | Start a source-checkout firmware job: list ports, install, compile, or upload. |
 | `GET /api/firmware/jobs/:id` | Poll a firmware job, including redacted output and structured port results. |

@@ -2538,6 +2538,77 @@ input[type="color"] {
     margin: 8px 0 12px;
 }
 
+.osc-control-section {
+    margin-bottom: 14px;
+}
+
+.osc-control-grid {
+    display: grid;
+    grid-template-columns: auto minmax(180px, 1fr) 110px auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.osc-enable-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.osc-port-field {
+    min-width: 0;
+}
+
+.osc-status-pill {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.osc-status-listening {
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.osc-status-error {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.osc-status-off {
+    border-color: var(--border);
+    color: var(--text-muted);
+}
+
+.osc-detail-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.osc-endpoint {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    color: var(--text-primary);
+}
+
+.osc-example-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
 .cue-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 180px));
@@ -2761,6 +2832,10 @@ input[type="color"] {
 
     .cue-controller-title {
         font-size: 28px;
+    }
+
+    .osc-control-grid {
+        grid-template-columns: 1fr;
     }
 }
 

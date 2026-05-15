@@ -40,6 +40,9 @@ class Handler(BaseHTTPRequestHandler):
     controller_state = None
     cue_list = None
 
+    def _osc_service(self):
+        return getattr(self.server, "osc_service", None)
+
     def _leave_controller_runtime(self, preserve_selection=True):
         if self.cue_list is not None:
             self.cue_list.release_output(preserve_selection=preserve_selection)
@@ -126,6 +129,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/cues":
             self._json_response(self.cue_list.get_json())
+            return
+        if path == "/api/integrations/osc":
+            service = self._osc_service()
+            if service is None:
+                self._json_error(503, "OSC service unavailable")
+            else:
+                self._json_response(service.status())
             return
         if path.startswith("/api/"):
             self._json_error(404, "not found")
@@ -358,6 +368,13 @@ class Handler(BaseHTTPRequestHandler):
             if cue is not None:
                 self.controller_state.set_playback_source(ControllerState.SOURCE_CONTROLLER)
             self._json_response({"cue": cue})
+
+        elif path == "/api/integrations/osc":
+            service = self._osc_service()
+            if service is None:
+                self._json_error(503, "OSC service unavailable")
+            else:
+                self._json_response(service.update(data))
 
         # -- Controller routes (control panel) --
         elif path == "/api/controller/activate":
@@ -642,11 +659,12 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def create_server(host, port, controller_state, cue_list, ui_lifecycle_enabled=False):
+def create_server(host, port, controller_state, cue_list, ui_lifecycle_enabled=False, osc_service=None):
     """Create and return an HTTPServer bound to host:port."""
     Handler.controller_state = controller_state
     Handler.cue_list = cue_list
     server = HTTPServer((host, port), Handler)
+    server.osc_service = osc_service
     server.ui_lifecycle_enabled = bool(ui_lifecycle_enabled)
     server.ui_lifecycle_started_at = time.monotonic()
     server.ui_last_heartbeat = None

@@ -34,11 +34,11 @@ document.addEventListener("alpine:init", () => {
         },
 
         get selectedInterface() {
-            return this.visibleInterfaces.find(item => item.id === this.selectedId)
+            return this.interfaces.find(item => item.id === this.selectedId)
                 || this.status?.selected_interface
                 || this.recommendedInterface
-                || this.visibleInterfaces.find(item => item.is_controller)
-                || this.visibleInterfaces.find(item => item.is_default)
+                || this.interfaces.find(item => item.is_controller)
+                || this.interfaces.find(item => item.is_default)
                 || this.visibleInterfaces[0]
                 || null;
         },
@@ -169,12 +169,12 @@ document.addEventListener("alpine:init", () => {
 
         syncFromStatus() {
             const preferred = this.status?.selected_interface;
-            const current = this.selectedId ? this.visibleInterfaces.find(item => item.id === this.selectedId) : null;
+            const current = this.selectedId ? this.interfaces.find(item => item.id === this.selectedId) : null;
             const iface = current
                 || preferred
                 || this.recommendedInterface
-                || this.visibleInterfaces.find(item => item.is_controller)
-                || this.visibleInterfaces.find(item => item.is_default)
+                || this.interfaces.find(item => item.is_controller)
+                || this.interfaces.find(item => item.is_default)
                 || this.visibleInterfaces[0];
             this.selectedId = iface?.id || "";
             this.controllerSsid = this.controllerConnection?.ssid || "";
@@ -468,8 +468,21 @@ document.addEventListener("alpine:init", () => {
             const parts = [];
             if (iface.device) parts.push(iface.device);
             if (iface.source_ip) parts.push(iface.source_ip);
+            if (iface.configured_ip && iface.configured_ip !== iface.source_ip) parts.push('configured ' + iface.configured_ip);
             if (iface.broadcast) parts.push("broadcast " + iface.broadcast);
             return parts.join(" · ");
+        },
+
+        configuredSummary(iface) {
+            if (!iface) return "None";
+            if (iface.configured_mode === "static" && iface.configured_ip) {
+                const parts = [iface.configured_ip];
+                if (iface.configured_subnet) parts.push(iface.configured_subnet);
+                if (iface.configured_gateway) parts.push("gateway " + iface.configured_gateway);
+                return parts.join(" · ");
+            }
+            if (iface.configured_mode === "dhcp") return "DHCP";
+            return "Unknown";
         },
 
         currentWifiLabel() {

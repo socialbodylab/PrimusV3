@@ -843,6 +843,41 @@
             </div>
         </div>
 
+        <div class="output-section osc-control-section">
+            <div class="output-header">
+                <span class="output-name">External Control</span>
+                <span class="osc-status-pill" :class="oscStatusClass()" x-text="oscStatusLabel()"></span>
+            </div>
+            <div class="osc-control-grid">
+                <label class="osc-enable-row">
+                    <input type="checkbox" x-model="oscConfig.enabled">
+                    <span>OSC</span>
+                </label>
+                <div class="form-group">
+                    <label class="form-label">Host</label>
+                    <input class="form-input" type="text" x-model="oscConfig.host" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="form-group osc-port-field">
+                    <label class="form-label">Port</label>
+                    <input class="form-input" type="number" min="0" max="65535" x-model.number="oscConfig.port">
+                </div>
+                <button class="btn btn-sm" @click="saveOscConfig()" :disabled="oscSaving" x-text="oscSaving ? 'Saving...' : 'Apply'"></button>
+            </div>
+            <div class="osc-detail-row">
+                <span class="osc-endpoint" x-text="oscEndpointLabel()"></span>
+                <span x-text="oscLastMessage()"></span>
+            </div>
+            <div class="osc-example-strip" x-show="cues.length > 0">
+                <template x-for="cue in cues.slice(0, 4)" :key="'osc-' + cue.number">
+                    <span class="cue-assignment-pill">
+                        <span x-text="cue.name"></span>
+                        <span class="cue-assignment-target" x-text="cueExternalAddress(cue)"></span>
+                    </span>
+                </template>
+                <span class="look-target-more" x-show="cues.length > 4" x-text="'+' + (cues.length - 4)"></span>
+            </div>
+        </div>
+
         <div class="cue-board-header">
             <div>
                 <span class="section-title" style="margin:0">Cue Board</span>
@@ -1211,6 +1246,10 @@
                         <span class="settings-detail-value" x-text="selectedInterface?.source_ip || 'None'"></span>
                     </div>
                     <div>
+                        <span class="settings-detail-label">macOS Config</span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
                         <span class="settings-detail-label">Subnet</span>
                         <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
                     </div>
@@ -1253,6 +1292,10 @@
                     <div>
                         <span class="settings-detail-label">Subnet</span>
                         <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">macOS Config</span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
                     </div>
                     <div>
                         <span class="settings-detail-label">SSID</span>

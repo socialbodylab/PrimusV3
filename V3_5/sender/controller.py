@@ -5,6 +5,7 @@ per-pixel crossfade engine, and auto-follow.
 
 import json
 import os
+import re
 import threading
 import time
 
@@ -15,6 +16,12 @@ from paths import cues_file
 _DEVICE_IPS_UNSET = object()
 ASSIGNMENT_LOOK = "look"
 ASSIGNMENT_BLACKOUT = "blackout"
+
+
+def cue_slug(value):
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
 
 
 def _cues_file():
@@ -346,6 +353,51 @@ class CueList:
             self._auto_follow_time = 0.0
         self.save()
 
+    def external_triggers(self):
+        """Return cue trigger hints for external control UIs."""
+        with self.lock:
+            return [
+                {
+                    "number": cue.get("number"),
+                    "name": cue.get("name", ""),
+                    "slug": cue_slug(cue.get("name") or cue.get("number")),
+                    "primus_address": f"/primus/cue/{cue_slug(cue.get('name') or cue.get('number'))}",
+                    "qlab_address": f"/cue/{cue_slug(cue.get('name') or cue.get('number'))}/start",
+                }
+                for cue in self.cues
+            ]
+
+    def find_cue_by_external_name(self, name):
+        """Resolve a cue by exact name, then unique slug fallback."""
+        target = str(name or "").strip()
+        if not target:
+            return {"cue": None, "index": -1, "error": "cue name required"}
+        target_lower = target.lower()
+        with self.lock:
+            exact = [
+                (idx, dict(cue))
+                for idx, cue in enumerate(self.cues)
+                if str(cue.get("name") or "").strip().lower() == target_lower
+            ]
+            if len(exact) == 1:
+                idx, cue = exact[0]
+                return {"cue": cue, "index": idx, "error": ""}
+            if len(exact) > 1:
+                return {"cue": None, "index": -1, "error": "ambiguous cue name"}
+
+            target_slug = cue_slug(target)
+            slug_matches = [
+                (idx, dict(cue))
+                for idx, cue in enumerate(self.cues)
+                if cue_slug(cue.get("name") or cue.get("number")) == target_slug
+            ]
+            if len(slug_matches) == 1:
+                idx, cue = slug_matches[0]
+                return {"cue": cue, "index": idx, "error": ""}
+            if len(slug_matches) > 1:
+                return {"cue": None, "index": -1, "error": "ambiguous cue slug"}
+        return {"cue": None, "index": -1, "error": "cue not found"}
+
     # ------------------------------------------------------------------
     #  Direct look activation (Control Panel)
     # ------------------------------------------------------------------
@@ -509,6 +561,15 @@ class CueList:
             if match is None:
                 return None
         return self._trigger_cue_at_index(match_idx, match, device_groups=device_groups)
+
+    def go_to_cue_name(self, name, device_groups=None):
+        """Jump to a cue by exact name, or by unique slug fallback."""
+        match = self.find_cue_by_external_name(name)
+        cue = match.get("cue")
+        idx = match.get("index", -1)
+        if cue is None or idx < 0:
+            return None
+        return self._trigger_cue_at_index(idx, cue, device_groups=device_groups)
 
     def get_elapsed(self):
         """Seconds elapsed since current cue started."""

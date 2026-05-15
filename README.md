@@ -146,6 +146,8 @@ Start here for V3.5 development:
 - [V3_5/README.md](V3_5/README.md) - documentation index and quick start
 - [V3_5/FIRMWARE_DEVELOPMENT.md](V3_5/FIRMWARE_DEVELOPMENT.md) - firmware profiles, pins, protocol contracts, and validation
 - [V3_5/SENDER_DEVELOPMENT.md](V3_5/SENDER_DEVELOPMENT.md) - sender architecture, discovery parsing, API behavior, and tests
+- [V3_5/ConnectionSettings.md](V3_5/ConnectionSettings.md) - show-router sender network settings and Settings API methods
+- [V3_5/exteriorIntegration.md](V3_5/exteriorIntegration.md) - inbound OSC cue triggering for QLab and other show-control tools
 - [V3_5/hardwareCompatibility.md](V3_5/hardwareCompatibility.md) - compact board/profile/pin/output reference
 
 Previous tracks are kept as historical references. See [PreviousVersions.md](PreviousVersions.md) for the V3.1 modular sender and V3.0 single-file sender notes.
@@ -281,6 +283,8 @@ PrimusV3/
 │   ├── README.md                    # V3.5 documentation index
 │   ├── FIRMWARE_DEVELOPMENT.md      # Firmware profile and protocol notes
 │   ├── SENDER_DEVELOPMENT.md        # Sender architecture and API notes
+│   ├── ConnectionSettings.md        # Sender network Settings workflow
+│   ├── exteriorIntegration.md       # OSC/show-control integration notes
 │   ├── hardwareCompatibility.md     # Board, pin, and output type reference
 │   ├── Arduino/
 │   ├── sender/

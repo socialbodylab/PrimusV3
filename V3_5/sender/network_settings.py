@@ -13,6 +13,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 from artnet import ipv4_octets
 from paths import state_file
@@ -346,6 +347,43 @@ def _mac_default_route():
     return out
 
 
+def _clean_network_value(value):
+    text = str(value or "").strip()
+    return "" if text.lower() in ("", "none", "unknown") else text
+
+
+def _parse_networksetup_info(text):
+    info = {
+        "configured_mode": "unknown",
+        "configured_ip": "",
+        "configured_subnet": "",
+        "configured_gateway": "",
+    }
+    body = str(text or "")
+    if "Manual Configuration" in body:
+        info["configured_mode"] = "static"
+    elif "DHCP Configuration" in body:
+        info["configured_mode"] = "dhcp"
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if line.startswith("IP address:"):
+            info["configured_ip"] = _clean_network_value(line.split(":", 1)[1])
+        elif line.startswith("Subnet mask:"):
+            info["configured_subnet"] = _clean_network_value(line.split(":", 1)[1])
+        elif line.startswith("Router:"):
+            info["configured_gateway"] = _clean_network_value(line.split(":", 1)[1])
+    return info
+
+
+def _mac_service_info(service):
+    if not service:
+        return {}
+    try:
+        return _parse_networksetup_info(_run_text([NETWORKSETUP, "-getinfo", service]))
+    except Exception:
+        return {}
+
+
 def _mac_wifi_ssid(device):
     if not device:
         return ""
@@ -440,8 +478,20 @@ def _mac_interfaces(settings):
     for service in services:
         device = service.get("device", "")
         ifinfo = ifaces.get(device, {})
+        link_status = ifinfo.get("status", "")
+        connected = bool(
+            ifinfo.get("ipv4", "")
+            and ifinfo.get("up")
+            and (
+                link_status == "active"
+                or (not link_status and ifinfo.get("running"))
+            )
+        )
         item_type = _interface_type(service.get("hardware_port") or service.get("service"))
         ipv4 = ifinfo.get("ipv4", "")
+        service_info = _mac_service_info(service.get("service", ""))
+        gateway = route.get("gateway", "") if route.get("interface") == device else ""
+        gateway = gateway or service_info.get("configured_gateway", "")
         item = {
             "id": _interface_id(service.get("service", ""), device),
             "service": service.get("service", ""),
@@ -453,9 +503,17 @@ def _mac_interfaces(settings):
             "source_ip": ipv4,
             "subnet": ifinfo.get("subnet", ""),
             "broadcast": ifinfo.get("broadcast", ""),
-            "gateway": route.get("gateway", "") if route.get("interface") == device else "",
+            "gateway": gateway,
             "network": _network_summary(ipv4, ifinfo.get("subnet", "")),
-            "connected": bool(ipv4 and (ifinfo.get("running") or ifinfo.get("status") == "active")),
+            "configured_mode": service_info.get("configured_mode", "unknown"),
+            "configured_ip": service_info.get("configured_ip", ""),
+            "configured_subnet": service_info.get("configured_subnet", ""),
+            "configured_gateway": service_info.get("configured_gateway", ""),
+            "configured_network": _network_summary(
+                service_info.get("configured_ip", ""),
+                service_info.get("configured_subnet", ""),
+            ),
+            "connected": connected,
             "is_default": route.get("interface") == device,
             "is_preferred": False,
             "is_controller": False,
@@ -467,6 +525,15 @@ def _mac_interfaces(settings):
             item["warnings"].append("Preferred connection is not active.")
         elif item["is_preferred"] and not item["ipv4"]:
             item["warnings"].append("Preferred connection has no IPv4 address.")
+        if item["configured_mode"] == "static" and item["configured_ip"]:
+            if item["ipv4"] and item["ipv4"] != item["configured_ip"]:
+                item["warnings"].append(
+                    f"macOS is configured for {item['configured_ip']}, but the adapter currently reports {item['ipv4']}."
+                )
+            elif not item["ipv4"]:
+                item["warnings"].append(
+                    f"macOS is configured for static IP {item['configured_ip']}, but the adapter has no live IPv4 address."
+                )
         interfaces.append(item)
     type_priority = {"ethernet": 0, "wifi": 1, "other": 2}
     interfaces.sort(key=lambda item: (not item["connected"], type_priority.get(item["type"], 3), not item["is_default"], item["service"]))
@@ -664,6 +731,36 @@ def _run_privileged_networksetup(args):
         raise NetworkSettingsError(409, "network setup command timed out") from error
 
 
+def _wait_for_interface_ip(device, expected_ip, expected_subnet, timeout=6.0):
+    if not device or not expected_ip:
+        return False
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        info = _mac_ifconfig().get(device, {})
+        if info.get("ipv4") == expected_ip:
+            if not expected_subnet or info.get("subnet") == expected_subnet:
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.25)
+
+
+def _stored_connection_matches(saved, interface):
+    saved = saved or {}
+    if saved.get("id") and saved.get("id") == interface.get("id"):
+        return True
+    if saved.get("device") and saved.get("device") == interface.get("device"):
+        service = saved.get("service")
+        return not service or service == interface.get("service")
+    return False
+
+
+def _update_saved_source_ip(settings, interface, source_ip):
+    for key in ("preferred", "controller_connection"):
+        if _stored_connection_matches(settings.get(key), interface):
+            settings[key]["source_ip"] = source_ip
+
+
 def apply_static_ip(data):
     _require_macos()
     status = get_network_status()
@@ -685,10 +782,22 @@ def apply_static_ip(data):
         profile["subnet"],
         profile["gateway"],
     ])
+    confirmed = _wait_for_interface_ip(interface.get("device", ""), profile["ip"], profile["subnet"])
     settings = load_settings()
-    settings["last_applied"] = {**profile, "service": interface["service"], "device": interface["device"]}
+    _update_saved_source_ip(settings, interface, profile["ip"])
+    settings["last_applied"] = {
+        **profile,
+        "service": interface["service"],
+        "device": interface["device"],
+        "confirmed": confirmed,
+    }
     save_settings(settings)
-    return get_network_status()
+    status = get_network_status()
+    if not confirmed:
+        status["warnings"].append(
+            "macOS accepted the static profile, but the adapter has not reported the new IP yet. Refresh after the link settles, and check the cable/router if it stays pending."
+        )
+    return status
 
 
 def set_dhcp(data):

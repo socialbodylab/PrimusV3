@@ -19,6 +19,13 @@ document.addEventListener("alpine:init", () => {
         blackout: false,
         controllerPrepared: false,
         preparingController: false,
+        oscStatus: null,
+        oscConfig: {
+            enabled: true,
+            host: '127.0.0.1',
+            port: 53001,
+        },
+        oscSaving: false,
 
         cueModal: false,
         cueEditIndex: -1,
@@ -35,17 +42,20 @@ document.addEventListener("alpine:init", () => {
         targetDeviceIps: [],
 
         _pollInterval: null,
+        _lastOscPoll: 0,
         _looksChangedHandler: null,
         _modeChangedHandler: null,
 
         async init() {
             await this.loadLooks();
             await this.refresh();
+            await this.fetchOscStatus();
             this._looksChangedHandler = () => this.loadLooks();
             this._modeChangedHandler = async (event) => {
                 if (event?.detail?.mode === "controller") {
                     await this.loadLooks();
                     await this.refresh();
+                    await this.fetchOscStatus();
                     await this.prepareControllerMode();
                 } else {
                     this.controllerPrepared = false;
@@ -80,6 +90,11 @@ document.addEventListener("alpine:init", () => {
             try {
                 const data = await api("GET", "/api/cues");
                 this.applyCueState(data);
+                const now = Date.now();
+                if (now - this._lastOscPoll > 2000) {
+                    this._lastOscPoll = now;
+                    await this.fetchOscStatus();
+                }
             } catch (e) {}
         },
 
@@ -102,6 +117,78 @@ document.addEventListener("alpine:init", () => {
 
         async loadLooks() {
             this.looks = await api("GET", "/api/looks");
+        },
+
+        async fetchOscStatus() {
+            try {
+                const data = await api("GET", "/api/integrations/osc");
+                this.applyOscStatus(data);
+            } catch (e) {
+                this.oscStatus = { enabled: false, running: false, last_error: 'OSC status unavailable', history: [] };
+            }
+        },
+
+        applyOscStatus(data) {
+            this.oscStatus = data || null;
+            const settings = data?.settings || {};
+            this.oscConfig = {
+                enabled: settings.enabled ?? data?.enabled ?? true,
+                host: settings.host || '127.0.0.1',
+                port: settings.port || 53001,
+            };
+        },
+
+        async saveOscConfig() {
+            this.oscSaving = true;
+            try {
+                const data = await api("POST", "/api/integrations/osc", {
+                    enabled: !!this.oscConfig.enabled,
+                    host: this.oscConfig.host,
+                    port: Number(this.oscConfig.port) || 0,
+                });
+                this.applyOscStatus(data);
+            } catch (e) {
+                Alpine.store("app").showApiError('OSC settings failed', e);
+            } finally {
+                this.oscSaving = false;
+            }
+        },
+
+        oscStatusClass() {
+            if (!this.oscStatus?.enabled) return 'osc-status-off';
+            if (this.oscStatus?.running) return 'osc-status-listening';
+            return 'osc-status-error';
+        },
+
+        oscStatusLabel() {
+            if (!this.oscStatus) return 'Checking';
+            if (!this.oscStatus.enabled) return 'Disabled';
+            if (this.oscStatus.running) return 'Listening';
+            return 'Offline';
+        },
+
+        oscEndpointLabel() {
+            const bound = this.oscStatus?.bound || {};
+            const settings = this.oscStatus?.settings || this.oscConfig;
+            const host = bound.host || settings.host || '127.0.0.1';
+            const port = bound.port || settings.port || 53001;
+            return host + ':' + port;
+        },
+
+        oscLastMessage() {
+            const history = this.oscStatus?.history || [];
+            if (!history.length) return 'No OSC messages received yet';
+            const last = history[0];
+            if (last.ok) {
+                const cue = last.cue_name ? (' -> ' + last.cue_name) : '';
+                return last.time + ' ' + last.address + cue;
+            }
+            return last.time + ' ' + (last.address || 'Packet') + ' failed: ' + (last.error || 'unsupported command');
+        },
+
+        cueExternalAddress(cue) {
+            const match = (this.oscStatus?.cue_triggers || []).find(item => item.number === cue.number);
+            return match?.qlab_address || ('/primus/cue/goto ' + cue.number);
         },
 
         async prepareControllerMode() {
