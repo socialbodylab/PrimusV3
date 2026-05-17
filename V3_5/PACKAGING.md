@@ -196,7 +196,7 @@ Manual verification commands:
 ```bash
 codesign --verify --deep --strict --verbose=2 V3_5/dist/macos/PrimusCentral.app
 xcrun stapler validate V3_5/dist/macos/PrimusCentral.app
-spctl -a -vvv -t install V3_5/dist/macos/PrimusCentral.app
+spctl -a -vvv --type exec V3_5/dist/macos/PrimusCentral.app
 ```
 
 ## Verify The App

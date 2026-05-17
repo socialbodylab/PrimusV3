@@ -168,7 +168,7 @@ def _staple_and_verify_macos_app(app_path):
     _run(["xcrun", "stapler", "staple", str(app_path)])
     _run(["xcrun", "stapler", "validate", str(app_path)])
     if shutil.which("spctl") is not None:
-        _run(["spctl", "-a", "-vvv", "-t", "install", str(app_path)])
+        _run(["spctl", "-a", "-vvv", "--type", "exec", str(app_path)])
 
 
 def _notarize_macos_app(app_path, build_dir, notary_profile, timeout=None):

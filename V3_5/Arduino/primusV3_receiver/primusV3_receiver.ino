@@ -83,6 +83,10 @@ unsigned long lastReconnectAttempt = 0;
 // No-screen board connection indicator. V1 uses LED_BUILTIN; V2 uses
 // the onboard NeoPixel. V3.1 keeps using the TFT display.
 bool statusIndicatorConnected = false;
+bool statusIndicatorStaticIP = false;
+bool statusIndicatorLit = false;
+unsigned long lastStatusIndicatorBlink = 0;
+static const unsigned long STATUS_INDICATOR_BLINK_INTERVAL = 500;
 
 // ── Sender address (for FPS back-channel) ────────────────────────────
 IPAddress senderIP;
@@ -95,6 +99,7 @@ bool hasCustomName = false;
 
 // ── Static IP config (stored in NVS) ─────────────────────────────────
 bool useStaticIP = false;
+bool activeStaticIP = false;
 uint8_t storedIP[4]      = {0};
 uint8_t storedGateway[4] = {0};
 uint8_t storedSubnet[4]  = {0};
@@ -176,6 +181,70 @@ void loadStoredNetworkConfig() {
   }
 }
 
+void printStartupConnectionData() {
+  Serial.println("Startup connection data:");
+  Serial.print("  Device name: ");
+  Serial.println(hasCustomName ? customShortName : DEVICE_SHORT_NAME);
+  Serial.print("  Board profile: ");
+  Serial.println(BOARD_PROFILE_LABEL);
+  Serial.print("  Firmware: ");
+  Serial.print(FIRMWARE_NAME);
+  Serial.print(" ");
+  Serial.println(FIRMWARE_VERSION);
+  Serial.print("  Target SSID: ");
+  Serial.println(DEFAULT_WIFI_SSID);
+  Serial.print("  Target password: ");
+  Serial.println(DEFAULT_WIFI_PASSWORD);
+  Serial.print("  IP mode: ");
+  Serial.println(useStaticIP ? "Static" : "DHCP - no static IP assigned");
+  if (useStaticIP) {
+    Serial.print("  Static IP: ");
+    printIpBytes(storedIP);
+    Serial.println();
+    Serial.print("  Gateway: ");
+    printIpBytes(storedGateway);
+    Serial.println();
+    Serial.print("  Subnet: ");
+    printIpBytes(storedSubnet);
+    Serial.println();
+  } else {
+    Serial.println("  Static IP: none stored");
+  }
+  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
+    Serial.print("  Output ");
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.print(typeName(outputs[i].type));
+    Serial.print(" on port ");
+    Serial.print(outputs[i].pxl8Port);
+    Serial.print(" universe ");
+    Serial.println(outputs[i].universe);
+  }
+}
+
+void printConnectedNetworkData() {
+  Serial.println("Connected network data:");
+  Serial.print("  Device name: ");
+  Serial.println(hasCustomName ? customShortName : DEVICE_SHORT_NAME);
+  Serial.print("  SSID: ");
+  Serial.println(WiFi.SSID());
+  Serial.print("  IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("  Gateway: ");
+  Serial.println(WiFi.gatewayIP());
+  Serial.print("  Subnet: ");
+  Serial.println(WiFi.subnetMask());
+  Serial.print("  MAC: ");
+  Serial.println(WiFi.macAddress());
+  Serial.print("  RSSI: ");
+  Serial.print(WiFi.RSSI());
+  Serial.println(" dBm");
+  Serial.print("  Static IP assigned: ");
+  Serial.println(activeStaticIP ? "yes" : "no");
+  Serial.print("  Saved static IP settings: ");
+  Serial.println(useStaticIP ? "yes" : "no");
+}
+
 // ── Timing / FPS ─────────────────────────────────────────────────────
 unsigned long lastShowTime  = 0;
 unsigned long showDuration  = 2000;   // measured leds->show() time in µs
@@ -255,21 +324,34 @@ void saveOutputConfig() {
 //  WiFi
 // =====================================================================
 
-void setConnectionIndicator(bool connected) {
-  statusIndicatorConnected = connected;
+void writeConnectionIndicator(bool lit) {
+  statusIndicatorLit = lit;
 
 #if BOARD_HAS_STATUS_LED
-  bool ledOn = connected ? BOARD_STATUS_LED_ACTIVE_HIGH : !BOARD_STATUS_LED_ACTIVE_HIGH;
+  bool ledOn = lit ? BOARD_STATUS_LED_ACTIVE_HIGH : !BOARD_STATUS_LED_ACTIVE_HIGH;
   digitalWrite(BOARD_STATUS_LED_PIN, ledOn ? HIGH : LOW);
 #endif
 
 #if BOARD_HAS_STATUS_NEOPIXEL
-  uint32_t color = connected
-    ? statusPixel.Color(0, BOARD_STATUS_NEOPIXEL_BRIGHTNESS, 0)
+  uint32_t color = lit
+    ? statusPixel.Color(BOARD_STATUS_NEOPIXEL_BRIGHTNESS, 0, 0)
     : statusPixel.Color(0, 0, 0);
   statusPixel.setPixelColor(0, color);
   statusPixel.show();
 #endif
+}
+
+void setConnectionIndicator(bool connected) {
+  statusIndicatorConnected = connected;
+  statusIndicatorStaticIP = activeStaticIP;
+  lastStatusIndicatorBlink = millis();
+
+  if (!connected) {
+    writeConnectionIndicator(false);
+    return;
+  }
+
+  writeConnectionIndicator(true);
 }
 
 void initConnectionIndicator() {
@@ -291,13 +373,20 @@ void initConnectionIndicator() {
 
 void syncConnectionIndicator() {
   bool connected = (WiFi.status() == WL_CONNECTED);
-  if (connected == wifiConnected && connected == statusIndicatorConnected) return;
   wifiConnected = connected;
-  setConnectionIndicator(connected);
+  if (connected != statusIndicatorConnected || activeStaticIP != statusIndicatorStaticIP) {
+    setConnectionIndicator(connected);
+    return;
+  }
+  if (connected && !activeStaticIP && millis() - lastStatusIndicatorBlink >= STATUS_INDICATOR_BLINK_INTERVAL) {
+    lastStatusIndicatorBlink = millis();
+    writeConnectionIndicator(!statusIndicatorLit);
+  }
 }
 
 bool connectWifi() {
   WiFi.persistent(false);
+  activeStaticIP = false;
 
 #ifdef PRIMUSV3_FORCE_WIFI_CREDENTIAL_OVERRIDE
   static bool clearedStoredWifiCredentials = false;
@@ -315,9 +404,13 @@ bool connectWifi() {
     IPAddress localIP(storedIP[0], storedIP[1], storedIP[2], storedIP[3]);
     IPAddress gateway(storedGateway[0], storedGateway[1], storedGateway[2], storedGateway[3]);
     IPAddress subnet(storedSubnet[0], storedSubnet[1], storedSubnet[2], storedSubnet[3]);
-    WiFi.config(localIP, gateway, subnet);
-    Serial.print("Using static IP: ");
-    Serial.println(localIP);
+    activeStaticIP = WiFi.config(localIP, gateway, subnet);
+    if (activeStaticIP) {
+      Serial.print("Using static IP: ");
+      Serial.println(localIP);
+    } else {
+      Serial.println("Static IP config failed; using DHCP");
+    }
   } else {
     Serial.println("Using DHCP");
   }
@@ -339,6 +432,7 @@ bool connectWifi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Connected! IP: ");
     Serial.println(WiFi.localIP());
+    printConnectedNetworkData();
     setConnectionIndicator(true);
     return true;
   }
@@ -859,7 +953,7 @@ void handleScreenCycle() {
   switch (infoScreenIndex) {
     case 0:
       displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), wifiConnected,
-                        wifiConnected ? WiFi.RSSI() : 0);
+                        wifiConnected ? WiFi.RSSI() : 0, activeStaticIP);
       break;
     case 1:
       displayStatus(outputs, currentFps, outputActive);
@@ -991,12 +1085,14 @@ void setup() {
 
   loadStoredNetworkConfig();
 
+  printStartupConnectionData();
+
   // Set the TFT header to the custom name (or firmware default)
   setDisplayName(hasCustomName ? customShortName : DEVICE_SHORT_NAME);
 
   wifiConnected = connectWifi();
   if (wifiConnected) {
-    displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), true, WiFi.RSSI());
+    displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), true, WiFi.RSSI(), activeStaticIP);
   } else {
     displayError("WiFi Fail", "Could not connect. Retrying...");
   }

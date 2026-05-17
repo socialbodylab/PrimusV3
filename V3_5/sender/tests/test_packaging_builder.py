@@ -193,7 +193,7 @@ class PackagingBuilderTests(unittest.TestCase):
 
         self.assertEqual(calls[0][:3], ["xcrun", "stapler", "staple"])
         self.assertEqual(calls[1][:3], ["xcrun", "stapler", "validate"])
-        self.assertEqual(calls[2][:4], ["spctl", "-a", "-vvv", "-t"])
+        self.assertEqual(calls[2], ["spctl", "-a", "-vvv", "--type", "exec", "dist/macos/PrimusCentral.app"])
 
 
 if __name__ == "__main__":

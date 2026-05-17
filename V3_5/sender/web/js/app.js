@@ -377,6 +377,13 @@ document.addEventListener("alpine:init", () => {
             }
             this.showNotice('Preview target: ' + this.mixerPreviewTarget.label, 'info', 2000);
         },
+
+        requestLookPreviewFromHello(di) {
+            if (this.mode !== 'mixer') return;
+            document.dispatchEvent(new CustomEvent('primus:hello-preview', {
+                detail: { device: di },
+            }));
+        },
     });
 
     // --- Connection store: device management ---
@@ -571,6 +578,7 @@ document.addEventListener("alpine:init", () => {
         async helloDevice(di) {
             try {
                 await api("POST", "/api/hello_device", { device: di });
+                Alpine.store("app").requestLookPreviewFromHello(di);
             } catch (e) {
                 Alpine.store("app").showApiError('Hello failed', e);
             }

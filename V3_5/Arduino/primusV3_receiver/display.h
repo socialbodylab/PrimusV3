@@ -98,7 +98,8 @@ void displayStartup() {
 // =====================================================================
 //  Connection Screen  (main home screen)
 // =====================================================================
-void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi) {
+void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi,
+                       bool staticIPActive = false) {
   currentScreen = SCREEN_CONNECTION;
   tft.fillScreen(ST77XX_BLACK);
 
@@ -114,8 +115,8 @@ void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi)
   tft.setCursor(4, 40);
   tft.setTextSize(1);
   if (connected) {
-    tft.setTextColor(ST77XX_GREEN);
-    tft.print("WiFi OK");
+    tft.setTextColor(ST77XX_RED);
+    tft.print(staticIPActive ? "WiFi STATIC" : "WiFi DHCP");
     tft.setTextColor(0x7BEF);
     tft.print("  RSSI:");
     if (rssi > -50)      tft.setTextColor(ST77XX_GREEN);
@@ -376,9 +377,14 @@ void displayStartup() {
   Serial.println(BOARD_PROFILE_LABEL);
 }
 
-void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi) {
+void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi,
+                       bool staticIPActive = false) {
   Serial.print("Display status: ");
-  Serial.print(connected ? "WiFi OK " : "No WiFi ");
+  if (connected) {
+    Serial.print(staticIPActive ? "WiFi STATIC " : "WiFi DHCP ");
+  } else {
+    Serial.print("No WiFi ");
+  }
   Serial.print(ssid);
   Serial.print(" ");
   Serial.print(ip);

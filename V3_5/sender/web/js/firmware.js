@@ -2,9 +2,9 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("firmwareUploader", () => ({
         profile: "v3",
         profiles: [
-            { id: "v1", label: "V1", detail: "Huzzah32" },
-            { id: "v2", label: "V2", detail: "ESP32 Feather" },
-            { id: "v3", label: "V3", detail: "Reverse TFT" },
+            { id: "v1", label: "V1", detail: "2022 Original RUR performance. Device Types A/B/C/D/E" },
+            { id: "v2", label: "V2", detail: "2025 Make Magazine Device" },
+            { id: "v3", label: "V3", detail: "2026 Custom PCB Device" },
         ],
         available: false,
         availabilityMessage: "Checking firmware tools...",
@@ -209,6 +209,10 @@ document.addEventListener("alpine:init", () => {
 
         profileDetail() {
             return this.profiles.find(item => item.id === this.profile)?.detail || "Receiver";
+        },
+
+        profileLabel() {
+            return this.profiles.find(item => item.id === this.profile)?.label || "Receiver";
         },
 
         selectPort(port) {

@@ -144,13 +144,13 @@ Rules:
 
 V1 and V2 need an on-board WiFi connection indicator because they do not have a TFT.
 
-| Profile | Indicator | Connected state | Disconnected state |
-| --- | --- | --- | --- |
-| `v1` | `LED_BUILTIN` | On | Off |
-| `v2` | Onboard NeoPixel on GPIO0, power GPIO2 | Green | Off |
-| `v3` | TFT display | `WiFi OK` screen text | `No WiFi` / error screen |
+| Profile | Indicator | Connected static state | Connected DHCP state | Disconnected state |
+| --- | --- | --- | --- | --- |
+| `v1` | `LED_BUILTIN` | Solid on | Blink on/off | Off |
+| `v2` | Onboard NeoPixel on GPIO0, power GPIO2 | Solid red | Blinking red | Off |
+| `v3` | TFT display | `WiFi STATIC` screen text, static IP in serial/debug data | `WiFi DHCP` screen text, DHCP in serial/debug data | `No WiFi` / error screen |
 
-The indicator should reflect `WiFi.status() == WL_CONNECTED`. Keep sender activity, FPS, and Art-Net receive state separate from this simple board-level connection signal.
+The indicator should reflect `WiFi.status() == WL_CONNECTED` plus whether static IP settings were successfully applied for the current WiFi attempt. Keep sender activity, FPS, and Art-Net receive state separate from this simple board-level connection signal. At startup, all profiles print the target SSID, password, selected device name, IP mode, static IP data when present, output configuration, and connected network details to `Serial` for field debugging; the firmware never waits for Serial to be attached.
 
 ## Output Type Table
 

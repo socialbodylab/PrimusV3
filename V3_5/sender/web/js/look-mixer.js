@@ -225,6 +225,7 @@ document.addEventListener("alpine:init", () => {
                     this.syncPreviewStateWithPlayback();
                 }
             });
+            document.addEventListener('primus:hello-preview', () => this.enablePreviewFromHello());
             document.addEventListener('keydown', (e) => {
                 if (Alpine.store('app').mode !== 'mixer') return;
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -974,6 +975,13 @@ document.addEventListener("alpine:init", () => {
                 this.previewing = true;
                 this._sendPreview();
             }
+        },
+
+        enablePreviewFromHello() {
+            if (Alpine.store("app").mode !== "mixer") return;
+            if (this.subMode !== "timeline" || this.timelinePreviewLive || !this.look) return;
+            this.previewing = true;
+            this._sendPreview();
         },
 
         async stopPreview() {
