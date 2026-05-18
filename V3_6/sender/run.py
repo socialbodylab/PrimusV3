@@ -21,7 +21,7 @@ import time
 import webbrowser
 
 from artnet import FpsListener
-from state import ControllerState, OUTPUT_TYPES, animation_loop
+from state import ControllerState, OUTPUT_TYPES, animation_loop, set_current_thread_qos
 from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
@@ -36,6 +36,7 @@ DEDICATED_BROWSER_PID_FILE = "browser.pid"
 UI_CLOSE_GRACE_SECONDS = 2.0
 UI_HEARTBEAT_TIMEOUT_SECONDS = 45.0
 UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
+_MACOS_ACTIVITY_TOKEN = None
 
 
 def _handle_sigterm(signum, frame):
@@ -53,6 +54,29 @@ def _configure_app_logging():
     sys.stderr = log_file
     print()
     print(f"PrimusCentral started {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
+def _begin_macos_low_latency_activity():
+    """Ask macOS not to throttle PrimusCentral's live-output timers."""
+    if sys.platform != "darwin":
+        return None
+    if os.environ.get("PRIMUSV3_DISABLE_MACOS_ACTIVITY") == "1":
+        return None
+    try:
+        caffeinate = shutil.which("caffeinate") or "/usr/bin/caffeinate"
+        if not os.path.exists(caffeinate):
+            return None
+        process = subprocess.Popen(
+            [caffeinate, "-dimsu", "-w", str(os.getpid())],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print("macOS caffeinate activity enabled.")
+        return process
+    except Exception as exc:
+        print(f"macOS low-latency activity unavailable: {exc}")
+        return None
 
 
 def _kill_existing():
@@ -384,6 +408,8 @@ def _mixer_controller_loop(state, cue_list):
       - Auto-follow cue advancement
     """
     import time
+    if set_current_thread_qos():
+        state.performance.increment("mixer_controller_thread_qos_enabled")
     # Caches persist across frames for performance and stateful effects.
     # Separate state caches for current/prev looks to avoid collision.
     _look_cache = {}          # look_id -> look dict
@@ -394,16 +420,24 @@ def _mixer_controller_loop(state, cue_list):
     _current_look_id = None
     _prev_look_id = None
     _prev_elapsed_base = 0.0  # elapsed offset for outgoing look continuity
+    _idle_override_cleared = False
+
+    def record_loop(start):
+        state.performance.observe(
+            "mixer_controller_loop_ms", (time.perf_counter() - start) * 1000.0)
 
     while state.running:
+        loop_start = time.perf_counter()
         # Mixer preview takes priority over controller
         preview_look, preview_elapsed = state.get_mixer_preview()
         if preview_look:
+            _idle_override_cleared = False
             pixels = compute_look_frame(preview_look, preview_elapsed,
                                         fps=state.fps,
                                         clip_cache=_clip_cache,
                                         state_cache=_state_cache_cur)
             state.set_override_pixels(pixels)
+            record_loop(loop_start)
             time.sleep(1.0 / max(1, state.fps))
             continue
 
@@ -416,14 +450,20 @@ def _mixer_controller_loop(state, cue_list):
             # branch.  Without this, a race between stop_mixer_preview()
             # and the loop above can leave one stale frame in
             # _override_pixels permanently.
-            state.set_override_pixels(None)
+            if not _idle_override_cleared:
+                state.clear_override_pixels_if_present()
+                _idle_override_cleared = True
             if _current_look_id is not None:
                 _current_look_id = None
                 _prev_look_id = None
                 _state_cache_cur.clear()
                 _state_cache_prev.clear()
-            time.sleep(1.0 / max(1, state.fps))
+            state.performance.increment("mixer_controller_idle_waits")
+            record_loop(loop_start)
+            state.wait_for_render_work(timeout=0.25)
             continue
+
+        _idle_override_cleared = False
 
         # Check auto-follow timer
         cue_list.check_auto_follow(device_groups=state.get_device_groups())
@@ -470,6 +510,7 @@ def _mixer_controller_loop(state, cue_list):
                     for ip in entry_ips:
                         frames_by_ip[ip] = payload
             state.set_override_frames_by_device(frames_by_ip, default_frames)
+            record_loop(loop_start)
             time.sleep(1.0 / max(1, state.fps))
             continue
 
@@ -545,10 +586,12 @@ def _mixer_controller_loop(state, cue_list):
                 state.set_override_pixels(state.build_black_frame(), device_ips=device_ips)
             else:
                 state.set_override_pixels(None)
+        record_loop(loop_start)
         time.sleep(1.0 / max(1, state.fps))
 
 
 def main():
+    global _MACOS_ACTIVITY_TOKEN
     parser = argparse.ArgumentParser(
         description="PrimusV3.6 LED Controller")
     parser.add_argument("--port", type=int, default=DEFAULT_HTTP_PORT,
@@ -560,6 +603,7 @@ def main():
     signal.signal(signal.SIGTERM, _handle_sigterm)
     ensure_runtime_data()
     _configure_app_logging()
+    _MACOS_ACTIVITY_TOKEN = _begin_macos_low_latency_activity()
     _kill_existing()
 
     fps_listener = FpsListener()

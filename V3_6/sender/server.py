@@ -77,6 +77,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             self._json_response(self.controller_state.get_json())
             return
+        if path == "/api/performance":
+            self._json_response(self.controller_state.get_performance_json())
+            return
         if path == "/api/network/status":
             self._json_response(get_network_status())
             return
@@ -221,8 +224,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
         elif path == "/api/connect_all":
-            self._sync_artnet_source()
-            results = self.controller_state.connect_all()
+            known_ips = self.controller_state.discovery_targets()
+            interface = self._sync_artnet_source()
+            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+            if nodes:
+                self.controller_state.refresh_devices_from_nodes(nodes)
+            online_ips = {node.get("ip") for node in nodes if node.get("ip")}
+            results = self.controller_state.connect_all(only_ips=online_ips if online_ips else None)
             failed = [r for r in results if not r.get("ok")]
             if failed:
                 self._json_error(503, failed[0].get("error", "connect failed"))

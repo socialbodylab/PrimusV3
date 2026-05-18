@@ -4,6 +4,7 @@ state.py — Output type tables, controller state, animation tick, persistence.
 
 import json
 import os
+import sys
 import threading
 import time
 
@@ -77,6 +78,8 @@ DEFAULT_EFFECT = "pulse"
 DEFAULT_SPEED = 1.0
 DEFAULT_BRIGHTNESS = 1.0
 DEFAULT_PLAYBACK = "loop"
+LOW_LATENCY_SLEEP_SLICE = 0.004
+LOW_LATENCY_SPIN_SECONDS = 0.001
 
 DEFAULT_GRID_START_COLOR = [255, 0, 255]
 DEFAULT_GRID_END_COLOR = [0, 255, 255]
@@ -93,6 +96,112 @@ DEFAULT_TEMPLATE = [
     {"name": "A0", "type": "short_strip"},
     {"name": "A1", "type": "long_strip"},
 ]
+
+
+class PerformanceStats:
+    """Small rolling timing summary for live sender diagnostics."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.started_at = time.monotonic()
+        self.samples = {}
+        self.counters = {}
+
+    def observe(self, name, value):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return
+        with self.lock:
+            self._observe_unlocked(name, numeric)
+
+    def observe_many(self, observations):
+        values = []
+        for name, value in observations:
+            try:
+                values.append((name, float(value)))
+            except (TypeError, ValueError):
+                continue
+        if not values:
+            return
+        with self.lock:
+            for name, numeric in values:
+                self._observe_unlocked(name, numeric)
+
+    def _observe_unlocked(self, name, numeric):
+        sample = self.samples.setdefault(name, {
+            "count": 0,
+            "last": 0.0,
+            "avg": 0.0,
+            "max": 0.0,
+        })
+        sample["count"] += 1
+        count = sample["count"]
+        sample["last"] = numeric
+        sample["avg"] += (numeric - sample["avg"]) / count
+        if numeric > sample["max"]:
+            sample["max"] = numeric
+
+    def increment(self, name, amount=1):
+        with self.lock:
+            self.counters[name] = self.counters.get(name, 0) + amount
+
+    def snapshot(self):
+        with self.lock:
+            uptime_seconds = max(time.monotonic() - self.started_at, 0.001)
+            return {
+                "uptime_seconds": round(uptime_seconds, 3),
+                "samples": {
+                    name: {
+                        "count": sample["count"],
+                        "last": round(sample["last"], 3),
+                        "avg": round(sample["avg"], 3),
+                        "max": round(sample["max"], 3),
+                    }
+                    for name, sample in self.samples.items()
+                },
+                "counters": dict(self.counters),
+                "rates_per_second": {
+                    name: round(value / uptime_seconds, 3)
+                    for name, value in self.counters.items()
+                },
+            }
+
+
+def set_current_thread_qos():
+    """Raise the current macOS thread's scheduler class for frame timing."""
+    if sys.platform != "darwin":
+        return False
+    if os.environ.get("PRIMUSV3_DISABLE_THREAD_QOS") == "1":
+        return False
+    try:
+        import ctypes
+        libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        set_qos = libsystem.pthread_set_qos_class_self_np
+        set_qos.argtypes = [ctypes.c_int, ctypes.c_int]
+        set_qos.restype = ctypes.c_int
+        qos_class_user_interactive = 0x21
+        return set_qos(qos_class_user_interactive, 0) == 0
+    except Exception:
+        return False
+
+
+def _sleep_until_frame(deadline):
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        if remaining > LOW_LATENCY_SPIN_SECONDS:
+            sleep_for = min(
+                LOW_LATENCY_SLEEP_SLICE,
+                max(remaining - LOW_LATENCY_SPIN_SECONDS, 0.0),
+            )
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+                continue
+        while time.monotonic() < deadline:
+            pass
+        return
 
 # ======================================================================
 #  PERSISTENCE
@@ -375,6 +484,8 @@ class ControllerState:
 
     def __init__(self, fps_listener):
         self.lock = threading.Lock()
+        self.render_event = threading.Event()
+        self.performance = PerformanceStats()
         self.running = True
         self.fps = DEFAULT_FPS
         self.fps_listener = fps_listener
@@ -648,7 +759,9 @@ class ControllerState:
     # ------------------------------------------------------------------
 
     def get_json(self):
+        lock_start = time.perf_counter()
         with self.lock:
+            lock_acquired = time.perf_counter()
             look = {
                 "name": self.active_look["name"],
                 "outputs": [],
@@ -715,7 +828,12 @@ class ControllerState:
                         "grid_rotation": o["grid_rotation"],
                     })
                 out["devices"].append(d)
-            return out
+        lock_released = time.perf_counter()
+        self.performance.observe_many((
+            ("api_state_lock_wait_ms", (lock_acquired - lock_start) * 1000.0),
+            ("api_state_lock_held_ms", (lock_released - lock_acquired) * 1000.0),
+        ))
+        return out
 
     # ------------------------------------------------------------------
     #  Update from API
@@ -1129,12 +1247,26 @@ class ControllerState:
             _save_devices(self.devices)
             return {"ok": True}
 
-    def connect_all(self):
+    def connect_all(self, only_ips=None):
         results = []
+        only_ips = set(only_ips) if only_ips is not None else None
         with self.lock:
             for idx, dev in enumerate(self.devices):
+                if only_ips is not None and dev.get("ip") not in only_ips:
+                    results.append({
+                        "device_index": idx,
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "not discovered",
+                        "error": None,
+                    })
+                    continue
                 ok = self._ensure_sender_connected_unlocked(dev)
-                ok = self._send_output_config(dev) if ok else False
+                if ok:
+                    caps = _normalize_device_capabilities(dev.get("capabilities"))
+                    config_ok = self._send_output_config(dev)
+                    if caps.get("output_config"):
+                        ok = config_ok
                 results.append({
                     "device_index": idx,
                     "ok": ok,
@@ -1226,6 +1358,17 @@ class ControllerState:
             self._override_default_frames = None
             self._controller_device_ips = device_ips
 
+    def clear_override_pixels_if_present(self):
+        """Clear override buffers once when returning to designer/idle output."""
+        with self.lock:
+            if (self._override_pixels is None
+                    and self._override_frames_by_device is None
+                    and self._override_default_frames is None
+                    and self._controller_device_ips is None):
+                return False
+            self._clear_override_unlocked()
+            return True
+
     def set_override_frames_by_device(self, frames_by_ip=None, default_frames=None):
         """Set per-device controller frames.
 
@@ -1275,6 +1418,7 @@ class ControllerState:
             self._override_pixels = None
 
         self.playback_source = source
+        self.render_event.set()
 
     def start_mixer_preview(self, look, device_filter=None,
                             play_time=0.0, playing=False,
@@ -1362,15 +1506,26 @@ class ControllerState:
                 return self._mixer_preview_look, t
             return None, 0.0
 
+    def wait_for_render_work(self, timeout=0.25):
+        """Wait until mixer/controller work changes or timeout expires."""
+        self.render_event.wait(timeout)
+        self.render_event.clear()
+
+    def get_performance_json(self):
+        return self.performance.snapshot()
+
     # ------------------------------------------------------------------
     #  Animation tick
     # ------------------------------------------------------------------
 
     def tick(self):
+        tick_start = time.perf_counter()
         now = time.monotonic()
         send_queue = []
 
+        lock_start = time.perf_counter()
         with self.lock:
+            lock_acquired = time.perf_counter()
             t = now - self.start_time
             dt = max(now - self.last_tick, 0.001)
             self.last_tick = now
@@ -1483,14 +1638,25 @@ class ControllerState:
                     for r, g, b in send_pixels:
                         buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
                     send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
+        lock_released = time.perf_counter()
 
         failed_indices = set()
         successful_indices = set()
+        send_start = time.perf_counter()
         for di, sender, universe, data in send_queue:
+            one_send_start = time.perf_counter()
             if sender.send_output(universe, data):
                 successful_indices.add(di)
             else:
                 failed_indices.add(di)
+            self.performance.observe(
+                "artnet_send_ms",
+                (time.perf_counter() - one_send_start) * 1000.0,
+            )
+        send_finished = time.perf_counter()
+        if send_queue:
+            self.performance.increment("artnet_packets", len(send_queue))
+            self.performance.increment("artnet_frames_with_packets")
         seen = set()
         for _, sender, _, _ in send_queue:
             sid = id(sender)
@@ -1507,6 +1673,13 @@ class ControllerState:
                 for di in successful_indices - failed_indices:
                     if 0 <= di < len(self.devices):
                         self._clear_transport_error_unlocked(self.devices[di])
+        self.performance.observe_many((
+            ("tick_lock_wait_ms", (lock_acquired - lock_start) * 1000.0),
+            ("tick_lock_held_ms", (lock_released - lock_acquired) * 1000.0),
+            ("tick_send_batch_ms", (send_finished - send_start) * 1000.0),
+            ("tick_send_packets", len(send_queue)),
+            ("tick_total_ms", (time.perf_counter() - tick_start) * 1000.0),
+        ))
 
     def shutdown(self):
         self.running = False
@@ -1522,12 +1695,28 @@ class ControllerState:
 # ======================================================================
 
 def animation_loop(state):
+    if set_current_thread_qos():
+        state.performance.increment("animation_thread_qos_enabled")
     next_frame = time.monotonic()
     while state.running:
+        frame_start = time.perf_counter()
         state.tick()
+        state.performance.increment("animation_frames")
+        state.performance.observe(
+            "animation_tick_ms", (time.perf_counter() - frame_start) * 1000.0)
         next_frame += 1.0 / max(1, state.fps)
         sleep_time = next_frame - time.monotonic()
         if sleep_time > 0:
-            time.sleep(sleep_time)
+            requested_sleep = sleep_time
+            _sleep_until_frame(next_frame)
+            state.performance.observe(
+                "animation_sleep_latency_ms",
+                max(0.0, time.monotonic() - next_frame) * 1000.0,
+            )
+            state.performance.observe(
+                "animation_sleep_requested_ms",
+                requested_sleep * 1000.0,
+            )
         else:
+            state.performance.increment("animation_frame_overruns")
             next_frame = time.monotonic()

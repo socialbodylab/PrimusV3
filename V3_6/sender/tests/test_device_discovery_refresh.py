@@ -209,6 +209,35 @@ class DeviceDiscoveryRefreshTests(unittest.TestCase):
         self.assertTrue(dev["capabilities"]["hello"])
         save_devices.assert_called_once()
 
+    def test_connect_all_can_skip_not_discovered_saved_devices(self):
+        state = ControllerState(None)
+        self.addCleanup(state.shutdown)
+        state.add_device_from_node({
+            "ip": "127.0.0.1",
+            "short_name": "OnlineNode",
+            "long_name": "",
+            "num_ports": 0,
+            "universes": [0, 1],
+        }, auto_save=False)
+        state.add_device_from_node({
+            "ip": "127.0.0.2",
+            "short_name": "StaleNode",
+            "long_name": "",
+            "num_ports": 0,
+            "universes": [0, 1],
+        }, auto_save=False)
+
+        results = state.connect_all(only_ips={"127.0.0.1"})
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue(results[0]["ok"])
+        self.assertNotIn("skipped", results[0])
+        self.assertTrue(state.devices[0]["connected"])
+        self.assertTrue(results[1]["ok"])
+        self.assertTrue(results[1]["skipped"])
+        self.assertEqual(results[1]["reason"], "not discovered")
+        self.assertFalse(state.devices[1]["connected"])
+
 
 if __name__ == "__main__":
     unittest.main()
