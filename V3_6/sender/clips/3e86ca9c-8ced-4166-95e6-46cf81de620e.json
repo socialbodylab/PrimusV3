@@ -1,0 +1,25 @@
+{
+  "id": "3e86ca9c-8ced-4166-95e6-46cf81de620e",
+  "name": "Red Solid",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "solid",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    0,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.284947+00:00",
+  "modified": "2026-04-08T13:57:40.284983+00:00"
+}

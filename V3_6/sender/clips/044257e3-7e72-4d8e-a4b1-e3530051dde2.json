@@ -1,0 +1,25 @@
+{
+  "id": "044257e3-7e72-4d8e-a4b1-e3530051dde2",
+  "name": "Reverse Rainbow",
+  "group": "Reverse Rainbow",
+  "output_type": "long_strip",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    255
+  ],
+  "end_color": [
+    0,
+    255,
+    255
+  ],
+  "speed": 1.5,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.682747+00:00",
+  "modified": "2026-04-08T18:59:58.682765+00:00"
+}

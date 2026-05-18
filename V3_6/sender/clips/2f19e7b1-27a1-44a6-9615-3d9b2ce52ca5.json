@@ -1,0 +1,25 @@
+{
+  "id": "2f19e7b1-27a1-44a6-9615-3d9b2ce52ca5",
+  "name": "Radial Boomerang",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "radial",
+  "start_color": [
+    255,
+    200,
+    0
+  ],
+  "end_color": [
+    180,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.303090+00:00",
+  "modified": "2026-04-08T13:57:40.303132+00:00"
+}

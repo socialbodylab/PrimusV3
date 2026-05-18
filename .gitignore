@@ -12,11 +12,14 @@ __pycache__/
 # Primus sender runtime state
 V3_1/sender/.primus_state.json
 V3_5/sender/.primus_state.json
+V3_6/sender/.primus_state.json
 sender/.primus_state.json
 
 # Packaging outputs
 V3_5/build/
 V3_5/dist/
+V3_6/build/
+V3_6/dist/
 
 # Local Apple signing material
 *.certSigningRequest

@@ -1,0 +1,25 @@
+{
+  "id": "0bd63452-b494-4301-a571-953ac8220109",
+  "name": "Party Confetti",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    255,
+    0,
+    200
+  ],
+  "end_color": [
+    0,
+    255,
+    100
+  ],
+  "speed": 3.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 3.0,
+  "created": "2026-04-08T15:30:31.478008+00:00",
+  "modified": "2026-04-08T15:30:31.478019+00:00"
+}

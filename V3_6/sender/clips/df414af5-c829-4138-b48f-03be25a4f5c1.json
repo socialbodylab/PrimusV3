@@ -1,0 +1,25 @@
+{
+  "id": "df414af5-c829-4138-b48f-03be25a4f5c1",
+  "name": "Fast Spiral Flash",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "spiral",
+  "start_color": [
+    0,
+    255,
+    200
+  ],
+  "end_color": [
+    255,
+    0,
+    100
+  ],
+  "speed": 3.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 2.0,
+  "created": "2026-04-08T13:57:40.304336+00:00",
+  "modified": "2026-04-08T13:57:40.304370+00:00"
+}

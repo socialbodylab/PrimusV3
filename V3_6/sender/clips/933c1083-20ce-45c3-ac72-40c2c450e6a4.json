@@ -1,0 +1,25 @@
+{
+  "id": "933c1083-20ce-45c3-ac72-40c2c450e6a4",
+  "name": "Center Spark Chase",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    255,
+    255
+  ],
+  "speed": 1.4,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "center",
+  "duration": 3.2,
+  "created": "2026-05-08T22:02:11.849231+00:00",
+  "modified": "2026-05-08T22:02:11.849245+00:00"
+}
