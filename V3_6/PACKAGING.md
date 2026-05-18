@@ -208,6 +208,19 @@ spctl -a -vvv --type exec V3_6/dist/macos/PrimusCentral.app
 5. Connect a node and test Hello, Rename, and live preview.
 6. Save a clip/look, quit, relaunch, and confirm data persists.
 
+For macOS performance validation, launch through the app bundle with Finder or
+LaunchServices. Do not use `Contents/MacOS/PrimusCentral` as the primary FPS
+test path; it bypasses the app-bundle scheduling behavior that can affect live
+output timing. For repeatable local testing with a known port, use:
+
+```bash
+open -n V3_6/dist/macos/PrimusCentral.app --args --port 8097
+```
+
+The packaged sender enables a `caffeinate` process assertion, user-interactive
+QoS on the animation/render threads, and low-latency frame pacing so macOS app
+launches maintain the target live-output FPS.
+
 ## Distribution Notes
 
 Unsigned builds are suitable for local testing. Shared macOS releases should be Developer ID signed, notarized, and stapled. Windows distribution may require code signing to reduce SmartScreen warnings.
