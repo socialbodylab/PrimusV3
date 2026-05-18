@@ -651,6 +651,15 @@
         <!-- Clip palette by output type -->
         <div class="timeline-clip-library" x-show="look">
             <h3 class="form-label mb-2">Add Clips to Look</h3>
+            <div class="search-bar">
+                <input class="form-input"
+                       :placeholder="timelineSearchPlaceholder()"
+                       x-model="timelineSearch"
+                       :disabled="selectedTimelineType() === 'none'">
+                <button class="btn btn-sm"
+                        x-show="timelineSearch"
+                        @click="timelineSearch = ''">Clear</button>
+            </div>
             <template x-for="group in timelineClipGroups()" :key="'palette-' + group.type">
                 <div class="clip-type-group" :class="{ active: group.trackIndices.includes(selectedTrackIdx) }">
                     <div class="clip-type-group-header">
@@ -658,7 +667,7 @@
                         <span class="text-sm text-muted" x-text="group.ports.join(', ')"></span>
                     </div>
                     <div class="flex gap-2 mt-2" style="flex-wrap:wrap">
-                        <template x-for="clip in clipsForType(group.type)" :key="clip.id">
+                        <template x-for="clip in timelineClipsForType(group.type)" :key="clip.id">
                             <div class="clip-palette-btn"
                                     draggable="true"
                                     @dragstart="onClipDragStart($event, clip, selectedTrackForType(group.type))"
@@ -681,8 +690,8 @@
                             </div>
                         </template>
                         <span class="text-sm text-muted"
-                              x-show="clipsForType(group.type).length === 0">
-                            No clips for this output type. Switch to Clips to create some.
+                              x-show="timelineClipsForType(group.type).length === 0"
+                              x-text="timelineClipEmptyMessage(group)">
                         </span>
                     </div>
                 </div>

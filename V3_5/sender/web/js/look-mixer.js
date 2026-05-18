@@ -13,6 +13,7 @@ document.addEventListener("alpine:init", () => {
         // ── Timeline state ──
         look: null,
         clips: [],
+        allClips: [],
         playing: false,
         playTime: 0,
         transportTime: 0,
@@ -25,6 +26,7 @@ document.addEventListener("alpine:init", () => {
         savedLooks: [],
         pixelsPerSecond: 80,
         selectedTrackIdx: 0,
+        timelineSearch: "",
         selectedSegmentTrack: -1,
         selectedSegmentIdx: -1,
         editModal: false,
@@ -269,7 +271,8 @@ document.addEventListener("alpine:init", () => {
 
         // ── Clip loading (shared by timeline palette + designer library) ──
         async loadClips() {
-            this.clips = await api("GET", "/api/clips");
+            this.allClips = await api("GET", "/api/clips");
+            this.clips = this.allClips;
         },
 
         // ══════════════════════════════════════════════════
@@ -654,6 +657,9 @@ document.addEventListener("alpine:init", () => {
             });
             const groups = Array.from(byType.values());
             const selectedType = outputs[this.selectedTrackIdx]?.type;
+            if (this.timelineSearch.trim()) {
+                return groups.filter(group => group.type === selectedType);
+            }
             if (selectedType && selectedType !== "none") {
                 groups.sort((a, b) => {
                     if (a.type === selectedType && b.type !== selectedType) return -1;
@@ -1304,9 +1310,35 @@ document.addEventListener("alpine:init", () => {
             return this.clipsForType(otype);
         },
 
+        selectedTimelineType() {
+            return this.look?.outputs?.[this.selectedTrackIdx]?.type || "none";
+        },
+
+        timelineSearchPlaceholder() {
+            const type = this.selectedTimelineType();
+            if (!type || type === "none") return "Choose an output type to search clips...";
+            return "Search " + this.typeLabel(type) + " clips...";
+        },
+
+        timelineClipsForType(type) {
+            if (!type || type === "none") return [];
+            const query = this.timelineSearch.trim().toLowerCase();
+            const clips = this.clipsForType(type);
+            if (!query) return clips;
+            if (type !== this.selectedTimelineType()) return [];
+            return clips.filter(clip => (clip.name || "").toLowerCase().includes(query));
+        },
+
+        timelineClipEmptyMessage(group) {
+            if (this.timelineSearch.trim() && group.type === this.selectedTimelineType()) {
+                return "No matching clips.";
+            }
+            return "No clips for this output type. Switch to Clips to create some.";
+        },
+
         clipsForType(type) {
             if (!type || type === "none") return [];
-            return this.clips.filter(c => c.output_type === type);
+            return this.allClips.filter(c => c.output_type === type);
         },
 
         // ── Look Save/Load ──
