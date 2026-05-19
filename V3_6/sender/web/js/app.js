@@ -26,6 +26,43 @@ function api(method, path, body) {
     });
 }
 
+const PRIMUS_UI_PROFILES = {
+    workshop: {
+        name: "Workshop",
+        outputTypes: ["none", "small_grid", "short_strip", "extra_long_strip"],
+        defaultOutputs: ["small_grid", "short_strip"],
+        outputTypeLabels: {
+            none: "None",
+            small_grid: "Badge",
+            short_strip: "Collar",
+            extra_long_strip: "Belt",
+        },
+    },
+    full: {
+        name: "Full",
+        outputTypes: null,
+        defaultOutputs: ["short_strip", "long_strip"],
+        outputTypeLabels: {},
+    },
+};
+
+function initialUiProfileKey() {
+    const fallback = "workshop";
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const requested = (params.get("ui") || params.get("profile") || "").toLowerCase();
+        if (PRIMUS_UI_PROFILES[requested]) {
+            window.localStorage.setItem("primusUiProfile", requested);
+            return requested;
+        }
+        const stored = (window.localStorage.getItem("primusUiProfile") || "").toLowerCase();
+        if (PRIMUS_UI_PROFILES[stored]) return stored;
+    } catch {
+        return fallback;
+    }
+    return fallback;
+}
+
 // ── Color utilities ─────────────────────────────────────
 function rgbToHex(c) {
     return "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
@@ -59,6 +96,45 @@ document.addEventListener("alpine:init", () => {
         _noticeTimer: null,
         runtime: null,
         _lifecycleHeartbeat: null,
+        uiProfileKey: initialUiProfileKey(),
+
+        get uiProfile() {
+            return PRIMUS_UI_PROFILES[this.uiProfileKey] || PRIMUS_UI_PROFILES.workshop;
+        },
+
+        get outputTypes() {
+            return this.visibleOutputTypes(this.state?.look_output_types || []);
+        },
+
+        visibleOutputTypes(types) {
+            const source = Array.isArray(types) ? types : [];
+            const allowed = this.uiProfile.outputTypes;
+            if (!Array.isArray(allowed)) return source;
+            return source.filter(type => allowed.includes(type));
+        },
+
+        isOutputTypeVisible(type) {
+            const allowed = this.uiProfile.outputTypes;
+            return !Array.isArray(allowed) || allowed.includes(type);
+        },
+
+        defaultOutputType(index, currentType = null) {
+            if (currentType && this.isOutputTypeVisible(currentType)) return currentType;
+            const preferred = this.uiProfile.defaultOutputs?.[index];
+            if (preferred && this.isOutputTypeVisible(preferred)) return preferred;
+            return this.outputTypes.find(type => type !== "none") || "none";
+        },
+
+        setUiProfile(key) {
+            if (!PRIMUS_UI_PROFILES[key]) return;
+            this.uiProfileKey = key;
+            try {
+                window.localStorage.setItem("primusUiProfile", key);
+            } catch { /* ignore */ }
+            document.dispatchEvent(new CustomEvent("primus:ui-profile-changed", {
+                detail: { profile: key },
+            }));
+        },
 
         get playback() {
             return this.state?.playback || {
@@ -86,6 +162,8 @@ document.addEventListener("alpine:init", () => {
         },
 
         outputTypeLabel(type) {
+            const profileLabel = this.uiProfile.outputTypeLabels?.[type];
+            if (profileLabel) return profileLabel;
             const labels = {
                 none: "None",
                 short_strip: "Short Strip",

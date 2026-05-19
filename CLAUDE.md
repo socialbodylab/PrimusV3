@@ -12,6 +12,8 @@ V3.6 adds sender-side Clip, Look, and Timeline segment brightness. Receiver LED 
 
 V3.6 also adds portable Clip and Look sharing bundles through `sharing.py`: `GET /api/clips/:id/export`, `GET /api/looks/:id/export`, and `POST /api/import_bundle`. Look imports remap Clip IDs and clear saved `device_ips` so shared files do not overwrite local content or target someone else's receiver IPs.
 
+The 0.7 workshop release defaults the browser UI to a workshop profile that hides some output choices and renames the workshop kit: `small_grid` = Badge, `short_strip` = Collar, `extra_long_strip` = Belt, `none` = None. This is UI-only; do not remove output types from sender state, API, or firmware. Full UI can be restored with `?ui=full` or `?profile=full`; return with `?ui=workshop` or `?profile=workshop`. The browser stores the choice in `localStorage` as `primusUiProfile`.
+
 ## Repository layout
 
 ### V3.6 Sender (`V3_6/sender/`)
@@ -169,6 +171,7 @@ Cumulative rates include startup/browser/restore time, so calculate steady-state
 
 - No external Python runtime dependencies in the sender.
 - V3.6 web UI is static files under `V3_6/sender/web/` (Alpine.js, no build step).
+- 0.7 workshop focus belongs in browser UI profiles, not firmware/protocol tables.
 - Keep output types table-driven on both sender and firmware sides.
 - Device-control UI is capability-aware: rename, hello, IP config, and output config are enabled from discovery capabilities, with legacy Primus fallback for older firmware.
 - Grid layout is always serpentine (even rows left-to-right, odd rows right-to-left).

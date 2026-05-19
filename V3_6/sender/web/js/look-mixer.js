@@ -62,7 +62,12 @@ document.addEventListener("alpine:init", () => {
         libLoading: false,
 
         get outputTypes() {
-            return Alpine.store("app").state?.look_output_types || [];
+            return Alpine.store("app").outputTypes;
+        },
+
+        visibleClips(clips) {
+            const app = Alpine.store("app");
+            return (clips || []).filter(clip => app.isOutputTypeVisible(clip.output_type));
         },
 
         get devices() {
@@ -353,7 +358,7 @@ document.addEventListener("alpine:init", () => {
                 ...clip,
                 brightness: this.normalizeBrightness(clip.brightness),
             }));
-            this.clips = this.allClips;
+            this.clips = this.visibleClips(this.allClips);
         },
 
         openImportFile() {
@@ -524,16 +529,20 @@ document.addEventListener("alpine:init", () => {
         async refreshLibrary() {
             this.libLoading = true;
             try {
+                if (this.libFilterType && !Alpine.store("app").isOutputTypeVisible(this.libFilterType)) {
+                    this.libFilterType = "";
+                }
                 let url = "/api/clips?sort=" + this.libSortBy;
                 if (this.libFilterType) url += "&type=" + this.libFilterType;
                 if (this.libSearch) url += "&search=" + encodeURIComponent(this.libSearch);
-                this.clips = await api("GET", url);
+                this.clips = this.visibleClips(await api("GET", url));
             } finally {
                 this.libLoading = false;
             }
         },
 
         setLibFilter(type) {
+            if (!Alpine.store("app").isOutputTypeVisible(type)) return;
             this.libFilterType = this.libFilterType === type ? "" : type;
             this.refreshLibrary();
         },
@@ -747,8 +756,8 @@ document.addEventListener("alpine:init", () => {
                 description: "",
                 device_ips: this.currentDeviceIps(),
                 outputs: [
-                    { port: "A0", type: backendOutputs[0]?.type || "short_strip" },
-                    { port: "A1", type: backendOutputs[1]?.type || "long_strip" },
+                    { port: "A0", type: Alpine.store("app").defaultOutputType(0, backendOutputs[0]?.type) },
+                    { port: "A1", type: Alpine.store("app").defaultOutputType(1, backendOutputs[1]?.type) },
                 ],
                 tracks: [
                     { port: "A0", segments: [] },
@@ -1501,7 +1510,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         clipsForType(type) {
-            if (!type || type === "none") return [];
+            if (!type || type === "none" || !Alpine.store("app").isOutputTypeVisible(type)) return [];
             return this.allClips.filter(c => c.output_type === type);
         },
 

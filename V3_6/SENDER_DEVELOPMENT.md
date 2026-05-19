@@ -193,6 +193,23 @@ Guidelines:
 - Display profile metadata from API state rather than inferring board generation from IP/name.
 - Keep the Firmware tab visually aligned with the mixer/controller panels and use local API jobs instead of invoking upload commands from browser code.
 
+### Workshop UI Profile
+
+The 0.7 workshop release defaults the browser UI to a focused workshop profile in `web/js/app.js`. This is a cosmetic filter only: the sender state, API, saved files, and firmware keep the full output type table.
+
+Workshop output names:
+
+| Sender type | Workshop label |
+| --- | --- |
+| `small_grid` | Badge |
+| `short_strip` | Collar |
+| `extra_long_strip` | Belt |
+| `none` | None |
+
+The workshop profile hides `long_strip` and `grid` from ordinary selectors and clip browsing. Full functionality can be restored in the browser with `?ui=full` or `?profile=full`; return to the workshop profile with `?ui=workshop` or `?profile=workshop`. The selected profile is stored in browser `localStorage` as `primusUiProfile`.
+
+Keep this as a UI profile unless the user explicitly asks for a protocol or firmware change.
+
 ## Adding Output Types
 
 1. Update firmware `config.h` enum and `OUTPUT_TYPE_TABLE[]`.
