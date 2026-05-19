@@ -1,6 +1,6 @@
 # PrimusV3 Art-Net API Reference
 
-This document describes the network API exposed by PrimusV3 LED receiver nodes and strategies for integrating them into common creative-coding and lighting-control environments. It reflects the current V3.5 protocol used by reflashed V1, V2, and V3.1 receiver hardware.
+This document describes the network API exposed by PrimusV3 LED receiver nodes and strategies for integrating them into common creative-coding and lighting-control environments. It reflects the current V3.6 protocol used by reflashed V1, V2, and V3.1 receiver hardware.
 
 ---
 
@@ -17,7 +17,7 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **Sender HTTP API** | TCP / HTTP JSON | 8080 or auto-selected | Browser/tool → Sender |
 | **OSC cue control** | UDP / OSC | 53001 default | Show-control tool → Sender |
 
-Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing is required to drive receiver nodes directly. The V3.5 sender also exposes a local HTTP JSON API for Primus Central and an inbound OSC listener for external cue triggers.
+Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing is required to drive receiver nodes directly. The V3.6 sender also exposes a local HTTP JSON API for Primus Central and an inbound OSC listener for external cue triggers.
 
 ---
 
@@ -52,7 +52,7 @@ Key fields in the 239-byte reply:
 | 10–13 | 4 | IP Address | Node's IPv4 address (4 bytes) |
 | 14–15 | 2 | Port | `0x1936` (6454, little-endian) |
 | 26–43 | 18 | Short Name | `"PrimusV3"` or custom name (null-terminated) |
-| 44–107 | 64 | Long Name | Human-readable summary, e.g. `"PrimusV3.5 LED Node \| A0:Short Strip A1:Long Strip"` |
+| 44–107 | 64 | Long Name | Human-readable summary, e.g. `"PrimusV3.6 LED Node \| A0:Short Strip A1:Long Strip"` |
 | 108–171 | 64 | Node Report | Status plus capability tag, e.g. `"#0001 [0482] OK\|PV3CAP1\|0:1:0\|1:2:1\|B:v31\|F:RIOH"` |
 | 172–173 | 2 | NumPorts | Number of active outputs (big-endian) |
 | 174–177 | 4 | PortTypes | `0xC0` per active port (DMX output) |
@@ -61,7 +61,7 @@ Key fields in the 239-byte reply:
 
 PrimusV3 sender discovery prefers the `PV3CAP1` capability tag in Node Report.
 Each output tuple is `port_index:type_id:universe`, where `type_id` matches the
-receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. V3.5 nodes
+receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. V3.6 nodes
 also append `B:<profile>` where profile is `v1`, `v2`, or `v31`, and `IP:D` or
 `IP:S` to report whether the receiver is currently using DHCP or saved static IP
 settings. Feature flags are appended as `F:<letters>`; current letters are `R`
@@ -72,7 +72,7 @@ still fall back to the human-readable Long Name parser, and older PrimusV3 nodes
 without feature flags are treated as legacy-compatible for rename/hello/IP/output-config
 control.
 
-Example current V3.5 reports:
+Example current V3.6 reports:
 
 ```text
 #0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|IP:D|F:RIOH
@@ -108,7 +108,7 @@ Each physical output maps to one Art-Net universe. Outputs can be dynamically re
 
 ### Default Universe Layout
 
-V3.5 receiver profiles expose two logical outputs per node. Each output maps to one Art-Net universe.
+V3.6 receiver profiles expose two logical outputs per node. Each output maps to one Art-Net universe.
 
 | Profile | Hardware | Output A0 / Universe 0 | Output A1 / Universe 1 |
 |--------|----------|--------------------------|--------------------------|
@@ -135,7 +135,7 @@ All data fits within the 512-byte Art-Net universe limit. One ArtDmx packet per 
 
 - **Color order:** RGB (3 bytes per pixel)
 - **Channel mapping:** Pixel 0 = bytes 0–2, Pixel 1 = bytes 3–5, etc.
-- **Brightness:** Controlled entirely by the RGB values you send. There is no separate brightness channel — send the exact colors you want.
+- **Brightness:** Controlled entirely by the RGB values you send. There is no receiver brightness channel or legacy V2 brightness byte. V3.6 Primus Central brightness controls scale RGB values in the sender before ArtDmx transport; direct Art-Net integrations should send the exact RGB values they want rendered.
 - **Padding:** Art-Net requires even-length data. If your byte count is odd, pad with one `0x00`.
 - **Grid pixel order:** Grids always use serpentine ordering — even rows left-to-right, odd rows right-to-left.
 
@@ -144,6 +144,7 @@ All data fits within the 512-byte Art-Net universe limit. One ArtDmx packet per 
 - The node renders data as fast as it arrives. For smooth animation, **30 FPS** is a good default. The hardware supports up to ~60+ FPS depending on strip length.
 - Packets for active output universes within a **5 ms window** are assembled into a single frame. If a universe is missing, the timeout fires and the frame renders with the most recent data for the other output.
 - The **sequence byte** (offset 12) should increment 1→255→1 with each frame. This lets the node detect and discard out-of-order packets.
+- Primus Central v0.65 is the packaged macOS sender FPS baseline. Validate packaged app timing through Finder or LaunchServices, not by directly executing `Contents/MacOS/PrimusCentral`. The sender exposes `/api/performance` for local timing diagnostics.
 
 ---
 
@@ -248,7 +249,7 @@ If no NVS keys are present at boot, the node uses DHCP (default behavior).
 
 ## 7. Effects Engine
 
-The sender provides a built-in effects engine (`V3_5/sender/effects.py` in the current compatibility track) with the following effects:
+The sender provides a built-in effects engine (`V3_6/sender/effects.py` in the current compatibility track) with the following effects:
 
 | Effect | Description | Extra Parameters |
 |--------|-------------|------------------|
@@ -270,19 +271,20 @@ The sender provides a built-in effects engine (`V3_5/sender/effects.py` in the c
 
 The effects engine uses a **Look** architecture. In **V3.0**, animation state is computed once per frame and sent identically to all connected devices, with 3 output slots matching the 3 physical outputs.
 
-In **V3.5**, this is extended with a clip/look workflow:
+In **V3.6**, this is extended with a clip/look workflow:
 - **Clips** are saved effect presets (effect type, colors, speed, playback mode) scoped to an output type.
 - **Looks** are timeline-based compositions of clips across multiple tracks, with per-segment timing and crossfades.
 - **Cues** are triggerable production steps. A cue contains one or more assignments, where each assignment triggers a Look against its own target set, or triggers a virtual blackout.
 - **Playback sources** determine what drives the outputs: `designer` (live effect editing), `mixer` (look preview), `controller` (cue list playback), or `idle` (black).
+- **Brightness** is sender-side RGB scaling. Clips store a normalized brightness value, Timeline segments can override it, and Looks apply a final master brightness after fades/crossfades.
 
-Each Look has two output slots matching the current V3.5 receiver profile contract. Each slot has its own type, effect, colors, speed, and parameters.
+Each Look has two output slots matching the current V3.6 receiver profile contract. Each slot has its own type, effect, colors, speed, brightness, and parameters.
 
 ---
 
-## 8. HTTP Control API (V3.5 Sender)
+## 8. HTTP Control API (V3.6 Sender)
 
-The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
+The V3.6 sender (`V3_6/sender/run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
 
 ### GET Endpoints
 
@@ -291,15 +293,64 @@ The V3.5 sender (`V3_5/sender/run.py`) serves a web UI and exposes a JSON API. A
 | `GET /` | HTML control interface (Alpine.js SPA) |
 | `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
+| `GET /api/performance` | Rolling sender timing diagnostics, counters, and per-second rates for FPS/debug validation |
 | `GET /api/network/status` | Sender host network interfaces, selected/recommended Art-Net route, saved Settings profiles, and show-router network summaries |
 | `GET /api/clips` | List all clips. Query params: `?type=short_strip`, `?search=fire`, `?sort=modified\|created\|name` |
 | `GET /api/clips/:id` | Load a single clip by ID |
+| `GET /api/clips/:id/export` | Download a portable Clip bundle JSON file |
 | `GET /api/looks` | List all saved looks |
 | `GET /api/looks/:id` | Load a single look by ID |
+| `GET /api/looks/:id/export` | Download a portable Look bundle JSON file, including referenced Clips when available |
 | `GET /api/cues` | Get cue list state (cues, current index, playing flag) |
 | `GET /api/integrations/osc` | OSC listener settings, bound endpoint, recent message history, examples, and per-cue trigger hints |
 | `GET /api/firmware/status` | Source-checkout firmware upload availability plus current/last job state |
 | `GET /api/firmware/jobs/:id` | Poll a firmware upload job, including redacted output and structured results |
+
+### Sender Performance Diagnostics
+
+`GET /api/performance` is local sender instrumentation for validating live-output timing, especially packaged macOS builds. It returns rolling sample summaries, counters, uptime, and cumulative rates:
+
+```json
+{
+  "uptime_seconds": 42.0,
+  "samples": {
+    "animation_tick_ms": {"count": 1200, "last": 1.2, "avg": 1.1, "max": 7.8},
+    "animation_sleep_latency_ms": {"count": 1200, "last": 0.2, "avg": 0.3, "max": 5.4},
+    "tick_send_packets": {"count": 1200, "last": 2.0, "avg": 2.0, "max": 2.0}
+  },
+  "counters": {"animation_frames": 1200, "artnet_packets": 2400},
+  "rates_per_second": {"animation_frames": 28.57, "artnet_packets": 57.14}
+}
+```
+
+Useful samples include `animation_tick_ms`, `animation_sleep_requested_ms`, `animation_sleep_latency_ms`, `tick_lock_wait_ms`, `tick_lock_held_ms`, `tick_send_batch_ms`, `tick_send_packets`, `tick_total_ms`, and `artnet_send_ms`. Useful counters include `animation_frames`, `animation_frame_overruns`, `artnet_packets`, `artnet_frames_with_packets`, `animation_thread_qos_enabled`, and `mixer_controller_thread_qos_enabled`.
+
+The cumulative `rates_per_second` values include startup, browser launch, restore, and reconnect time. For steady-state FPS, compare `animation_frames` deltas over a short interval after the app has settled, or watch the receiver FPS telemetry.
+
+For packaged macOS validation, launch the app through LaunchServices and then query the API:
+
+```bash
+open -n V3_6/dist/macos/PrimusCentral.app --args --port 8097
+curl -s http://127.0.0.1:8097/api/performance
+```
+
+The v0.65 packaged app keeps live output responsive with a `caffeinate -dimsu -w <pid>` process assertion, user-interactive QoS for animation/render threads, and low-latency frame pacing. Set `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1` only for diagnostics that intentionally disable the `caffeinate` assertion. Do not use direct `Contents/MacOS/PrimusCentral` execution as the primary packaged FPS test.
+
+### Packaged Sender Build And Release Touchpoints
+
+The API surface above is the same in source and packaged runs. The release build path for the packaged sender is:
+
+```bash
+python3 V3_6/build_sender_app.py \
+  --target macos \
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h
+```
+
+Build-time overrides are `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime/storage overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`. The macOS timing assertion override is `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1`.
+
+The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V3_6/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V3_6/PACKAGING.md](V3_6/PACKAGING.md).
 
 ### POST Endpoints — Device Management
 
@@ -382,6 +433,39 @@ For `ssid_profile`, `scope` must be either `"ssid"` or `"service"`. Host IP appl
 | `POST /api/clip/preview` | `{clip_id, t}` | Compute one preview frame for a clip at time `t`. Returns `{pixels, grid, count}` |
 | `POST /api/clips/save` | `{name, outputs}` or clip dict | Save clip(s) from designer outputs, or save a single clip dict |
 | `POST /api/clips/save_single` | Clip dict | Save or update a single clip. Auto-generates ID and timestamp if missing |
+| `POST /api/import_bundle` | Bundle JSON | Import a Clip or Look export bundle. Imported IDs are remapped when needed |
+
+### Clip And Look Sharing Bundles
+
+Portable sharing bundles use schema `primus.v3.6.bundle`, `version:1`, and `kind:"clip"` or `kind:"look"`.
+
+Clip export response:
+
+```json
+{
+  "schema": "primus.v3.6.bundle",
+  "version": 1,
+  "kind": "clip",
+  "created": "2026-05-19T00:00:00+00:00",
+  "clip": {"id": "clip-id", "name": "Pulse", "output_type": "short_strip"}
+}
+```
+
+Look export response:
+
+```json
+{
+  "schema": "primus.v3.6.bundle",
+  "version": 1,
+  "kind": "look",
+  "created": "2026-05-19T00:00:00+00:00",
+  "look": {"id": "look-id", "name": "Opening", "tracks": []},
+  "clips": [],
+  "missing_clip_ids": []
+}
+```
+
+`POST /api/import_bundle` accepts current bundles, older `{kind, clip/look}` objects, a raw Clip object with `output_type` and `effect`, or a raw Look object with `tracks` and `outputs`. Imported Clips and Looks keep their original IDs only if those IDs are safe and unused; otherwise new UUIDs are generated and returned in `clip_id_map` and `look_id_map`. Imported Looks clear saved `device_ips` so a shared Look does not target someone else's receiver IPs by accident.
 
 ### POST Endpoints — Looks & Mixer
 
@@ -476,7 +560,7 @@ Cue lookup for name-based OSC triggers is exact case-insensitive name first, the
 
 ### POST Endpoints — Firmware Upload
 
-These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V3_5/Arduino/upload.sh`, run one job at a time, and redact WiFi passwords from job output. The Firmware tab uses the simple flow of firmware version, selected device or all devices, independently optional device-name and WiFi overrides, then compile/upload with an output window. If Arduino CLI is missing, the Firmware tab can start a one-time setup job that installs managed firmware tools outside the app bundle.
+These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V3_6/Arduino/upload.sh`, run one job at a time, and redact WiFi passwords from job output. The Firmware tab uses the simple flow of firmware version, selected device or all devices, independently optional device-name and WiFi overrides, then compile/upload with an output window. If Arduino CLI is missing, the Firmware tab can start a one-time setup job that installs managed firmware tools outside the app bundle.
 
 | Route | Body | Description |
 |---|---|---|
@@ -516,7 +600,7 @@ The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Scr
 
 The device name shown on the TFT is the custom name (set via ArtAddress/Rename) or the default firmware name "PrimusV3".
 
-V1 and V2 boards have no TFT, so V3.5 firmware uses simple onboard connection indicators:
+V1 and V2 boards have no TFT, so V3.6 firmware uses simple onboard connection indicators:
 
 | Profile | Indicator | Connected | Disconnected |
 |---------|-----------|-----------|--------------|
@@ -642,7 +726,7 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
 };
 ```
 
-### On the sender side (V3.5: state.py)
+### On the sender side (V3.6: state.py)
 
 Add a matching entry to `OUTPUT_TYPES` and `LOOK_OUTPUT_TYPES`:
 

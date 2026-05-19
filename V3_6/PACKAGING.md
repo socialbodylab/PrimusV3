@@ -219,7 +219,73 @@ open -n V3_6/dist/macos/PrimusCentral.app --args --port 8097
 
 The packaged sender enables a `caffeinate` process assertion, user-interactive
 QoS on the animation/render threads, and low-latency frame pacing so macOS app
-launches maintain the target live-output FPS.
+launches maintain the target live-output FPS. Set
+`PRIMUSV3_DISABLE_MACOS_ACTIVITY=1` only when intentionally disabling the
+`caffeinate` assertion for diagnostics.
+
+The v0.65 release is the baseline for this behavior. It fixed the case where
+source `run.py` and direct binary execution reached about 30 FPS, but a real
+`.app` launch through LaunchServices/Finder dropped to about 15-20 FPS. Keep
+the LaunchServices test path in future release validation.
+
+While validating timing, query the sender diagnostics endpoint:
+
+```bash
+curl -s http://127.0.0.1:8097/api/performance
+```
+
+Use steady-state deltas from `counters.animation_frames` for FPS; cumulative
+`rates_per_second` includes startup, browser launch, restore, and reconnect time.
+
+## Create A Release DMG
+
+Create release DMGs from a clean staging directory. The staging directory must
+contain only `PrimusCentral.app` and an `/Applications` symlink. Do not copy the
+real `/Applications` folder into the DMG.
+
+Example for version `0.65`:
+
+```bash
+rm -rf V3_6/build/macos/dmg-staging
+mkdir -p V3_6/build/macos/dmg-staging
+ditto V3_6/dist/macos/PrimusCentral.app V3_6/build/macos/dmg-staging/PrimusCentral.app
+ln -s /Applications V3_6/build/macos/dmg-staging/Applications
+rm -f V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg \
+	V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg.sha256
+hdiutil create -volname "PrimusCentral 0.65" \
+	-srcfolder V3_6/build/macos/dmg-staging \
+	-ov -format UDZO V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg
+```
+
+Sign, notarize, staple, and verify the DMG itself:
+
+```bash
+codesign --force --timestamp \
+	--sign "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+	V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg
+xcrun notarytool submit V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg \
+	--keychain-profile "PrimusCentral Notary" --wait --timeout 1h
+xcrun stapler staple V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg
+xcrun stapler validate V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg
+spctl -a -vvv --type open --context context:primary-signature \
+	V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg
+hdiutil verify V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg
+```
+
+Generate the checksum after the final stapling step, because stapling mutates
+the DMG:
+
+```bash
+shasum -a 256 V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg \
+	> V3_6/dist/macos/PrimusCentral-0.65-macOS-arm64.dmg.sha256
+```
+
+GitHub release assets should be named:
+
+```text
+PrimusCentral-<version>-macOS-arm64.dmg
+PrimusCentral-<version>-macOS-arm64.dmg.sha256
+```
 
 ## Distribution Notes
 

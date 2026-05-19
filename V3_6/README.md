@@ -6,6 +6,8 @@ The important design choice is that V1 and V2 hardware are not supported through
 
 V3.6 adds dynamic Clip, Look, and Timeline segment brightness in the sender. Receiver firmware keeps LED driver brightness locked at 255 and accepts ordinary RGB ArtDmx frames; the sender scales RGB pixel values before transport so brightness changes are smooth across V1, V2, and V3.1 profiles without reviving the old V2 brightness-byte protocol.
 
+V3.6 also adds portable Clip and Look sharing bundles. Clips export as standalone JSON bundles, Looks export with their referenced Clips when available, and imports remap IDs as needed so shared files do not overwrite local show content.
+
 ## Documentation Map
 
 | Document | Use it for |
@@ -121,6 +123,33 @@ Run sender checks:
 python3 -m py_compile V3_6/sender/*.py
 python3 -m unittest discover -s V3_6/sender/tests
 ```
+
+## Packaged macOS Release Baseline
+
+The v0.65 release is the baseline for packaged macOS FPS behavior. The bug it fixed only reproduced when `PrimusCentral.app` was launched as a real app bundle through Finder or LaunchServices. Do not use `V3_6/dist/macos/PrimusCentral.app/Contents/MacOS/PrimusCentral` as the primary packaged-performance test path; direct binary execution bypasses the app-bundle scheduler behavior.
+
+Build, sign, notarize, staple, and verify the app with:
+
+```sh
+python3 V3_6/build_sender_app.py \
+	--target macos \
+	--sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+	--notary-profile "PrimusCentral Notary" \
+	--notary-timeout 1h
+```
+
+The release app keeps the visible name `PrimusCentral.app`, uses bundle ID `com.socialbodylab.PrimusCentral`, and is written to `V3_6/dist/macos/PrimusCentral.app`. Signing settings can also come from `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`.
+
+Packaged macOS runtime timing uses three intentional overrides: a `caffeinate -dimsu -w <pid>` process assertion, user-interactive QoS for the animation and mixer/controller threads, and low-latency frame pacing. Set `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1` only when intentionally disabling the `caffeinate` assertion for diagnostics.
+
+Validate packaged FPS through LaunchServices, then inspect the sender performance API:
+
+```sh
+open -n V3_6/dist/macos/PrimusCentral.app --args --port 8097
+curl -s http://127.0.0.1:8097/api/performance
+```
+
+For release DMGs, create a clean staging directory with only `PrimusCentral.app` and an `/Applications` symlink, notarize and staple the DMG itself, then generate the SHA-256 checksum after stapling. The full command checklist is in [PACKAGING.md](PACKAGING.md).
 
 ## Contracts That Must Stay In Sync
 
