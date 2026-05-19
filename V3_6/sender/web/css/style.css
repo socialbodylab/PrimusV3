@@ -423,11 +423,17 @@ body {
 
 .device-card.device-connected {
     border-color: var(--success);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 45%, transparent);
 }
 
 .device-card.device-static-ip {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.device-card.device-connected.device-static-ip {
+    border-color: var(--success);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 45%, transparent);
 }
 
 .device-header {
