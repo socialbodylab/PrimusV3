@@ -7,7 +7,7 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 ## Active versions
 
 - **V3.1** — Active sender + receiver under `V3_1/`. The original V3.0 single-file sender (`sender/led_controller.py`) is archived but still functional.
-- **V3.2** — Active audio receiver firmware under `V3_2/`. Firmware-only variant; there is no V3.2 sender yet. Audio nodes run V3.2 firmware and are controlled by the V3.1 sender for LED, plus direct Art-Net opcodes for audio and FTP.
+- **V3.2** — Active Radius firmware under `V3_2/`. Firmware-only variant; there is no V3.2 sender yet. Radius nodes (V3.2) are audio-only and controlled by the V3.1 sender via direct Art-Net opcodes for audio and FTP.
 
 ## Repository layout
 
@@ -42,9 +42,9 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - `V3_1/Arduino/upload.sh` — arduino-cli build/upload script.
 
 ### Audio Receiver Firmware (V3.2)
-- `V3_2/Arduino/primusV3_audio_receiver/` — Extends V3.1 receiver with audio and FTP.
+- `V3_2/Arduino/radiusV2/` — Extends V3.1 receiver with audio and FTP.
   - `config.h` — Adds `AUDIO_BOARD` compile-time switch, `ARTNET_OPCODE_AUDIO_CMD 0x8200`, `ARTNET_OPCODE_FTP_CMD 0x8201`.
-  - `primusV3_audio_receiver.ino` — Main sketch: all V3.1 features plus audio and FTP orchestration.
+  - `radiusV2.ino` — Main sketch: all V3.1 features plus audio and FTP orchestration.
   - `audio.h` — WAV playback behind a unified API (VS1053 or MAX98357 I2S, selected at compile time).
   - `ftp.h` — FTP server wrapper (SimpleFTPServer library). FTP starts off; started via Art-Net or D1 button.
   - `display.h` — Adds Audio screen and FTP screen to the V3.1 display.
@@ -64,7 +64,7 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 
 ## V3.2 Concepts
 
-- **Audio node**: A V3.2 receiver. Identical to a V3.1 node for LED purposes; additionally plays WAV files from SD card on Art-Net command.
+- **Radius node**: A V3.2 receiver. Audio-only — no LED outputs or NeoPXL8 code. Plays WAV files from SD card on Art-Net command. Radius V1 = HUZZAH32 (headless); Radius V2 = ESP32-S3 Reverse TFT Feather (with display).
 - **SD bus mutex** (`sdBusy`): A boolean flag that prevents FTP and audio from accessing the SD card simultaneously. Set to `true` by audio playback, cleared when audio stops. FTP checks this flag before starting and refuses if set.
 - **FTP lifecycle**: FTP is off at boot. It is started explicitly (Art-Net 0x8201 cmd=1, or D1 button on FTP screen) and stopped explicitly (Art-Net 0x8201 cmd=0, or audio command, or D1 button). There is no auto-start or auto-restart.
 - **Audio board switch**: `#define AUDIO_BOARD` in `config.h` selects between `AUDIO_BOARD_MUSIC_MAKER` (VS1053, SPI) and `AUDIO_BOARD_BFF` (MAX98357, I2S) at compile time. The `audio.h` API is identical for both.
@@ -108,7 +108,7 @@ none, solid, pulse, linear, constrainbow, rainbow, knight_rider, chase, radial (
 **POST (clips)**: `/api/clip/preview`, `/api/clips/save`, `/api/clips/save_single`
 **POST (looks/mixer)**: `/api/looks/save`, `/api/mixer/preview`, `/api/device_groups/save`
 **POST (cues)**: `/api/cues` (save), `/api/cues/go`
-**POST (audio — V3.2 nodes only)**: `/api/audio/cmd`, `/api/audio/files`
+**POST (audio — Radius nodes only)**: `/api/audio/cmd`, `/api/audio/files`
 **DELETE**: `/api/clips/<id>`, `/api/looks/<id>`, `/api/device_groups/<id>`
 
 ## Hardware

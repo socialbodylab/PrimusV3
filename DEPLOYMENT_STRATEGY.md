@@ -157,9 +157,9 @@ There are two firmware variants to distribute:
 | Variant | Path | Use Case |
 |---------|------|----------|
 | `primusV3_receiver` | `V3_1/Arduino/` | LED-only nodes (V3.0 / V3.1) |
-| `primusV3_audio_receiver` | `V3_2/Arduino/` | LED + audio nodes (V3.2) |
+| `radiusV2` | `V3_2/Arduino/` | Radius nodes (V3.2) |
 
-The audio receiver also has a compile-time board switch (`AUDIO_BOARD` in `config.h`), so two `.bin` files are needed for V3.2: one for Music Maker FeatherWing and one for Audio BFF.
+The Radius firmware also has a compile-time board switch (`AUDIO_BOARD` in `config.h`), so two `.bin` files are needed for V3.2: one for Music Maker FeatherWing (Radius V1) and one for Audio BFF (Radius V2).
 
 For end-user flashing without `arduino-cli`:
 

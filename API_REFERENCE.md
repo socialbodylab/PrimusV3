@@ -17,7 +17,7 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
 | **FTP file transfer** | TCP | 21 | Bidirectional |
 
-LED data, discovery, and control use standard Art-Net 4 over IPv4 UDP. Four custom opcodes extend the protocol for output configuration, audio playback, and FTP management. FTP (TCP port 21) is used for SD card file management on audio nodes and is not part of the Art-Net protocol. Any software that speaks Art-Net can drive the LED outputs directly.
+LED data, discovery, and control use standard Art-Net 4 over IPv4 UDP. Four custom opcodes extend the protocol for output configuration, audio playback, and FTP management. FTP (TCP port 21) is used for SD card file management on Radius nodes and is not part of the Art-Net protocol. Any software that speaks Art-Net can drive the LED outputs directly.
 
 ---
 
@@ -180,7 +180,7 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 
 ## 6. Audio Playback — ArtAudioCmd (custom opcode 0x8200)
 
-V3.2 audio nodes support WAV file playback triggered over Art-Net. Audio files are stored on an SD card and managed via FTP (see §7). This opcode is only implemented in the `primusV3_audio_receiver` firmware.
+Radius nodes support WAV file playback triggered over Art-Net. Audio files are stored on an SD card and managed via FTP (see §7). This opcode is only implemented in the `radiusV2` firmware.
 
 ### ArtAudioCmd Packet (sender → node)
 
@@ -217,7 +217,7 @@ V3.2 audio nodes support WAV file playback triggered over Art-Net. Audio files a
 
 ## 7. FTP Server Control — ArtFtpCmd (custom opcode 0x8201)
 
-V3.2 audio nodes include an FTP server (TCP port 21) for managing WAV files on the SD card. The server is off by default and must be explicitly started — either via this opcode or the D1 button on the node's FTP screen. This opcode is only implemented in the `primusV3_audio_receiver` firmware.
+Radius nodes include an FTP server (TCP port 21) for managing WAV files on the SD card. The server is off by default and must be explicitly started — either via this opcode or the D1 button on the node's FTP screen. This opcode is only implemented in the `radiusV2` firmware.
 
 ### ArtFtpCmd Packet (sender → node)
 
@@ -321,8 +321,8 @@ The V3.1 sender (`run.py`) serves a web UI and exposes a JSON API. All POST/DELE
 | `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically |
 | `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
 | `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
-| `POST /api/audio/cmd` | `{device: N, cmd, filename, volume}` | Send audio command to a V3.2 node. `cmd`: `"play"` `"loop"` `"stop"` `"pause"` `"volume"` |
-| `POST /api/audio/files` | `{device: N}` | List WAV files on a V3.2 node's SD card. Starts FTP, queries, stops FTP. Returns `{files: [...]}` (~1–2 s) |
+| `POST /api/audio/cmd` | `{device: N, cmd, filename, volume}` | Send audio command to a Radius node. `cmd`: `"play"` `"loop"` `"stop"` `"pause"` `"volume"` |
+| `POST /api/audio/files` | `{device: N}` | List WAV files on a Radius node's SD card. Starts FTP, queries, stops FTP. Returns `{files: [...]}` (~1–2 s) |
 
 ### POST Endpoints — Clips
 
@@ -372,7 +372,7 @@ The ESP32-S3 Reverse TFT Feather has a built-in 240×135 ST7789 TFT display. Scr
 | **Error** | Error message and details |
 | **Test Mode** | Test pattern name (entered via D1 button) |
 
-### V3.2 Audio Receiver (primusV3_audio_receiver)
+### V3.2 Audio Receiver (radiusV2)
 
 Two additional screens are added. All screens cycle with D0:
 
