@@ -1205,6 +1205,196 @@ input[type="color"] {
     white-space: nowrap;
 }
 
+/* ── File Manager ─────────────────────────────────────────────────── */
+
+.audio-fm {
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+}
+
+.audio-fm-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.audio-fm-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.audio-fm-crumb-seg {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.audio-fm-crumb {
+    color: var(--accent);
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 3px;
+    transition: background 0.1s;
+}
+.audio-fm-crumb:hover { background: var(--bg-hover); }
+
+.audio-fm-list {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    min-height: 32px;
+    margin-bottom: 8px;
+    position: relative;
+    transition: border-color 0.15s;
+}
+.audio-fm-list.drag-active {
+    border-color: var(--accent);
+    background: rgba(0, 191, 255, 0.05);
+}
+
+.audio-fm-empty {
+    padding: 10px 12px;
+    font-size: 12px;
+}
+
+.audio-fm-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    transition: background 0.1s;
+}
+.audio-fm-row:hover { background: var(--bg-hover); }
+.audio-fm-row.fm-row-playing {
+    background: #0d1f0d;
+    border-left: 2px solid var(--success);
+    padding-left: 6px;
+}
+
+.audio-fm-icon {
+    width: 18px;
+    font-size: 13px;
+    text-align: center;
+    flex-shrink: 0;
+    user-select: none;
+}
+.audio-fm-icon.icon-playing { color: var(--success); }
+
+.audio-fm-name {
+    flex: 1;
+    font-size: 12px;
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.audio-fm-name.audio-fm-folder {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 500;
+}
+.audio-fm-name.audio-fm-folder:hover { text-decoration: underline; }
+
+.audio-fm-size {
+    font-size: 11px;
+    font-family: monospace;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.audio-fm-rename-input {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: monospace;
+    font-size: 12px;
+    padding: 2px 6px;
+    outline: none;
+    min-width: 0;
+}
+
+.audio-fm-drop-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 191, 255, 0.10);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+}
+
+.audio-fm-dropzone {
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    user-select: none;
+    margin-bottom: 6px;
+}
+.audio-fm-dropzone:hover,
+.audio-fm-dropzone.drag-active {
+    border-color: var(--accent);
+    background: rgba(0, 191, 255, 0.06);
+    color: var(--accent);
+}
+
+.audio-fm-upload-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 11px;
+}
+
+.audio-fm-upload-name {
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.audio-fm-upload-bar {
+    flex: 2;
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.audio-fm-upload-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.1s linear;
+}
+
+.audio-fm-upload-pct {
+    width: 32px;
+    text-align: right;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
 .empty-state {
     padding: 32px 16px;
     text-align: center;

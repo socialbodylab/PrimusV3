@@ -14,6 +14,7 @@ from effects import (
 from artnet import (
     ArtNetSender, send_output_config, send_art_address,
     send_audio_cmd, send_ftp_cmd, list_audio_files,
+    ftp_list_dir, ftp_upload, ftp_rename, ftp_delete, ftp_mkdir,
     AUDIO_CMD_STOP, AUDIO_CMD_PLAY, AUDIO_CMD_LOOP, AUDIO_CMD_PAUSE, AUDIO_CMD_VOLUME,
 )
 
@@ -725,14 +726,53 @@ class ControllerState:
         return True
 
     def get_audio_files(self, di):
-        """Return sorted list of WAV filenames on a V3.2 device's SD card.
-        Starts FTP, queries, stops FTP.  Returns [] on error or wrong index.
-        """
+        """Return sorted list of WAV filenames on a V3.2 device's SD card."""
         with self.lock:
             if di < 0 or di >= len(self.devices):
                 return []
             ip = self.devices[di]["ip"]
         return list_audio_files(ip)
+
+    def _get_device_ip(self, di):
+        """Return IP for device index di, or None if invalid."""
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return None
+            return self.devices[di]["ip"]
+
+    def ftp_list_dir(self, di, path="/"):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return None
+        return ftp_list_dir(ip, path)
+
+    def ftp_upload(self, di, path, data):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        ftp_upload(ip, path, data)
+        return True
+
+    def ftp_rename(self, di, src, dst):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        ftp_rename(ip, src, dst)
+        return True
+
+    def ftp_delete(self, di, path, is_dir=False):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        ftp_delete(ip, path, is_dir=is_dir)
+        return True
+
+    def ftp_mkdir(self, di, path):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        ftp_mkdir(ip, path)
+        return True
 
     # ------------------------------------------------------------------
 

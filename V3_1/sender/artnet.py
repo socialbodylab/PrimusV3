@@ -383,28 +383,98 @@ def send_ftp_cmd(ip, start):
         sock.close()
 
 
-def list_audio_files(ip, timeout=5.0):
-    """Return a sorted list of WAV filenames on a V3.2 audio node's SD card.
-
-    Starts the FTP server via Art-Net, connects with ftplib, retrieves the
-    file list, then stops the FTP server.  Returns [] on any error.
-    """
-    import ftplib
-
-    send_ftp_cmd(ip, start=True)
-    time.sleep(0.5)  # give the ESP32 time to start the TCP server
-
-    files = []
+def list_audio_files(ip):
+    """Return sorted WAV filenames in the root of a V3.2 audio node's SD card."""
     try:
-        ftp = ftplib.FTP()
-        ftp.connect(ip, FTP_PORT, timeout=timeout)
-        ftp.login(FTP_USER, FTP_PASSWORD)
-        all_files = ftp.nlst()
-        files = sorted(f for f in all_files if f.lower().endswith(".wav"))
-        ftp.quit()
+        entries = ftp_list_dir(ip, "/")
+        return sorted(e["name"] for e in entries if e["name"].lower().endswith(".wav"))
     except Exception as e:
         print(f"[audio] FTP list failed for {ip}: {e}")
+        return []
+
+
+# ======================================================================
+#  FTP FILE MANAGEMENT  [V3.2 audio nodes only]
+# ======================================================================
+
+import contextlib as _contextlib
+import io as _io
+
+@_contextlib.contextmanager
+def _ftp_session(ip, timeout=8.0):
+    """Start FTP on device, connect, yield ftplib.FTP, then disconnect and stop."""
+    import ftplib
+    send_ftp_cmd(ip, start=True)
+    time.sleep(0.5)
+    ftp = ftplib.FTP()
+    try:
+        ftp.connect(ip, FTP_PORT, timeout=timeout)
+        ftp.login(FTP_USER, FTP_PASSWORD)
+        yield ftp
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            ftp.close()
+        except Exception:
+            pass
+        raise
     finally:
         send_ftp_cmd(ip, start=False)
 
-    return files
+
+def _parse_list_line(line):
+    """Parse a Unix-style FTP LIST line into {name, is_dir, size}."""
+    parts = line.split(None, 8)
+    if len(parts) < 9:
+        return None
+    try:
+        size = int(parts[4])
+    except ValueError:
+        size = 0
+    return {"name": parts[8], "is_dir": parts[0].startswith("d"), "size": size}
+
+
+def ftp_list_dir(ip, path="/"):
+    """Return list of {name, is_dir, size} for entries in path on the SD card."""
+    entries = []
+    with _ftp_session(ip) as ftp:
+        lines = []
+        try:
+            ftp.retrlines(f"LIST {path}", lines.append)
+        except Exception:
+            ftp.retrlines("LIST", lines.append)
+        for line in lines:
+            entry = _parse_list_line(line)
+            if entry and entry["name"] not in (".", ".."):
+                entries.append(entry)
+    return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
+
+
+def ftp_upload(ip, path, data):
+    """Upload bytes to path on the SD card."""
+    with _ftp_session(ip) as ftp:
+        ftp.storbinary(f"STOR {path}", _io.BytesIO(data))
+
+
+def ftp_rename(ip, src, dst):
+    """Rename or move a file/folder on the SD card."""
+    with _ftp_session(ip) as ftp:
+        ftp.rename(src, dst)
+
+
+def ftp_delete(ip, path, is_dir=False):
+    """Delete a file or empty directory on the SD card."""
+    with _ftp_session(ip) as ftp:
+        if is_dir:
+            ftp.rmd(path)
+        else:
+            ftp.delete(path)
+
+
+def ftp_mkdir(ip, path):
+    """Create a directory on the SD card."""
+    with _ftp_session(ip) as ftp:
+        ftp.mkd(path)

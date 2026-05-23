@@ -864,19 +864,19 @@
     <!-- ──── AUDIO PANEL ──── -->
     <div class="panel" x-show="$store.app.mode === 'audio'" x-data="audioPanel">
 
-        <div class="section-title">Audio Nodes</div>
+        <div class="section-title">Radius Nodes</div>
 
         <!-- Empty state -->
         <template x-if="audioDevices.length === 0">
             <div class="empty-state">
-                <div>No audio nodes detected.</div>
-                <div class="text-muted text-sm" style="margin-top:6px">Audio nodes run V3.2 firmware and identify as "PrimusV3-Audio" during discovery.</div>
+                <div>No Radius nodes detected.</div>
+                <div class="text-muted text-sm" style="margin-top:6px">Radius nodes run V3.2 firmware and identify as "Radius" during discovery.</div>
             </div>
         </template>
 
         <!-- One card per audio-capable device -->
         <template x-for="dev in audioDevices" :key="dev.di">
-            <div class="audio-node-card">
+            <div class="audio-node-card" x-init="initDevice(dev.di)">
 
                 <!-- Header -->
                 <div class="audio-node-header">
@@ -909,44 +909,159 @@
                     <span x-text="playing[dev.di]?.file"></span>
                 </div>
 
-                <!-- File list -->
-                <div class="audio-files-section">
-                    <template x-if="fileCache[dev.di] === undefined">
-                        <button class="btn btn-sm" style="width:100%"
-                                :disabled="loadingFiles[dev.di]"
-                                @click="loadFiles(dev.di)"
-                                x-text="loadingFiles[dev.di] ? 'Loading…' : 'Load Files'">
-                        </button>
-                    </template>
-                    <template x-if="fileCache[dev.di] !== undefined">
-                        <div>
-                            <div class="flex justify-between items-center mb-2">
-                                <span class="text-muted" style="font-size:11px"
-                                      x-text="fileCache[dev.di].length + ' file' + (fileCache[dev.di].length !== 1 ? 's' : '')"></span>
-                                <button class="btn btn-sm" @click="refreshFiles(dev.di)"
-                                        :disabled="loadingFiles[dev.di]">↺ Refresh</button>
-                            </div>
-                            <template x-if="fileCache[dev.di].length === 0">
-                                <div class="text-muted text-sm" style="padding:8px 0">No WAV files on SD card.</div>
+                <!-- File manager -->
+                <div class="audio-fm">
+
+                    <!-- Toolbar: breadcrumb + actions -->
+                    <div class="audio-fm-toolbar">
+                        <div class="audio-fm-breadcrumb">
+                            <span class="audio-fm-crumb" @click="navigateTo(dev.di, '/')">SD</span>
+                            <template x-for="(seg, i) in breadcrumbs(dev.di)" :key="i">
+                                <span class="audio-fm-crumb-seg">
+                                    <span class="text-muted">/</span>
+                                    <span class="audio-fm-crumb"
+                                          @click="navigateTo(dev.di, crumbPath(dev.di, i))"
+                                          x-text="seg"></span>
+                                </span>
                             </template>
-                            <template x-for="file in fileCache[dev.di]" :key="file">
-                                <div class="audio-file-row" :class="{ playing: isPlaying(dev.di, file) }">
-                                    <span class="audio-file-icon"
-                                          x-text="isLooping(dev.di, file) ? '↺' : (isPlaying(dev.di, file) ? '▶' : '')"></span>
-                                    <span class="audio-file-name" x-text="file"></span>
+                            <span class="text-muted" style="font-size:11px;margin-left:4px"
+                                  x-show="loading[dev.di]">…</span>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" @click="startNewFolder(dev.di)">+ Folder</button>
+                            <button class="btn btn-sm" @click="loadDir(dev.di)"
+                                    :disabled="loading[dev.di]">↺</button>
+                        </div>
+                    </div>
+
+                    <!-- Entry list -->
+                    <div class="audio-fm-list"
+                         :class="{ 'drag-active': dragOver[dev.di] }"
+                         @dragover.prevent="dragOver = {...dragOver, [dev.di]: true}"
+                         @dragleave.prevent="dragOver = {...dragOver, [dev.di]: false}"
+                         @drop.prevent="onDrop(dev.di, $event)">
+
+                        <!-- New folder input row -->
+                        <template x-if="newFolderMode[dev.di]">
+                            <div class="audio-fm-row">
+                                <span class="audio-fm-icon">📁</span>
+                                <input class="audio-fm-rename-input"
+                                       :id="'new-folder-input-' + dev.di"
+                                       x-model="newFolderName[dev.di]"
+                                       @keydown.enter="commitNewFolder(dev.di)"
+                                       @keydown.escape="cancelNewFolder(dev.di)"
+                                       placeholder="folder name">
+                                <button class="btn btn-sm btn-primary" @click="commitNewFolder(dev.di)">✓</button>
+                                <button class="btn btn-sm" @click="cancelNewFolder(dev.di)">✕</button>
+                            </div>
+                        </template>
+
+                        <!-- Loading skeleton -->
+                        <template x-if="loading[dev.di] && entries[dev.di] === undefined">
+                            <div class="audio-fm-empty text-muted">Loading…</div>
+                        </template>
+
+                        <!-- Empty directory -->
+                        <template x-if="!loading[dev.di] && entries[dev.di] && entries[dev.di].length === 0 && !newFolderMode[dev.di]">
+                            <div class="audio-fm-empty text-muted">Empty directory</div>
+                        </template>
+
+                        <!-- Entries -->
+                        <template x-for="entry in (entries[dev.di] || [])" :key="entry.name">
+                            <div class="audio-fm-row"
+                                 :class="{ 'fm-row-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }">
+
+                                <!-- Icon -->
+                                <span class="audio-fm-icon"
+                                      :class="{ 'icon-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }"
+                                      x-text="entryIcon(dev.di, entry)"></span>
+
+                                <!-- Name (or rename input) -->
+                                <template x-if="!isRenaming(dev.di, entry.name)">
+                                    <span class="audio-fm-name"
+                                          :class="{ 'audio-fm-folder': entry.is_dir }"
+                                          @click="entry.is_dir && navigateInto(dev.di, entry.name)"
+                                          x-text="entry.name"></span>
+                                </template>
+                                <template x-if="isRenaming(dev.di, entry.name)">
+                                    <input class="audio-fm-rename-input"
+                                           :value="renaming[dev.di]?.value"
+                                           @input="renaming = {...renaming, [dev.di]: {...renaming[dev.di], value: $event.target.value}}"
+                                           @keydown.enter="commitRename(dev.di, entry.name)"
+                                           @keydown.escape="cancelRename(dev.di)">
+                                </template>
+
+                                <!-- Size -->
+                                <span class="audio-fm-size text-muted"
+                                      x-text="entry.is_dir ? '' : formatSize(entry.size)"></span>
+
+                                <!-- Play buttons (WAV only, not while renaming) -->
+                                <template x-if="!entry.is_dir && entry.name.toLowerCase().endsWith('.wav') && !isRenaming(dev.di, entry.name)">
                                     <div class="btn-group">
                                         <button class="btn btn-sm"
-                                                :class="{ 'btn-primary': isPlaying(dev.di, file) && !isLooping(dev.di, file) }"
-                                                @click="play(dev.di, file, 'play')" title="Play once">▶</button>
+                                                :class="{ 'btn-primary': isPlaying(dev.di, entry.name) && !isLooping(dev.di, entry.name) }"
+                                                @click="play(dev.di, entry.name, 'play')" title="Play">▶</button>
                                         <button class="btn btn-sm"
-                                                :class="{ 'btn-primary': isLooping(dev.di, file) }"
-                                                @click="play(dev.di, file, 'loop')" title="Loop">↺</button>
+                                                :class="{ 'btn-primary': isLooping(dev.di, entry.name) }"
+                                                @click="play(dev.di, entry.name, 'loop')" title="Loop">↺</button>
                                     </div>
-                                </div>
-                            </template>
+                                </template>
+
+                                <!-- Rename / delete (not while renaming) -->
+                                <template x-if="!isRenaming(dev.di, entry.name)">
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm" title="Rename"
+                                                @click="startRename(dev.di, entry.name)">✏</button>
+                                        <button class="btn btn-sm btn-danger" title="Delete"
+                                                @click="deleteEntry(dev.di, entry)">✕</button>
+                                    </div>
+                                </template>
+
+                                <!-- Commit / cancel (while renaming) -->
+                                <template x-if="isRenaming(dev.di, entry.name)">
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-primary"
+                                                @click="commitRename(dev.di, entry.name)">✓</button>
+                                        <button class="btn btn-sm"
+                                                @click="cancelRename(dev.di)">✕</button>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Drop hint overlay -->
+                        <div class="audio-fm-drop-hint" x-show="dragOver[dev.di]">
+                            Drop to upload
+                        </div>
+                    </div>
+
+                    <!-- Drop zone / upload trigger -->
+                    <div class="audio-fm-dropzone"
+                         :class="{ 'drag-active': dragOver[dev.di] }"
+                         @click="triggerFileInput(dev.di)"
+                         @dragover.prevent="dragOver = {...dragOver, [dev.di]: true}"
+                         @dragleave.prevent="dragOver = {...dragOver, [dev.di]: false}"
+                         @drop.prevent="onDrop(dev.di, $event)">
+                        <input type="file" accept=".wav,.WAV" multiple
+                               style="display:none" :id="'file-input-' + dev.di"
+                               @change="onFileInput(dev.di, $event)">
+                        <span x-text="dragOver[dev.di] ? 'Drop to upload' : '↑ Drop WAV files or click to upload'"></span>
+                    </div>
+
+                    <!-- Upload progress -->
+                    <template x-if="uploadStatus[dev.di]">
+                        <div class="audio-fm-upload-row">
+                            <span class="audio-fm-upload-name" x-text="uploadStatus[dev.di].name"></span>
+                            <div class="audio-fm-upload-bar">
+                                <div class="audio-fm-upload-fill"
+                                     :style="'width:' + uploadStatus[dev.di].progress + '%'"></div>
+                            </div>
+                            <span class="audio-fm-upload-pct"
+                                  x-text="uploadStatus[dev.di].progress + '%'"></span>
                         </div>
                     </template>
-                </div>
+
+                </div><!-- /.audio-fm -->
 
             </div>
         </template>

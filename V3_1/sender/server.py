@@ -8,6 +8,7 @@ import re
 import mimetypes
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import unquote
 
 import clips
 import mixer
@@ -21,6 +22,16 @@ _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 def _safe_id(value):
     """Return True if value is a safe resource identifier (no path traversal)."""
     return bool(value) and bool(_SAFE_ID_RE.match(value))
+
+
+def _safe_ftp_path(path):
+    """Return True if path is a safe absolute FTP path (no traversal)."""
+    if not isinstance(path, str) or not path.startswith("/") or "\x00" in path:
+        return False
+    for part in path.split("/"):
+        if part == "..":
+            return False
+    return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -87,11 +98,17 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_POST(self):
+        path = self.path.split("?")[0]
+
+        # Binary upload: handle before _read_json() consumes the body
+        if path == "/api/audio/upload":
+            self._handle_audio_upload()
+            return
+
         data = self._read_json()
         if data is None:
             self._respond(400, "application/json", b'{"error":"invalid JSON"}')
             return
-        path = self.path
 
         if path == "/api/update":
             self.controller_state.update(data)
@@ -295,11 +312,65 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/audio/files":
             di = data.get("device", -1)
+            ftp_path = str(data.get("path", "/"))
             if not (0 <= di < len(self.controller_state.devices)):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(ftp_path):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
             else:
-                files = self.controller_state.get_audio_files(di)
-                self._json_response({"files": files})
+                try:
+                    entries = self.controller_state.ftp_list_dir(di, ftp_path)
+                    self._json_response({"entries": entries or []})
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/rename":
+            di = data.get("device", -1)
+            src = str(data.get("src", ""))
+            dst = str(data.get("dst", ""))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(src) or not _safe_ftp_path(dst):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    self.controller_state.ftp_rename(di, src, dst)
+                    self._ok()
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/delete":
+            di = data.get("device", -1)
+            ftp_path = str(data.get("path", ""))
+            is_dir = bool(data.get("is_dir", False))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(ftp_path):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    self.controller_state.ftp_delete(di, ftp_path, is_dir=is_dir)
+                    self._ok()
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/mkdir":
+            di = data.get("device", -1)
+            ftp_path = str(data.get("path", ""))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(ftp_path):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    self.controller_state.ftp_mkdir(di, ftp_path)
+                    self._ok()
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
 
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
@@ -333,6 +404,31 @@ class Handler(BaseHTTPRequestHandler):
             self._ok()
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
+
+    def _handle_audio_upload(self):
+        params = self._query_params()
+        try:
+            di = int(params.get("device", -1))
+        except (TypeError, ValueError):
+            di = -1
+        ftp_path = unquote(params.get("path", ""))
+        if not (0 <= di < len(self.controller_state.devices)):
+            self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            return
+        if not _safe_ftp_path(ftp_path):
+            self._respond(400, "application/json", b'{"error":"invalid path"}')
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._respond(400, "application/json", b'{"error":"empty upload"}')
+            return
+        file_data = self.rfile.read(length)
+        try:
+            self.controller_state.ftp_upload(di, ftp_path, file_data)
+            self._ok()
+        except Exception as e:
+            self._respond(500, "application/json",
+                          json.dumps({"error": str(e)}).encode())
 
     # ------------------------------------------------------------------
     #  Helpers
