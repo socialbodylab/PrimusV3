@@ -2,7 +2,7 @@
  * buttons.h — PrimusV3 Button Handler
  * ===========================================
  * D0 (active-LOW):  Cycle TFT info screens
- * D1 (active-HIGH): Toggle test mode
+ * D1 (active-HIGH): Context action — audio test on screen 2, FTP toggle on screen 3
  *
  * D2 / brightness cycling has been removed — brightness is locked to 255.
  */
@@ -22,7 +22,7 @@ static const uint8_t btnPins[2] = { BTN_D0, BTN_D1 };
 //  Actions — set by button presses, consumed by main loop
 // =====================================================================
 volatile bool btnScreenCycle = false;   // D0 pressed
-volatile bool btnTestToggle  = false;   // D1 pressed
+volatile bool btnD1          = false;   // D1 pressed — context action
 
 // =====================================================================
 //  Init
@@ -49,7 +49,7 @@ void buttonsPoll() {
     bool pressed = readButton(i);
     if (pressed && !lastBtnState[i]) {
       if (i == 0) btnScreenCycle = true;
-      else        btnTestToggle  = true;
+      else        btnD1          = true;
     }
     lastBtnState[i] = pressed;
   }

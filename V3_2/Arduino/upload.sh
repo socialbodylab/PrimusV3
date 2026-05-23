@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# upload.sh — Compile & upload primusV3_audio_receiver to ESP32-S3 Reverse TFT Feather
+# upload.sh — Compile & upload primusV3_audio_receiver
 # Usage:
-#   ./upload.sh              # auto-detect port, compile + upload
+#   ./upload.sh                          # auto-detect port, compile + upload
 #   ./upload.sh /dev/cu.usbmodem14101   # specify port manually
-#   ./upload.sh --compile    # compile only, no upload
-#   ./upload.sh --install    # install required libraries only
+#   ./upload.sh --compile                # compile only, no upload
+#   ./upload.sh --install                # install required libraries only
 
 set -euo pipefail
 
-SKETCH_DIR="$(cd "$(dirname "$0")/primusV3_audio_receiver" && pwd)"
+SKETCH_DIR="$(cd "$(dirname "$0")/radiusV2" && pwd)"
+
 FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
 BAUD=921600
+BUILD_PROPS=()
+info_board="Adafruit ESP32-S3 Reverse TFT Feather"
 
 REQUIRED_LIBS=(
-  "Adafruit NeoPXL8"
   "Adafruit ST7735 and ST7789 Library"
   "Adafruit GFX Library"
   "Adafruit VS1053 Library"
@@ -24,6 +26,58 @@ REQUIRED_LIBS=(
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
 ok()    { printf "\033[1;32m[OK]\033[0m    %s\n" "$*"; }
 err()   { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*" >&2; }
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS] [PORT]
+
+Options:
+  --board <name>   Target board (default: feather-esp32s3-reversetft)
+  --compile        Compile only, do not upload
+  --install        Install required libraries only
+  -h, --help       Show this help
+
+Boards:
+  feather-esp32s3-reversetft   Adafruit ESP32-S3 Reverse TFT Feather (5691)  [default]
+  feather-esp32                Adafruit Feather HUZZAH32 (3405) — headless test build
+
+Examples:
+  $(basename "$0")                              # compile + upload (auto-detect port)
+  $(basename "$0") --board feather-esp32        # compile + upload to HUZZAH32
+  $(basename "$0") --compile                    # compile only
+  $(basename "$0") /dev/cu.usbmodem14101        # specify port manually
+EOF
+}
+
+for (( i=1; i<=$#; i++ )); do
+  case "${!i}" in
+    -h|--help)
+      usage; exit 0 ;;
+    --board)
+      next=$((i+1))
+      BOARD_ARG="${!next:-}"
+      case "$BOARD_ARG" in
+        feather-esp32s3-reversetft)
+          ;;  # already the default
+        feather-esp32)
+          FQBN="esp32:esp32:featheresp32"
+          BAUD=460800
+          BUILD_PROPS=(
+            --build-property "compiler.cpp.extra_flags=-DTARGET_BOARD=2"
+            --build-property "compiler.c.extra_flags=-DTARGET_BOARD=2"
+          )
+          info_board="Adafruit Feather HUZZAH32 (ESP32)"
+          ;;
+        *)
+          err "Unknown board: $BOARD_ARG"
+          usage; exit 1
+          ;;
+      esac
+      set -- "${@:1:$((i-1))}" "${@:$((i+2))}"
+      break
+      ;;
+  esac
+done
 
 check_cli() {
   if ! command -v arduino-cli &>/dev/null; then
@@ -48,25 +102,28 @@ install_libs() {
 }
 
 detect_port() {
+  local target_fqbn="$1"
   local port
   port=$(arduino-cli board list --format json 2>/dev/null \
     | python3 -c "
 import sys, json
+target = sys.argv[1] if len(sys.argv) > 1 else ''
 data = json.load(sys.stdin)
 ports = data.get('detected_ports', data) if isinstance(data, dict) else data
+# First pass: exact FQBN match
 for p in ports:
-    addr = p.get('port', p.get('matching_boards', [{}]))
-    boards = p.get('matching_boards', [])
-    for b in boards:
-        if 'esp32s3' in b.get('fqbn', '').lower():
+    addr = p.get('port', {})
+    for b in p.get('matching_boards', []):
+        if b.get('fqbn', '').lower() == target.lower():
             print(addr.get('address', '') if isinstance(addr, dict) else '')
             sys.exit(0)
+# Second pass: any esp32 serial port
 for p in ports:
     addr = p.get('port', {})
     if isinstance(addr, dict) and addr.get('protocol', '') == 'serial':
         print(addr.get('address', ''))
         sys.exit(0)
-" 2>/dev/null)
+" "$target_fqbn" 2>/dev/null)
   echo "$port"
 }
 
@@ -85,8 +142,8 @@ fi
 install_libs
 
 info "Compiling sketch: $SKETCH_DIR"
-info "Board: $FQBN"
-arduino-cli compile --fqbn "$FQBN" "$SKETCH_DIR" --warnings default
+info "Board: $info_board ($FQBN)"
+arduino-cli compile --fqbn "$FQBN" "${BUILD_PROPS[@]+"${BUILD_PROPS[@]}"}" "$SKETCH_DIR" --warnings default
 ok "Compilation successful"
 
 if [[ "${1:-}" == "--compile" ]]; then
@@ -96,7 +153,7 @@ fi
 PORT="${1:-}"
 if [[ -z "$PORT" ]]; then
   info "Auto-detecting board port..."
-  PORT=$(detect_port)
+  PORT=$(detect_port "$FQBN")
 fi
 
 if [[ -z "$PORT" ]]; then
@@ -111,7 +168,7 @@ fi
 ok "Using port: $PORT"
 
 info "Uploading to $PORT at ${BAUD} baud..."
-arduino-cli upload --fqbn "$FQBN" --port "$PORT" "$SKETCH_DIR"
+arduino-cli upload --fqbn "$FQBN" "${BUILD_PROPS[@]+"${BUILD_PROPS[@]}"}" --port "$PORT" "$SKETCH_DIR"
 ok "Upload complete!"
 echo ""
 info "Monitor serial output with: arduino-cli monitor -p $PORT -b $FQBN"

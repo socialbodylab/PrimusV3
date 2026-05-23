@@ -5,20 +5,43 @@
  *
  * Screen index cycle (D0 button):
  *   0 — Connection / home
- *   1 — Output status
- *   2 — Error / system
- *   3 — Audio status (Now Playing / Idle)
- *   4 — FTP status (IP, credentials, file count, on/off)
+ *   1 — Error / system
+ *   2 — Audio status
+ *   3 — FTP status
  */
 
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
+#include <WiFi.h>
+#include "config.h"
+
+// =====================================================================
+//  NO_DISPLAY stubs — headless builds (HUZZAH32, no TFT)
+// =====================================================================
+#ifdef NO_DISPLAY
+
+#define NUM_INFO_SCREENS 4
+
+char displayDeviceName[18] = {0};
+
+inline void setDisplayName(const char* name) {
+  strncpy(displayDeviceName, name, 17);
+  displayDeviceName[17] = '\0';
+}
+inline void displayInit()       {}
+inline void displayStartup()    {}
+inline void displayConnection(const char*, IPAddress, bool, int) {}
+inline void displayError(const char*, const char*)               {}
+inline void displayAudioStatus(const char*, uint8_t, bool)       {}
+inline void displayFtpStatus(bool, IPAddress, uint16_t)          {}
+inline void displayUpdateFooter(float, IPAddress = IPAddress(0,0,0,0)) {}
+
+#else  // full TFT implementation below
+
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
-#include <WiFi.h>
-#include "config.h"
 
 // =====================================================================
 //  TFT Object
@@ -31,18 +54,14 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 enum ScreenMode {
   SCREEN_STARTUP    = 0,
   SCREEN_CONNECTION = 1,
-  SCREEN_STATUS     = 2,
-  SCREEN_ERROR      = 3,
-  SCREEN_TEST       = 4,
-  SCREEN_AUDIO      = 5,
-  SCREEN_FTP        = 6
+  SCREEN_ERROR      = 2,
+  SCREEN_AUDIO      = 3,
+  SCREEN_FTP        = 4
 };
 
-#define NUM_INFO_SCREENS 5
+#define NUM_INFO_SCREENS 4
 
 ScreenMode currentScreen = SCREEN_STARTUP;
-
-const uint16_t portColors[MAX_OUTPUTS] = { ST77XX_RED, ST77XX_GREEN, ST77XX_BLUE };
 
 // =====================================================================
 //  Device name shown in headers
@@ -109,7 +128,7 @@ void displayStartup() {
 }
 
 // =====================================================================
-//  Connection Screen
+//  Connection Screen (screen index 0)
 // =====================================================================
 void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi) {
   currentScreen = SCREEN_CONNECTION;
@@ -160,13 +179,13 @@ void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi)
   tft.setCursor(4, 96);
   tft.setTextSize(1);
   tft.setTextColor(0x7BEF);
-  tft.print("FPS: ");
+  tft.print("P/s: ");
   tft.setTextColor(ST77XX_CYAN);
   tft.print("--");
 
   tft.setCursor(4, 110);
   tft.setTextColor(0x7BEF);
-  tft.print("D0:Screen  D1:Test/FTP");
+  tft.print("D0:Screen");
 
   tft.setCursor(4, 124);
   tft.setTextSize(1);
@@ -177,69 +196,7 @@ void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi)
 }
 
 // =====================================================================
-//  Running Status Screen
-// =====================================================================
-void displayStatus(OutputConfig outputs[NUM_OUTPUTS], float fps,
-                   bool outputActive[NUM_OUTPUTS]) {
-  currentScreen = SCREEN_STATUS;
-  tft.fillScreen(ST77XX_BLACK);
-
-  tft.setCursor(4, 4);
-  tft.setTextSize(1);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.print(headerName());
-  tft.print(" | Status");
-  tft.drawFastHLine(0, 14, 240, ST77XX_WHITE);
-
-  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
-    int16_t y = 18 + i * 28;
-
-    tft.setCursor(4, y);
-    tft.setTextSize(2);
-    tft.setTextColor(portColors[i]);
-    tft.print(i);
-
-    tft.setTextSize(1);
-    tft.setTextColor(ST77XX_WHITE);
-    tft.setCursor(20, y);
-    tft.print(typeName(outputs[i].type));
-    tft.setCursor(20, y + 10);
-    tft.print(outputs[i].pixelCount);
-    tft.print("px");
-
-    tft.setCursor(100, y);
-    tft.print("U:");
-    tft.print(outputs[i].universe);
-
-    tft.setCursor(160, y);
-    if (outputs[i].type == OUTPUT_OFF) {
-      tft.setTextColor(0x7BEF);
-      tft.print("OFF");
-    } else if (outputActive[i]) {
-      tft.setTextColor(ST77XX_GREEN);
-      tft.print("RECV");
-    } else {
-      tft.setTextColor(ST77XX_RED);
-      tft.print("IDLE");
-    }
-  }
-
-  int16_t footerY = 105;
-  tft.drawFastHLine(0, footerY, 240, ST77XX_WHITE);
-  tft.setCursor(4, footerY + 4);
-  tft.setTextSize(1);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.print("FPS: ");
-  tft.setTextColor(ST77XX_CYAN);
-  tft.print(fps, 1);
-
-  tft.setCursor(4, footerY + 16);
-  tft.setTextColor(0x7BEF);
-  tft.print("Art-Net Node · ArtPoll OK");
-}
-
-// =====================================================================
-//  Error Screen
+//  Error Screen (screen index 1)
 // =====================================================================
 void displayError(const char* errorMsg, const char* detail) {
   currentScreen = SCREEN_ERROR;
@@ -271,36 +228,7 @@ void displayError(const char* errorMsg, const char* detail) {
 }
 
 // =====================================================================
-//  Test Mode Screen
-// =====================================================================
-void displayTestMode(uint8_t testModeIdx, const char* modeName) {
-  currentScreen = SCREEN_TEST;
-  tft.fillScreen(ST77XX_BLACK);
-
-  tft.setCursor(4, 4);
-  tft.setTextSize(1);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.print(headerName());
-  tft.print(" | Test Mode");
-  tft.drawFastHLine(0, 14, 240, ST77XX_MAGENTA);
-
-  tft.setCursor(10, 35);
-  tft.setTextSize(3);
-  tft.setTextColor(ST77XX_MAGENTA);
-  tft.println(modeName);
-
-  tft.setCursor(10, 80);
-  tft.setTextSize(1);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.println("ArtNet paused during test");
-
-  tft.setCursor(10, 100);
-  tft.setTextColor(ST77XX_YELLOW);
-  tft.println("D1: next mode / exit");
-}
-
-// =====================================================================
-//  Audio Status Screen (screen index 3)
+//  Audio Status Screen (screen index 2)
 // =====================================================================
 void displayAudioStatus(const char* filename, uint8_t volume, bool playing) {
   currentScreen = SCREEN_AUDIO;
@@ -322,7 +250,6 @@ void displayAudioStatus(const char* filename, uint8_t volume, bool playing) {
     tft.setCursor(4, 40);
     tft.setTextSize(2);
     tft.setTextColor(ST77XX_CYAN);
-    // Truncate long filenames to fit display
     char truncName[17];
     strncpy(truncName, filename, 16);
     truncName[16] = '\0';
@@ -359,10 +286,14 @@ void displayAudioStatus(const char* filename, uint8_t volume, bool playing) {
 #else
   tft.print("Board: BFF (MAX98357 I2S)");
 #endif
+
+  tft.setCursor(4, 124);
+  tft.setTextColor(0x4208);
+  tft.print("D1: Test Tone");
 }
 
 // =====================================================================
-//  FTP Status Screen (screen index 4)
+//  FTP Status Screen (screen index 3)
 // =====================================================================
 void displayFtpStatus(bool running, IPAddress ip, uint16_t fileCount) {
   currentScreen = SCREEN_FTP;
@@ -382,7 +313,6 @@ void displayFtpStatus(bool running, IPAddress ip, uint16_t fileCount) {
     tft.print("FTP SERVER ON");
 
     tft.setCursor(4, 38);
-    tft.setTextSize(1);
     tft.setTextColor(0x7BEF);
     tft.print("IP:   ");
     tft.setTextColor(ST77XX_WHITE);
@@ -428,66 +358,18 @@ void displayFtpStatus(bool running, IPAddress ip, uint16_t fileCount) {
 }
 
 // =====================================================================
-//  Quick footer update
+//  Quick footer update — connection screen packet-rate counter
 // =====================================================================
-void displayUpdateFooter(float fps, IPAddress sourceIP = IPAddress(0,0,0,0)) {
-  if (currentScreen == SCREEN_CONNECTION) {
-    tft.fillRect(34, 96, 50, 10, ST77XX_BLACK);
-    tft.setCursor(34, 96);
-    tft.setTextSize(1);
-    tft.setTextColor(ST77XX_CYAN);
-    if (fps > 0) tft.print(fps, 1); else tft.print("--");
-    return;
-  }
+void displayUpdateFooter(float pktRate, IPAddress sourceIP = IPAddress(0,0,0,0)) {
+  if (currentScreen != SCREEN_CONNECTION) return;
 
-  if (currentScreen != SCREEN_STATUS) return;
-
-  int16_t footerY = 105;
-  tft.fillRect(0, footerY + 1, 240, 30, ST77XX_BLACK);
-  tft.drawFastHLine(0, footerY, 240, ST77XX_WHITE);
-
-  tft.setCursor(4, footerY + 4);
+  // "P/s: " is 5 chars × 6px = 30px; number starts at x=4+30=34
+  tft.fillRect(34, 96, 70, 10, ST77XX_BLACK);
+  tft.setCursor(34, 96);
   tft.setTextSize(1);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.print("FPS: ");
   tft.setTextColor(ST77XX_CYAN);
-  tft.print(fps, 1);
-
-  if (sourceIP != IPAddress(0,0,0,0)) {
-    tft.setCursor(80, footerY + 4);
-    tft.setTextColor(ST77XX_WHITE);
-    tft.print("Src: ");
-    tft.setTextColor(ST77XX_YELLOW);
-    tft.print(sourceIP);
-  }
-
-  tft.setCursor(4, footerY + 16);
-  tft.setTextColor(0x7BEF);
-  tft.print("Heap:");
-  tft.print(ESP.getFreeHeap() / 1024);
-  tft.print("k");
+  if (pktRate > 0) tft.print(pktRate, 1); else tft.print("--");
 }
 
-// =====================================================================
-//  Quick output active/idle indicator update
-// =====================================================================
-void displayUpdateOutputActive(uint8_t index, bool active, OutputType type) {
-  if (currentScreen != SCREEN_STATUS) return;
-
-  int16_t y = 18 + index * 28;
-  tft.fillRect(160, y, 80, 10, ST77XX_BLACK);
-  tft.setCursor(160, y);
-  tft.setTextSize(1);
-  if (type == OUTPUT_OFF) {
-    tft.setTextColor(0x7BEF);
-    tft.print("OFF");
-  } else if (active) {
-    tft.setTextColor(ST77XX_GREEN);
-    tft.print("RECV");
-  } else {
-    tft.setTextColor(ST77XX_RED);
-    tft.print("IDLE");
-  }
-}
-
+#endif // NO_DISPLAY
 #endif // DISPLAY_H

@@ -28,9 +28,9 @@ extern bool sdBusy;   // defined in the .ino
 // =====================================================================
 //  Internal state (shared across both implementations)
 // =====================================================================
-static char   _audioCurrentFile[33] = {0};
-static uint8_t _audioVolume = 80;
-static bool   _audioLooping = false;
+char   _audioCurrentFile[33] = {0};
+uint8_t _audioVolume = 80;
+bool   _audioLooping = false;
 
 // =====================================================================
 //  Music Maker FeatherWing (VS1053B) — SPI hardware codec
@@ -39,7 +39,7 @@ static bool   _audioLooping = false;
 
 #include <Adafruit_VS1053.h>
 
-static Adafruit_VS1053_FilePlayer _musicMaker(
+Adafruit_VS1053_FilePlayer _musicMaker(
   MM_CS_PIN, MM_DCS_PIN, MM_DREQ_PIN, MM_SDCS_PIN);
 
 void audioInit() {
@@ -48,13 +48,11 @@ void audioInit() {
   // VS1053 begin() initialises both the codec and the onboard SD card
   if (!_musicMaker.begin()) {
     Serial.println("[Audio] ERROR: VS1053 begin() failed");
-    displayError("VS1053 Fail", "Music Maker not detected");
     return;
   }
 
   if (!SD.begin(MM_SDCS_PIN)) {
     Serial.println("[Audio] ERROR: SD card init failed (Music Maker)");
-    displayError("SD Fail", "SD card not found (MM)");
     return;
   }
   Serial.println("[Audio] SD OK");
@@ -78,7 +76,7 @@ bool audioPlay(const char* filename, uint8_t volume) {
   sdBusy = true;
 
   // VS1053 volume: 0=max, 254=silent. Map 0-100 → 100-0 (scale to 0-100 range)
-  uint8_t vs1053vol = (uint8_t)((100 - volume) * 100 / 100);
+  uint8_t vs1053vol = (uint8_t)((100 - volume) * 254 / 100);
   _musicMaker.setVolume(vs1053vol, vs1053vol);
 
   bool ok = _musicMaker.startPlayingFile(filename);
@@ -109,8 +107,15 @@ void audioPause() {
 
 void audioSetVolume(uint8_t volume) {
   _audioVolume = volume;
-  uint8_t vs1053vol = (uint8_t)((100 - volume) * 100 / 100);
+  uint8_t vs1053vol = (uint8_t)((100 - volume) * 254 / 100);
   _musicMaker.setVolume(vs1053vol, vs1053vol);
+}
+
+void audioTestTone() {
+  if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  Serial.println("[Audio] Test tone: 1kHz, 500ms");
+  _musicMaker.sineTest(0x44, 500);
+  Serial.println("[Audio] Test tone complete");
 }
 
 void audioLoop(const char* filename, uint8_t volume) {
@@ -145,19 +150,25 @@ const char* audioCurrentFile() {
 #elif AUDIO_BOARD == AUDIO_BOARD_BFF
 
 #include <AudioFileSourceSD.h>
+#include <AudioFileSourcePROGMEM.h>
 #include <AudioGeneratorWAV.h>
+#include <AudioGeneratorRTTTL.h>
 #include <AudioOutputI2S.h>
 
-static AudioFileSourceSD* _audioSource = nullptr;
-static AudioGeneratorWAV* _audioGen    = nullptr;
-static AudioOutputI2S*    _audioOut    = nullptr;
+// A4 (440 Hz) for ~2 seconds — no SD card required
+static const char _testToneRTTTL[] PROGMEM = "test:d=2,o=4,b=60:a";
+
+AudioFileSourceSD*     _audioSource = nullptr;
+AudioGeneratorWAV*     _audioGen    = nullptr;
+AudioOutputI2S*        _audioOut    = nullptr;
+AudioFileSourcePROGMEM* _testSrc    = nullptr;
+AudioGeneratorRTTTL*   _testGen     = nullptr;
 
 void audioInit() {
   Serial.println("[Audio] Audio BFF (MAX98357 I2S)");
 
   if (!SD.begin(BFF_SDCS_PIN)) {
     Serial.println("[Audio] ERROR: SD card init failed (BFF)");
-    displayError("SD Fail", "SD card not found (BFF)");
     return;
   }
   Serial.println("[Audio] SD OK");
@@ -174,10 +185,12 @@ bool audioPlay(const char* filename, uint8_t volume) {
     return false;
   }
 
-  // Stop any existing playback
-  if (_audioGen && _audioGen->isRunning()) {
-    _audioGen->stop();
-  }
+  // Stop test tone or existing playback
+  if (_testGen && _testGen->isRunning()) _testGen->stop();
+  delete _testGen; _testGen = nullptr;
+  delete _testSrc; _testSrc = nullptr;
+
+  if (_audioGen && _audioGen->isRunning()) _audioGen->stop();
   delete _audioGen;    _audioGen    = nullptr;
   delete _audioSource; _audioSource = nullptr;
 
@@ -216,6 +229,10 @@ bool audioPlay(const char* filename, uint8_t volume) {
 }
 
 void audioStop() {
+  if (_testGen && _testGen->isRunning()) _testGen->stop();
+  delete _testGen; _testGen = nullptr;
+  delete _testSrc; _testSrc = nullptr;
+
   if (_audioGen && _audioGen->isRunning()) _audioGen->stop();
   delete _audioGen;    _audioGen    = nullptr;
   delete _audioSource; _audioSource = nullptr;
@@ -226,14 +243,35 @@ void audioStop() {
 }
 
 void audioPause() {
-  // ESP8266Audio does not have a native pause — stop is the closest
-  if (_audioGen && _audioGen->isRunning()) _audioGen->stop();
-  Serial.println("[Audio] Paused (stopped)");
+  // ESP8266Audio has no native pause. On BFF hardware, pause = stop.
+  // A subsequent play command will restart from the beginning of the file.
+  audioStop();
+  Serial.println("[Audio] Pause → Stop (BFF has no native pause)");
 }
 
 void audioSetVolume(uint8_t volume) {
   _audioVolume = volume;
   if (_audioOut) _audioOut->SetGain(volume / 100.0f);
+}
+
+void audioTestTone() {
+  // Stop any regular playback
+  if (_audioGen && _audioGen->isRunning()) _audioGen->stop();
+  delete _audioGen;    _audioGen    = nullptr;
+  delete _audioSource; _audioSource = nullptr;
+  _audioCurrentFile[0] = '\0';
+  _audioLooping = false;
+  sdBusy = false;
+
+  // Stop any previous test tone
+  if (_testGen && _testGen->isRunning()) _testGen->stop();
+  delete _testGen; _testGen = nullptr;
+  delete _testSrc; _testSrc = nullptr;
+
+  _testSrc = new AudioFileSourcePROGMEM(_testToneRTTTL, strlen_P(_testToneRTTTL));
+  _testGen = new AudioGeneratorRTTTL();
+  _testGen->begin(_testSrc, _audioOut);
+  Serial.println("[Audio] Test tone: A4 (440 Hz)");
 }
 
 void audioLoop(const char* filename, uint8_t volume) {
@@ -242,6 +280,17 @@ void audioLoop(const char* filename, uint8_t volume) {
 }
 
 void audioUpdate() {
+  // Test tone takes priority over regular playback
+  if (_testGen && _testGen->isRunning()) {
+    if (!_testGen->loop()) {
+      _testGen->stop();
+      delete _testGen; _testGen = nullptr;
+      delete _testSrc; _testSrc = nullptr;
+      Serial.println("[Audio] Test tone complete");
+    }
+    return;
+  }
+
   if (_audioGen && _audioGen->isRunning()) {
     if (!_audioGen->loop()) {
       // Finished
@@ -265,7 +314,7 @@ void audioUpdate() {
 }
 
 bool audioIsPlaying() {
-  return _audioGen && _audioGen->isRunning();
+  return (_testGen && _testGen->isRunning()) || (_audioGen && _audioGen->isRunning());
 }
 
 const char* audioCurrentFile() {
