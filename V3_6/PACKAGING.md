@@ -2,6 +2,8 @@
 
 The V3.6 sender can be packaged as a one-click macOS app or Windows executable because it is pure Python, serves its own static web UI, and has no runtime dependencies outside the Python standard library.
 
+For the current Windows 11 build handoff, validation checklist, and known platform gaps, see [WINDOWS_BUILD.md](WINDOWS_BUILD.md).
+
 ## Runtime Paths
 
 Source checkouts keep using `V3_6/sender/` for clips, looks, cues, and `.primus_state.json`.

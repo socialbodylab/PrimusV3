@@ -19,6 +19,7 @@ V3.6 also adds portable Clip and Look sharing bundles. Clips export as standalon
 | [ConnectionSettings.md](ConnectionSettings.md) | Sender network Settings workflow, show-router route selection, and Settings API methods. |
 | [exteriorIntegration.md](exteriorIntegration.md) | Inbound OSC cue triggering for QLab and other show-control tools. |
 | [PACKAGING.md](PACKAGING.md) | Build a one-click macOS app or Windows executable for the V3.6 sender/interface. |
+| [WINDOWS_BUILD.md](WINDOWS_BUILD.md) | Windows 11 build handoff, permissions, networking, timing, firmware, and validation checklist for the 0.7 app. |
 | [hardwareCompatibility.md](hardwareCompatibility.md) | Compact board/profile/pin/output reference. |
 | [previousHardware/](previousHardware/) | Archived V1/V2 firmware and specs used only as historical reference. |
 
@@ -45,6 +46,7 @@ V3_6/
 ├── ConnectionSettings.md
 ├── exteriorIntegration.md
 ├── FIRMWARE_DEVELOPMENT.md
+├── WINDOWS_BUILD.md
 └── SENDER_DEVELOPMENT.md
 ```
 
