@@ -131,6 +131,21 @@ document.addEventListener("alpine:init", () => {
             return "Active";
         },
 
+        get hostPlatformLabel() {
+            const platform = String(this.status?.platform || "").toLowerCase();
+            if (platform.startsWith("win")) return "Windows";
+            if (platform === "darwin") return "macOS";
+            return "Host";
+        },
+
+        get hostConfigLabel() {
+            return this.hostPlatformLabel + " Config";
+        },
+
+        get applyStaticLabel() {
+            return "Apply to " + this.hostPlatformLabel;
+        },
+
         get profileNetwork() {
             return this.networkSummary(this.staticIp, this.subnet);
         },
@@ -312,7 +327,7 @@ document.addEventListener("alpine:init", () => {
                 this.status = result;
                 Alpine.store("app").network = result;
                 this.syncFromStatus();
-                Alpine.store("app").showNotice("Static IP applied to macOS.", "success");
+                Alpine.store("app").showNotice("Static IP applied to " + this.hostPlatformLabel + ".", "success");
             } catch (e) {
                 Alpine.store("app").showApiError("Static IP apply failed", e);
             } finally {
@@ -334,7 +349,7 @@ document.addEventListener("alpine:init", () => {
                 this.status = result;
                 Alpine.store("app").network = result;
                 this.syncFromStatus();
-                Alpine.store("app").showNotice("macOS service reverted to DHCP.", "success");
+                Alpine.store("app").showNotice(this.hostPlatformLabel + " connection reverted to DHCP.", "success");
             } catch (e) {
                 Alpine.store("app").showApiError("DHCP revert failed", e);
             } finally {

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -59,6 +60,70 @@ destination: default
   interface: en0
 """
 
+WINDOWS_SNAPSHOT = {
+    "interfaces": [
+        {
+            "service": "Ethernet",
+            "device": "12",
+            "hardware_port": "USB 10/100/1000 LAN",
+            "status": "Up",
+            "media_connection_state": "Connected",
+            "physical_medium": "14",
+            "if_type": 6,
+            "mac": "AA-BB-CC-DD-EE-01",
+            "ipv4": "192.168.10.2",
+            "prefix_length": 24,
+            "gateway": "192.168.10.1",
+            "configured_mode": "static",
+            "connected": True,
+            "is_default": False,
+        },
+        {
+            "service": "Wi-Fi",
+            "device": "15",
+            "hardware_port": "RZ616 Wi-Fi 6E 160MHz",
+            "status": "Up",
+            "media_connection_state": "Connected",
+            "physical_medium": "9",
+            "if_type": 71,
+            "mac": "AA-BB-CC-DD-EE-02",
+            "ipv4": "10.0.0.45",
+            "prefix_length": 24,
+            "gateway": "10.0.0.1",
+            "configured_mode": "dhcp",
+            "connected": True,
+            "is_default": True,
+        },
+        {
+            "service": "Bluetooth Network Connection",
+            "device": "16",
+            "hardware_port": "Bluetooth Device (Personal Area Network)",
+            "status": "Disconnected",
+            "media_connection_state": "Disconnected",
+            "physical_medium": "10",
+            "if_type": 6,
+            "mac": "AA-BB-CC-DD-EE-03",
+            "ipv4": "169.254.10.20",
+            "prefix_length": 16,
+            "gateway": "",
+            "configured_mode": "dhcp",
+            "connected": False,
+            "is_default": False,
+        },
+    ],
+    "default_route": {"interface": "15", "gateway": "10.0.0.1"},
+}
+
+WINDOWS_WLAN = """
+There is 1 interface on the system:
+
+    Name                   : Wi-Fi
+    Description            : RZ616 Wi-Fi 6E 160MHz
+    State                  : connected
+    SSID                   : PrimusController
+    BSSID                  : e2:db:d1:ec:0e:ee
+"""
+
 
 def mac_command_output(args, timeout=4.0):
     if "-listnetworkserviceorder" in args:
@@ -71,6 +136,14 @@ def mac_command_output(args, timeout=4.0):
         return "Current Wi-Fi Network: PrimusRouter\n"
     if "-getinfo" in args:
         return "DHCP Configuration\nIP address: 10.0.0.20\nSubnet mask: 255.255.255.0\nRouter: 10.0.0.1\n"
+    raise AssertionError(f"unexpected command: {args}")
+
+
+def windows_command_output(args, timeout=4.0):
+    if args and str(args[0]).lower().startswith("powershell"):
+        return json.dumps(WINDOWS_SNAPSHOT)
+    if args[:3] == ["netsh", "wlan", "show"]:
+        return WINDOWS_WLAN
     raise AssertionError(f"unexpected command: {args}")
 
 
@@ -238,6 +311,80 @@ class NetworkSettingsTests(unittest.TestCase):
             wifi = next(item for item in status["interfaces"] if item["device"] == "en0")
             self.assertEqual(wifi["type"], "wifi")
             self.assertEqual(wifi["ssid"], "FallbackNet")
+
+    def test_status_parses_windows_interfaces_and_allows_selection(self):
+        with mock.patch.object(network_settings.sys, "platform", "win32"), \
+                mock.patch.object(network_settings, "_run_text", side_effect=windows_command_output):
+            status = network_settings.get_network_status()
+
+            self.assertTrue(status["supported"])
+            self.assertEqual(status["platform"], "win32")
+            self.assertEqual(len(status["interfaces"]), 3)
+            ethernet = next(item for item in status["interfaces"] if item["service"] == "Ethernet")
+            wifi = next(item for item in status["interfaces"] if item["service"] == "Wi-Fi")
+            self.assertEqual(ethernet["type"], "ethernet")
+            self.assertEqual(ethernet["subnet"], "255.255.255.0")
+            self.assertEqual(ethernet["broadcast"], "192.168.10.255")
+            self.assertEqual(ethernet["configured_mode"], "static")
+            self.assertEqual(wifi["type"], "wifi")
+            self.assertEqual(wifi["ssid"], "PrimusController")
+            self.assertTrue(wifi["is_default"])
+            self.assertEqual(status["recommended_interface"]["service"], "Ethernet")
+
+            selected = network_settings.set_preferred_interface({"id": ethernet["id"]})
+            self.assertEqual(selected["selected_interface"]["service"], "Ethernet")
+            self.assertEqual(network_settings.get_artnet_interface()["source_ip"], "192.168.10.2")
+
+    def test_windows_subprocesses_are_hidden_when_supported(self):
+        with mock.patch.object(network_settings.os, "name", "nt"), \
+                mock.patch.object(network_settings.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True):
+            kwargs = network_settings._no_window_subprocess_kwargs()
+
+        self.assertEqual(kwargs.get("creationflags"), 0x08000000)
+        if hasattr(network_settings.subprocess, "STARTUPINFO"):
+            self.assertIn("startupinfo", kwargs)
+
+    def test_apply_static_ip_uses_elevated_windows_netsh(self):
+        network_settings.save_settings({
+            "preferred": {
+                "id": "12:Ethernet",
+                "service": "Ethernet",
+                "device": "12",
+                "source_ip": "192.168.10.2",
+            }
+        })
+        with mock.patch.object(network_settings.sys, "platform", "win32"), \
+                mock.patch.object(network_settings, "_run_text", side_effect=windows_command_output), \
+                mock.patch.object(network_settings, "_wait_for_interface_ip", return_value=True), \
+                mock.patch.object(network_settings.subprocess, "run") as run_mock:
+            result = network_settings.apply_static_ip({
+                "id": "12:Ethernet",
+                "scope": "service",
+                "mode": "static",
+                "ip": "192.168.10.50",
+                "gateway": "192.168.10.1",
+                "subnet": "255.255.255.0",
+            })
+
+            self.assertTrue(run_mock.called)
+            powershell_args = run_mock.call_args.args[0]
+            self.assertEqual(powershell_args[:4], ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass"])
+            self.assertIn("Start-Process", powershell_args[-1])
+            self.assertIn("-Verb RunAs", powershell_args[-1])
+            self.assertIn("-WindowStyle Hidden", powershell_args[-1])
+            self.assertEqual(result["last_applied"]["ip"], "192.168.10.50")
+            self.assertTrue(result["last_applied"]["confirmed"])
+            self.assertEqual(network_settings.load_settings()["preferred"]["source_ip"], "192.168.10.50")
+
+    def test_set_dhcp_uses_elevated_windows_netsh(self):
+        with mock.patch.object(network_settings.sys, "platform", "win32"), \
+                mock.patch.object(network_settings, "_run_text", side_effect=windows_command_output), \
+                mock.patch.object(network_settings.subprocess, "run") as run_mock:
+            result = network_settings.set_dhcp({"id": "12:Ethernet"})
+
+            self.assertTrue(run_mock.called)
+            self.assertEqual(result["last_applied"]["mode"], "dhcp")
+            self.assertEqual(network_settings.load_settings()["service_profiles"]["Ethernet"]["mode"], "dhcp")
 
     def test_status_prefers_scutil_ssid_when_networksetup_is_empty(self):
         with mock.patch.object(network_settings.sys, "platform", "darwin"), \

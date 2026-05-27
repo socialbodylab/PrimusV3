@@ -1308,7 +1308,7 @@
                         <span class="settings-detail-value" x-text="selectedInterface?.source_ip || 'None'"></span>
                     </div>
                     <div>
-                        <span class="settings-detail-label">macOS Config</span>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
                         <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
                     </div>
                     <div>
@@ -1356,7 +1356,7 @@
                         <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
                     </div>
                     <div>
-                        <span class="settings-detail-label">macOS Config</span>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
                         <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
                     </div>
                     <div>
@@ -1438,7 +1438,7 @@
                 <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!validationMessage }" x-text="validationMessage || profileModeNote()"></div>
                 <div class="settings-actions-row">
                     <button class="btn" @click="saveProfile()" :disabled="!canSaveProfile" x-text="saving ? 'Saving...' : 'Save Sender Profile'"></button>
-                    <button class="btn btn-primary" x-show="mode === 'static'" @click="applyStaticIp()" :disabled="!canApplyStatic" x-text="applying ? 'Applying...' : 'Apply to macOS'"></button>
+                    <button class="btn btn-primary" x-show="mode === 'static'" @click="applyStaticIp()" :disabled="!canApplyStatic" x-text="applying ? 'Applying...' : applyStaticLabel"></button>
                     <button class="btn btn-danger" @click="revertDhcp()" :disabled="!canRevertDhcp" x-text="applying ? 'Applying...' : 'Revert to DHCP'"></button>
                 </div>
             </div>

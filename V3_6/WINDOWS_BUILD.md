@@ -179,12 +179,7 @@ Windows static IP and DHCP changes require administrator rights. The current sen
 
 For the first Windows build, configure the PC network adapter manually in Windows Settings or Control Panel, then use PrimusCentral only for receiver discovery, receiver IP config, output config, rename, hello, clips, looks, and cues.
 
-If Windows host network controls are added later, evaluate these approaches:
-
-- `netsh interface ipv4 set address` through an elevated helper.
-- PowerShell `NetTCPIP` commands through an elevated helper.
-- WMI/CIM adapter APIs.
-- Opening the relevant Windows Settings page and keeping IP changes manual.
+Windows host network controls are implemented through PowerShell status probes and elevated `netsh interface ipv4` commands. Static IP and DHCP changes should trigger a Windows UAC prompt. The app should not run entirely as Administrator; only the host network change command should elevate.
 
 Avoid making the whole app run as Administrator unless there is a clear reason. A full elevated app changes file ownership, firewall behavior, and browser launch assumptions.
 
@@ -196,19 +191,20 @@ Start firmware validation with list-ports only. Do not attempt batch upload unti
 
 ## Network Interface And IP Configuration
 
-Receiver control over Art-Net is intended to work on Windows. Host network switching is the current gap.
+Receiver control over Art-Net and host network switching are intended to work on Windows.
 
 Current implementation status:
 
 - `V3_6/sender/artnet.py` uses standard UDP sockets and can send Art-Net frames on Windows.
 - `V3_6/sender/state.py` can bind Art-Net senders to a selected source IP when one is provided.
-- `V3_6/sender/network_settings.py` currently supports macOS host interface discovery, preferred Art-Net source routing, static IP apply, and DHCP revert.
-- On non-macOS platforms, `get_network_status()` reports unsupported and returns the warning `Host network switching is currently supported on macOS only.`
+- `V3_6/sender/network_settings.py` supports macOS and Windows host interface discovery, preferred Art-Net source routing, static IP apply, and DHCP revert.
+- On Windows, interface status comes from PowerShell NetTCPIP commands plus `netsh wlan`; static IP and DHCP changes run through an elevated Windows prompt and `netsh`.
+- On platforms other than macOS and Windows, `get_network_status()` reports unsupported.
 
-Practical Windows 11 workaround for 0.7 validation:
+Practical Windows 11 validation flow:
 
 1. Connect the Windows machine to the show router or Ethernet adapter used for receiver traffic.
-2. Set the adapter to DHCP or a manual static IP in Windows Settings, depending on the network.
+2. Use Settings to select the desired sender connection for Art-Net.
 3. Confirm the PC and receivers are on the same IPv4 subnet.
 4. Launch PrimusCentral.
 5. Allow Windows Firewall prompts for the show network.
@@ -216,10 +212,10 @@ Practical Windows 11 workaround for 0.7 validation:
 7. If discovery fails, try manual add by receiver IP before changing sender code.
 8. If manual add works but discovery does not, suspect broadcast/firewall/interface selection.
 
-Recommended future Windows implementation shape:
+Recommended future Windows hardening shape:
 
 - Keep the public API used by `server.py` stable.
-- Add Windows-specific helpers inside `network_settings.py` or a small platform helper module.
+- Keep Windows-specific helpers narrow inside `network_settings.py` or a small platform helper module.
 - Preserve the current persisted `sender_network` state format where possible.
 - Do not fork the sender UI or create a separate Windows-only sender.
 
@@ -312,7 +308,7 @@ The current builder creates a Windows `.exe`, but release-grade Windows packagin
 
 ### Icon
 
-The macOS `.icns` generation is automated. Windows icon generation is not yet automated.
+The macOS `.icns` generation is automated. Windows `.ico` generation is automated too.
 
 Use the same tracked source image:
 
@@ -320,47 +316,99 @@ Use the same tracked source image:
 V3_6/assets/appIcon.png
 ```
 
-Generate a Windows `.ico` into the ignored build tree, for example:
+The builder converts that PNG into a Windows `.ico` in the ignored build tree:
 
 ```text
 V3_6\build\windows\icons\PrimusCentral.ico
 ```
 
-Then pass it to PyInstaller with:
+The generated icon is passed to PyInstaller by default:
 
 ```powershell
-py V3_6\build_sender_app.py --target windows --icon V3_6\build\windows\icons\PrimusCentral.ico
+py V3_6\build_sender_app.py --target windows
 ```
 
-Important: `build_sender_app.py` does not currently expose a generic `--icon` argument for Windows. Either add that flag to the builder or temporarily test icon handling by calling PyInstaller directly. Keep ImageMagick, Pillow, or other icon-conversion tools as build-time tools only; do not add them as sender runtime dependencies.
+Pillow is required as a build-time tool for the conversion and is listed in `V3_6\requirements-build.txt`; it is not a sender runtime dependency. A custom `.ico` can still be supplied with `--icon` when needed.
 
 The `.ico` should include common Windows sizes: 16, 24, 32, 48, 64, 128, and 256 px.
 
 ### Signing
 
-The builder has macOS signing and notarization support only. There is no Windows Authenticode signing step yet.
+The builder supports optional Windows Authenticode signing with Azure Artifact Signing. The build machine needs:
 
-Potential future command shape after a certificate decision:
+- An Artifact Signing account with completed identity validation.
+- A certificate profile.
+- The signing user or service principal assigned the **Artifact Signing Certificate Profile Signer** role.
+- Azure CLI login or another Azure `DefaultAzureCredential` method.
+- Windows SDK SignTool, .NET 8, and the Artifact Signing Client Tools dlib.
+
+Install the Azure client-side tools:
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a V3_6\dist\windows\PrimusCentral.exe
+winget install -e --id Microsoft.AzureCLI
+winget install -e --id Microsoft.Azure.ArtifactSigningClientTools
+winget install -e --id JRSoftware.InnoSetup
 ```
 
-This is a placeholder direction, not an implemented project command.
+Create local metadata under the ignored build tree:
+
+```json
+{
+  "Endpoint": "https://eus.codesigning.azure.net",
+  "CodeSigningAccountName": "<Artifact Signing account name>",
+  "CertificateProfileName": "<Certificate profile name>",
+  "CorrelationId": "PrimusCentral-0.7"
+}
+```
+
+The endpoint must match the Azure region for the signing account. Then sign as part of the Windows build:
+
+```powershell
+az login
+az account set --subscription "<subscription name or id>"
+py V3_6\build_sender_app.py --target windows `
+  --windows-sign-metadata V3_6\build\windows\signing\metadata.json `
+  --windows-sign-dlib "C:\Path\To\Azure.CodeSigning.Dlib.dll"
+```
+
+The builder uses SHA-256 and Microsoft's Artifact Signing timestamp URL, `http://timestamp.acs.microsoft.com`, then verifies the signature with SignTool. Signing mutates the `.exe`; rebuild the release ZIP and checksum after signing.
 
 ### Installer Versus Standalone Executable
 
-The simplest Windows 0.7 validation artifact is the standalone `.exe`. For wider distribution, evaluate whether an installer is worth it.
+The recommended Windows 0.7 GitHub release publishes both a signed installer and a portable ZIP. The installer is the easiest option for most users: it installs PrimusCentral into a user-local app directory, creates Start Menu shortcuts, offers an optional desktop shortcut, and can be signed alongside the app. The ZIP remains the fallback for portable use or environments where an installer is inconvenient. Do not upload the raw `.exe`; direct executable downloads are more likely to be interrupted or warned on by browsers and endpoint tools.
 
-A Windows installer could:
+Recommended release asset names:
 
-- Place the app under `Program Files` or a user-local app directory.
-- Create Start Menu shortcuts.
-- Add firewall rules for UDP ports.
-- Install or check USB serial prerequisites.
-- Sign the installer and app.
+```text
+PrimusCentral-0.7-Windows-x64-Setup.exe
+PrimusCentral-0.7-Windows-x64-Setup.exe.sha256
+PrimusCentral-0.7-Windows-x64.zip
+PrimusCentral-0.7-Windows-x64.zip.sha256
+```
 
-A standalone `.exe` is easier to test, but users may need manual firewall approval and SmartScreen confirmation.
+The ZIP should contain:
+
+```text
+PrimusCentral.exe
+README-Windows.txt
+```
+
+Build the installer with Inno Setup after the app has been signed:
+
+```powershell
+py V3_6\build_sender_app.py --target windows --windows-installer `
+  --windows-sign-metadata V3_6\build\windows\signing\metadata.json `
+  --windows-sign-dlib "C:\Path\To\Azure.CodeSigning.Dlib.dll"
+```
+
+The current installer intentionally stays simple:
+
+- User-local install under `%LOCALAPPDATA%\Programs\PrimusCentral`.
+- Start Menu shortcut and optional desktop shortcut.
+- App and installer signing when Azure metadata is supplied.
+- No firewall-rule automation or USB-driver installation yet.
+
+A signed installer or ZIP should reduce warnings compared with an unsigned raw executable, but users may still need manual firewall approval and occasional SmartScreen confirmation while the app builds Windows reputation.
 
 ## Windows Build Checklist
 
@@ -372,7 +420,7 @@ Run this checklist from a fresh Windows checkout when possible.
 py --version
 py -m pip --version
 py -m pip install --upgrade pip
-py -m pip install pyinstaller
+py -m pip install -r V3_6\requirements-build.txt
 ```
 
 Optional virtual environment:
@@ -381,7 +429,7 @@ Optional virtual environment:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 py -m pip install --upgrade pip
-py -m pip install pyinstaller
+py -m pip install -r V3_6\requirements-build.txt
 ```
 
 If PowerShell blocks activation scripts, either use `cmd.exe` activation or adjust the current-user execution policy intentionally:
@@ -471,11 +519,9 @@ Do not create a separate Windows sender branch. The Windows work should preserve
 
 Known Windows gaps to address only when needed:
 
-- Host network adapter discovery and static/DHCP apply in `network_settings.py`.
 - Windows timer-resolution or thread-priority tuning if packaged FPS misses target.
 - Windows firewall rule installation for public distribution.
 - Authenticode signing and release reputation.
-- Windows icon generation in `build_sender_app.py`.
 - Non-Bash firmware uploader path.
 - More explicit Windows tests for browser launch, app-data paths, firmware tool availability, and unsupported network Settings behavior.
 

@@ -8,7 +8,7 @@ The Settings tab gives this its own operational surface to the right of Firmware
 
 Settings recommends an active Ethernet or USB-Ethernet connection when one is available. The Show Router Setup section displays:
 
-- Selected sender connection and macOS service.
+- Selected sender connection and host network service or adapter.
 - Sender IP, subnet, gateway, network CIDR, and usable host range.
 - Actions to use that connection for Art-Net, return to automatic routing, and discover receivers.
 
@@ -24,7 +24,7 @@ Static sender IP is the recommended mode when the show router has no internet or
 
 Settings validates that the subnet mask is contiguous, the sender IP is a usable host address, and the gateway is in the same subnet as the sender IP. It also shows the derived CIDR and usable range before applying the profile.
 
-Save Sender Profile stores the profile in Primus Central. Apply to macOS changes the actual macOS network service with `networksetup` through an administrator prompt. No WiFi passwords, admin passwords, or tokens are stored by Primus Central.
+Save Sender Profile stores the profile in Primus Central. Applying a profile changes the actual host network connection: macOS uses `networksetup` through an administrator prompt, and Windows uses an elevated `netsh` command through the Windows UAC prompt. No WiFi passwords, admin passwords, or tokens are stored by Primus Central.
 
 ## Receiver Network
 
@@ -40,9 +40,9 @@ Receiver DHCP/static controls remain available in the existing device controls. 
 
 ## Active Connections
 
-The tab lists active local IPv4 connections Primus can use on macOS:
+The tab lists active local IPv4 connections Primus can use on macOS and Windows:
 
-- WiFi services, including the current SSID when macOS reports it.
+- WiFi services, including the current SSID when the operating system reports it.
 - Ethernet or USB-Ethernet services.
 - Current sender IP, subnet, broadcast address, gateway, and default-route status.
 
@@ -54,13 +54,13 @@ Some setups put the sender computer on the show router WiFi instead of Ethernet.
 
 The Controller SSID can be typed directly or filled from the currently active WiFi network. This means the show-router WiFi can be named before it is active, and Primus will recognize it later when the computer joins that SSID.
 
-If macOS reports a privacy placeholder such as `<redacted>` or `<data> 0x00` instead of the current SSID, Primus ignores that placeholder. A typed Controller SSID is still saved, and when it is saved against the active WiFi adapter Primus can keep using that adapter/source IP as the controller route. Fully automatic SSID switching still depends on macOS exposing the real current SSID.
+If the operating system reports a privacy placeholder such as `<redacted>` or `<data> 0x00` instead of the current SSID, Primus ignores that placeholder. A typed Controller SSID is still saved, and when it is saved against the active WiFi adapter Primus can keep using that adapter/source IP as the controller route. Fully automatic SSID switching still depends on the operating system exposing the real current SSID.
 
-When Primus Central sees the tagged SSID active, that connection becomes the selected Art-Net route even if the physical WiFi service is the same macOS network service used by the internet SSID. When the computer is back on a different WiFi SSID, the controller tag no longer matches, so Primus does not treat that internet connection as the show-controller route.
+When Primus Central sees the tagged SSID active, that connection becomes the selected Art-Net route even if the physical WiFi adapter is the same network service used by the internet SSID. When the computer is back on a different WiFi SSID, the controller tag no longer matches, so Primus does not treat that internet connection as the show-controller route.
 
 ## Platform Scope
 
-The first implementation applies host IP changes on macOS only. Other platforms report unsupported status for host network switching while keeping the rest of Primus Central available.
+Host IP changes are implemented on macOS and Windows. Other platforms report unsupported status for host network switching while keeping the rest of Primus Central available.
 
 ## Settings API Methods
 
@@ -75,9 +75,9 @@ The Settings tab is backed by JSON endpoints on the local Primus Central HTTP se
 | `POST /api/network/controller_connection` | `{mode:"clear"}` | Clear the saved show-router WiFi tag. |
 | `POST /api/network/ssid_profile` | `{scope:"ssid/service", mode:"static", ip, gateway, subnet, ssid?, service?, device?}` | Save a static sender IP profile for a WiFi SSID or wired service. |
 | `POST /api/network/ssid_profile` | `{scope:"ssid/service", mode:"dhcp", ssid?, service?, device?}` | Save a DHCP profile for a WiFi SSID or wired service. |
-| `POST /api/network/apply_static_ip` | `{id?, service?, device?, ip, gateway, subnet}` | macOS-only: apply a static sender IP using `networksetup` through an administrator prompt, then save the profile. |
-| `POST /api/network/set_dhcp` | `{id?, service?, device?}` | macOS-only: return the selected macOS network service to DHCP and save that profile. |
+| `POST /api/network/apply_static_ip` | `{id?, service?, device?, ip, gateway, subnet}` | Apply a static sender IP using the platform network helper, then save the profile. |
+| `POST /api/network/set_dhcp` | `{id?, service?, device?}` | Return the selected host network connection to DHCP and save that profile. |
 
 Selecting or clearing the preferred interface also updates the sender's Art-Net source binding in memory, so subsequent discovery, connect, rename, output configuration, and receiver IP configuration calls use the intended show-router side of the computer when possible.
 
-For sender profiles, `scope` must be either `"ssid"` for WiFi-network profiles or `"service"` for wired/macOS service profiles.
+For sender profiles, `scope` must be either `"ssid"` for WiFi-network profiles or `"service"` for wired host-connection profiles.

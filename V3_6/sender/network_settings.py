@@ -6,6 +6,7 @@ dependency-free.
 """
 
 import copy
+import base64
 import ipaddress
 import json
 import os
@@ -23,6 +24,7 @@ STATE_KEY = "sender_network"
 NETWORKSETUP = "/usr/sbin/networksetup"
 SCUTIL = "/usr/sbin/scutil"
 AIRPORT = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+POWERSHELL = "powershell.exe"
 
 DEFAULT_SETTINGS = {
     "preferred": {
@@ -125,12 +127,29 @@ def save_settings(settings):
     return data[STATE_KEY]
 
 
+def _no_window_subprocess_kwargs():
+    if os.name != "nt":
+        return {}
+    kwargs = {}
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if creation_flags:
+        kwargs["creationflags"] = creation_flags
+    startupinfo_class = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_class is not None:
+        startupinfo = startupinfo_class()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def _run_text(args, timeout=4.0):
     return subprocess.check_output(
         args,
         text=True,
         stderr=subprocess.DEVNULL,
         timeout=timeout,
+        **_no_window_subprocess_kwargs(),
     )
 
 
@@ -141,6 +160,7 @@ def _run_text_input(args, input_text, timeout=4.0):
         text=True,
         stderr=subprocess.DEVNULL,
         timeout=timeout,
+        **_no_window_subprocess_kwargs(),
     )
 
 
@@ -347,6 +367,185 @@ def _mac_default_route():
     return out
 
 
+def _prefix_to_dotted(prefix):
+    try:
+        value = int(prefix)
+    except (TypeError, ValueError):
+        return ""
+    if value < 0 or value > 32:
+        return ""
+    mask = (0xFFFFFFFF << (32 - value)) & 0xFFFFFFFF if value else 0
+    return ".".join(str((mask >> shift) & 0xFF) for shift in (24, 16, 8, 0))
+
+
+def _windows_json(script, timeout=8.0):
+    text = _run_text([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=timeout)
+    text = str(text or "").strip()
+    if not text:
+        return {}
+    return json.loads(text)
+
+
+def _windows_network_snapshot():
+    script = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+$defaultRoute = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1)[0]
+$items = foreach ($adapter in Get-NetAdapter) {
+    $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.ifIndex
+    $ipInterface = @(Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $adapter.ifIndex | Select-Object -First 1)[0]
+    $addresses = @($ipConfig.IPv4Address | Where-Object { $_.IPAddress -and $_.IPAddress -notlike '169.254.*' })
+    if ($addresses.Count -eq 0) { $addresses = @($ipConfig.IPv4Address) }
+    $address = @($addresses | Select-Object -First 1)[0]
+    $gateway = @($ipConfig.IPv4DefaultGateway | Select-Object -First 1)[0]
+    $dhcpText = if ($ipInterface) { [string]$ipInterface.Dhcp } else { '' }
+    $mode = if ($dhcpText -match 'Enabled|1') { 'dhcp' } elseif ($dhcpText -match 'Disabled|0') { 'static' } else { 'unknown' }
+    $ipv4 = ''
+    $prefixLength = $null
+    if ($address) {
+        $ipv4 = [string]$address.IPAddress
+        $prefixLength = [int]$address.PrefixLength
+    }
+    $gatewayHop = ''
+    if ($gateway) { $gatewayHop = [string]$gateway.NextHop }
+    [pscustomobject]@{
+        service = [string]$adapter.Name
+        device = [string]$adapter.ifIndex
+        hardware_port = [string]$adapter.InterfaceDescription
+        interface_guid = [string]$adapter.InterfaceGuid
+        status = [string]$adapter.Status
+        media_connection_state = [string]$adapter.MediaConnectionState
+        physical_medium = [string]$adapter.NdisPhysicalMedium
+        if_type = [int]$adapter.InterfaceType
+        mac = [string]$adapter.MacAddress
+        ipv4 = $ipv4
+        prefix_length = $prefixLength
+        gateway = $gatewayHop
+        configured_mode = $mode
+        connected = (($adapter.Status -eq 'Up') -and ($address -ne $null))
+        is_default = (($defaultRoute -ne $null) -and ($defaultRoute.InterfaceIndex -eq $adapter.ifIndex))
+    }
+}
+$routeInterface = ''
+$routeGateway = ''
+if ($defaultRoute) {
+    $routeInterface = [string]$defaultRoute.InterfaceIndex
+    $routeGateway = [string]$defaultRoute.NextHop
+}
+[pscustomobject]@{
+    interfaces = @($items)
+    default_route = [pscustomobject]@{ interface = $routeInterface; gateway = $routeGateway }
+} | ConvertTo-Json -Depth 5 -Compress
+'''
+    try:
+        data = _windows_json(script)
+    except Exception:
+        return {"interfaces": [], "default_route": {"interface": "", "gateway": ""}}
+    if not isinstance(data, dict):
+        return {"interfaces": [], "default_route": {"interface": "", "gateway": ""}}
+    interfaces = data.get("interfaces") or []
+    if isinstance(interfaces, dict):
+        interfaces = [interfaces]
+    data["interfaces"] = [item for item in interfaces if isinstance(item, dict)]
+    if not isinstance(data.get("default_route"), dict):
+        data["default_route"] = {"interface": "", "gateway": ""}
+    return data
+
+
+def _parse_windows_wlan_interfaces(text):
+    networks = {}
+    current = {}
+
+    def flush():
+        name = str(current.get("name") or "").strip()
+        state = str(current.get("state") or "").strip().lower()
+        ssid = _clean_ssid(current.get("ssid"))
+        if name and state == "connected" and ssid:
+            networks[name] = ssid
+
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            continue
+        key, value = [part.strip() for part in line.split(":", 1)]
+        key_lower = key.lower()
+        if key_lower == "name":
+            flush()
+            current = {"name": value}
+        elif key_lower in ("state", "ssid", "description"):
+            current[key_lower] = value
+    flush()
+    return networks
+
+
+def _windows_wifi_ssids():
+    try:
+        return _parse_windows_wlan_interfaces(_run_text(["netsh", "wlan", "show", "interfaces"], timeout=4.0))
+    except Exception:
+        return {}
+
+
+def _windows_interface_type(item):
+    if_type = str(item.get("if_type") or "")
+    physical_medium = str(item.get("physical_medium") or "").lower()
+    if if_type == "71" or physical_medium in ("9", "native 802.11", "wireless lan"):
+        return "wifi"
+    return _interface_type(" ".join(str(item.get(key) or "") for key in ("service", "hardware_port")))
+
+
+def _windows_interfaces(settings):
+    snapshot = _windows_network_snapshot()
+    route = snapshot.get("default_route", {"interface": "", "gateway": ""})
+    ssids = _windows_wifi_ssids()
+    preferred = settings.get("preferred", {})
+    controller_connection = settings.get("controller_connection", {})
+    interfaces = []
+    for item in snapshot.get("interfaces", []):
+        service = str(item.get("service") or "")
+        device = str(item.get("device") or "")
+        item_type = _windows_interface_type(item)
+        ipv4 = str(item.get("ipv4") or "")
+        subnet = _prefix_to_dotted(item.get("prefix_length"))
+        gateway = str(item.get("gateway") or "") or (route.get("gateway", "") if route.get("interface") == device else "")
+        configured_mode = str(item.get("configured_mode") or "unknown")
+        connected = bool(item.get("connected") and ipv4)
+        interface = {
+            "id": _interface_id(service, device),
+            "service": service,
+            "hardware_port": str(item.get("hardware_port") or service),
+            "device": device,
+            "type": item_type,
+            "ssid": ssids.get(service, "") if item_type == "wifi" else "",
+            "ipv4": ipv4,
+            "source_ip": ipv4,
+            "subnet": subnet,
+            "broadcast": _network_summary(ipv4, subnet).get("broadcast", ""),
+            "gateway": gateway,
+            "network": _network_summary(ipv4, subnet),
+            "configured_mode": configured_mode,
+            "configured_ip": ipv4 if configured_mode == "static" else "",
+            "configured_subnet": subnet if configured_mode == "static" else "",
+            "configured_gateway": gateway if configured_mode == "static" else "",
+            "configured_network": _network_summary(ipv4, subnet) if configured_mode == "static" else {},
+            "connected": connected,
+            "is_default": bool(item.get("is_default")) or route.get("interface") == device,
+            "is_preferred": False,
+            "is_controller": False,
+            "warnings": [],
+        }
+        interface["is_preferred"] = _matches_preferred(interface, preferred)
+        interface["is_controller"] = _matches_controller(interface, controller_connection)
+        if interface["is_preferred"] and not interface["connected"]:
+            interface["warnings"].append("Preferred connection is not active.")
+        elif interface["is_preferred"] and not interface["ipv4"]:
+            interface["warnings"].append("Preferred connection has no IPv4 address.")
+        interfaces.append(interface)
+    type_priority = {"ethernet": 0, "wifi": 1, "other": 2}
+    interfaces.sort(key=lambda entry: (not entry["connected"], type_priority.get(entry["type"], 3), not entry["is_default"], entry["service"]))
+    return interfaces, route
+
+
 def _clean_network_value(value):
     text = str(value or "").strip()
     return "" if text.lower() in ("", "none", "unknown") else text
@@ -542,8 +741,9 @@ def _mac_interfaces(settings):
 
 def get_network_status():
     settings = load_settings()
+    supported = sys.platform == "darwin" or sys.platform.startswith("win")
     status = {
-        "supported": sys.platform == "darwin",
+        "supported": supported,
         "platform": sys.platform,
         "interfaces": [],
         "preferred": settings.get("preferred", {}),
@@ -555,11 +755,14 @@ def get_network_status():
         "last_applied": settings.get("last_applied", {}),
         "warnings": [],
     }
-    if sys.platform != "darwin":
-        status["warnings"].append("Host network switching is currently supported on macOS only.")
+    if not supported:
+        status["warnings"].append("Host network switching is currently supported on macOS and Windows only.")
         return status
 
-    interfaces, route = _mac_interfaces(settings)
+    if sys.platform == "darwin":
+        interfaces, route = _mac_interfaces(settings)
+    else:
+        interfaces, route = _windows_interfaces(settings)
     selected = next((item for item in interfaces if item.get("is_preferred") and item.get("connected")), None)
     if selected is None:
         selected = next((item for item in interfaces if item.get("is_controller") and item.get("connected")), None)
@@ -708,9 +911,10 @@ def save_profile(data):
     return get_network_status()
 
 
-def _require_macos():
-    if sys.platform != "darwin":
-        raise NetworkSettingsError(501, "host network changes are currently supported on macOS only")
+def _require_host_network_changes_supported():
+    if sys.platform == "darwin" or sys.platform.startswith("win"):
+        return
+    raise NetworkSettingsError(501, "host network changes are currently supported on macOS and Windows only")
 
 
 def _run_privileged_networksetup(args):
@@ -731,15 +935,85 @@ def _run_privileged_networksetup(args):
         raise NetworkSettingsError(409, "network setup command timed out") from error
 
 
+def _encoded_powershell(script):
+    return base64.b64encode(str(script).encode("utf-16le")).decode("ascii")
+
+
+def _run_privileged_windows_script(script):
+    encoded = _encoded_powershell(script)
+    launcher = (
+        "$process = Start-Process -FilePath 'powershell.exe' "
+        "-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','" + encoded + "') "
+        "-Verb RunAs -WindowStyle Hidden -Wait -PassThru; "
+        "if ($null -eq $process -or $null -eq $process.ExitCode) { exit 1 }; "
+        "exit $process.ExitCode"
+    )
+    try:
+        subprocess.run(
+            [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", launcher],
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=120,
+            **_no_window_subprocess_kwargs(),
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or error.stdout or "").strip()
+        raise NetworkSettingsError(409, detail or "Windows network setup command failed or was cancelled") from error
+    except subprocess.TimeoutExpired as error:
+        raise NetworkSettingsError(409, "Windows network setup command timed out") from error
+
+
+def _ps_single_quote(value):
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _run_windows_static_ip(interface, profile):
+    alias = interface.get("service") or interface.get("device")
+    if not alias:
+        raise NetworkSettingsError(400, "network interface alias required")
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$alias = {_ps_single_quote(alias)}
+& netsh.exe interface ipv4 set address name="$alias" static {profile['ip']} {profile['subnet']} {profile['gateway']} 1
+if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}
+exit 0
+"""
+    _run_privileged_windows_script(script)
+
+
+def _run_windows_dhcp(interface):
+    alias = interface.get("service") or interface.get("device")
+    if not alias:
+        raise NetworkSettingsError(400, "network interface alias required")
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$alias = {_ps_single_quote(alias)}
+& netsh.exe interface ipv4 set address name="$alias" source=dhcp
+if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}
+& netsh.exe interface ipv4 set dnsservers name="$alias" source=dhcp
+exit 0
+"""
+    _run_privileged_windows_script(script)
+
+
 def _wait_for_interface_ip(device, expected_ip, expected_subnet, timeout=6.0):
     if not device or not expected_ip:
         return False
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        info = _mac_ifconfig().get(device, {})
-        if info.get("ipv4") == expected_ip:
-            if not expected_subnet or info.get("subnet") == expected_subnet:
-                return True
+        if sys.platform == "darwin":
+            info = _mac_ifconfig().get(device, {})
+            if info.get("ipv4") == expected_ip:
+                if not expected_subnet or info.get("subnet") == expected_subnet:
+                    return True
+        elif sys.platform.startswith("win"):
+            interfaces, _route = _windows_interfaces(load_settings())
+            for item in interfaces:
+                if item.get("device") == device or item.get("service") == device:
+                    if item.get("ipv4") == expected_ip:
+                        if not expected_subnet or item.get("subnet") == expected_subnet:
+                            return True
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.25)
@@ -762,7 +1036,7 @@ def _update_saved_source_ip(settings, interface, source_ip):
 
 
 def apply_static_ip(data):
-    _require_macos()
+    _require_host_network_changes_supported()
     status = get_network_status()
     interface = _find_interface(status, data)
     if not interface:
@@ -774,14 +1048,17 @@ def apply_static_ip(data):
     if interface.get("type") == "wifi" and profile.get("ssid") and interface.get("ssid") != profile.get("ssid"):
         raise NetworkSettingsError(409, "selected WiFi service is not connected to the saved SSID")
     save_profile({**profile, "scope": "ssid" if profile.get("ssid") else "service"})
-    _run_privileged_networksetup([
-        NETWORKSETUP,
-        "-setmanual",
-        interface["service"],
-        profile["ip"],
-        profile["subnet"],
-        profile["gateway"],
-    ])
+    if sys.platform == "darwin":
+        _run_privileged_networksetup([
+            NETWORKSETUP,
+            "-setmanual",
+            interface["service"],
+            profile["ip"],
+            profile["subnet"],
+            profile["gateway"],
+        ])
+    else:
+        _run_windows_static_ip(interface, profile)
     confirmed = _wait_for_interface_ip(interface.get("device", ""), profile["ip"], profile["subnet"])
     settings = load_settings()
     _update_saved_source_ip(settings, interface, profile["ip"])
@@ -794,21 +1071,25 @@ def apply_static_ip(data):
     save_settings(settings)
     status = get_network_status()
     if not confirmed:
+        platform_name = "macOS" if sys.platform == "darwin" else "Windows"
         status["warnings"].append(
-            "macOS accepted the static profile, but the adapter has not reported the new IP yet. Refresh after the link settles, and check the cable/router if it stays pending."
+            f"{platform_name} accepted the static profile, but the adapter has not reported the new IP yet. Refresh after the link settles, and check the cable/router if it stays pending."
         )
     return status
 
 
 def set_dhcp(data):
-    _require_macos()
+    _require_host_network_changes_supported()
     status = get_network_status()
     interface = _find_interface(status, data)
     if not interface:
         raise NetworkSettingsError(409, "selected connection is not available")
     if not interface.get("service"):
         raise NetworkSettingsError(400, "network service required")
-    _run_privileged_networksetup([NETWORKSETUP, "-setdhcp", interface["service"]])
+    if sys.platform == "darwin":
+        _run_privileged_networksetup([NETWORKSETUP, "-setdhcp", interface["service"]])
+    else:
+        _run_windows_dhcp(interface)
     settings = load_settings()
     profile = {
         "mode": "dhcp",

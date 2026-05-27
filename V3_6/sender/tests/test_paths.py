@@ -65,7 +65,8 @@ class PathsTests(unittest.TestCase):
             self.assertEqual(paths.tools_dir(), tmpdir)
             self.assertTrue(os.path.isdir(paths.arduino_cli_bin_dir()))
             self.assertTrue(os.path.isdir(paths.arduino_data_dir()))
-            self.assertTrue(paths.arduino_cli_executable().endswith("arduino-cli"))
+            expected_exe = "arduino-cli.exe" if os.name == "nt" else "arduino-cli"
+            self.assertEqual(os.path.basename(paths.arduino_cli_executable()), expected_exe)
 
     def test_runtime_seed_does_not_overwrite_existing_cues(self):
         with tempfile.TemporaryDirectory() as tmpdir:
