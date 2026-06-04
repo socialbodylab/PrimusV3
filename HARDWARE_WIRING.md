@@ -150,6 +150,82 @@ To override the default for a given build, define `AUDIO_BOARD` before `config.h
 
 ---
 
+---
+
+## Adafruit PCM5102 Stereo I2S DAC (#6250)
+
+**Form factor:** Small breakout board (32.5 × 20.3 mm) with 3.5mm stereo jack and solder pads. Line-level output — requires powered speakers or amplifier (minimum 1 kΩ load; cannot drive headphones directly).
+
+**Chip:** Texas Instruments PCM5102A. The chip datasheet calls the word clock pin **LRCK**; Adafruit's silkscreen labels it **WSEL** — these are the same signal.
+
+```
+     Adafruit PCM5102 I2S DAC (#6250)
+     ┌──────────────────────────────────────────────────────────────┐
+     │   ○    ○    ○    ○    ○    ○   [*]                          │
+     │   DE  FIL  MCK   MU   FM   3V                               │
+     │  (T1) (T2) (T3) (T4) (T5) (T6)                  [3.5mm] ==│
+     │                                                             │
+     │              [PCM5102A]                                     │
+     │                                                             │
+     │   ○    ○    ○    ○    ○    ○    ○    ○                      │
+     │  (1)  (2)  (3)  (4)  (5)  (6)  (7)  (8)                    │
+     │  VIN  GND WSEL  DIN  BCK  Lout   G  Rout                   │
+     └──────────────────────────────────────────────────────────────┘
+```
+
+Bottom row — 8 pads in a single line, labels offset on silkscreen:
+
+| # | Pad  | Function |
+|---|------|----------|
+| 1 | VIN  | Power input (3.3–5V) |
+| 2 | GND  | Ground |
+| 3 | WSEL | I²S word select / LRCK |
+| 4 | DIN  | I²S data in |
+| 5 | BCK  | I²S bit clock |
+| 6 | Lout | Left audio output (same as 3.5mm L) |
+| 7 | G    | Analog audio ground |
+| 8 | Rout | Right audio output (same as 3.5mm R) |
+
+Top control pads (T1–T6, left → right with jack at right):
+
+| Pad | Label | Function | Default | For this project |
+|-----|-------|----------|---------|-----------------|
+| T1  | DE    | De-emphasis for 44.1 kHz | OFF | Leave floating |
+| T2  | FIL   | Filter: LOW=normal, HIGH=low-latency | Normal | Leave floating |
+| T3  | MCK   | Master clock input | Auto (from BCK) | Leave floating |
+| T4  | MU    | Mute / XSMT: LOW=muted, HIGH=active | — | **Tie to 3.3V** |
+| T5  | FM    | Format: LOW=I²S, HIGH=left-justified | — | **Tie to GND** |
+| T6  | 3V    | 3.3V output from onboard regulator | — | Do not connect |
+
+### Breadboard Wiring — PCM5102 → Feather
+
+**Power and configuration (5 connections)**
+
+| PCM5102 Pad | Connect to    | Notes |
+|-------------|---------------|-------|
+| VIN (B1 upper) | Feather 3V (R2) | Power |
+| GND (B1 lower) | Feather GND (R4) | Ground |
+| MU  (T4)    | Feather 3V    | Un-mute — **required or output is silent** |
+| FM  (T5)    | GND           | I²S format — **required or audio is garbled** |
+
+**I2S audio (3 signal wires)**
+
+| PCM5102 Pad | Signal              | Feather Label | Feather Pos | GPIO |
+|-------------|---------------------|---------------|-------------|------|
+| BCK  (pad 5) | Bit clock          | A3            | R8          | 15   |
+| WSEL (pad 3) | Word select (LRCK) | A2            | R7          | 16   |
+| DIN  (pad 4) | Data in            | A1            | R6          | 17   |
+
+### Config.h pin definitions (same as BFF — no firmware changes needed)
+
+```cpp
+#define BFF_BCK_PIN  15  // A3 — I2S bit clock  → PCM5102 BCK
+#define BFF_WS_PIN   16  // A2 — I2S word select → PCM5102 WSEL (LRCK)
+#define BFF_DATA_PIN 17  // A1 — I2S data out   → PCM5102 DIN
+```
+
+---
+
 ## References
 
 | Source | URL / Path |

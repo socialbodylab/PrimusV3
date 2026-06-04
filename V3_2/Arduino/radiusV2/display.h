@@ -8,6 +8,7 @@
  *   1 — Error / system
  *   2 — Audio status
  *   3 — FTP status
+ *   4 — SD card status
  */
 
 #ifndef DISPLAY_H
@@ -21,7 +22,7 @@
 // =====================================================================
 #ifdef NO_DISPLAY
 
-#define NUM_INFO_SCREENS 4
+#define NUM_INFO_SCREENS 5
 
 char displayDeviceName[18] = {0};
 
@@ -34,7 +35,9 @@ inline void displayStartup()    {}
 inline void displayConnection(const char*, IPAddress, bool, int) {}
 inline void displayError(const char*, const char*)               {}
 inline void displayAudioStatus(const char*, uint8_t, bool)       {}
+inline void displayAudioUpdate(const char*, uint8_t, bool)       {}
 inline void displayFtpStatus(bool, IPAddress, uint16_t)          {}
+inline void displaySdStatus(bool, uint16_t)                      {}
 inline void displayUpdateFooter(float, IPAddress = IPAddress(0,0,0,0)) {}
 
 #else  // full TFT implementation below
@@ -56,10 +59,11 @@ enum ScreenMode {
   SCREEN_CONNECTION = 1,
   SCREEN_ERROR      = 2,
   SCREEN_AUDIO      = 3,
-  SCREEN_FTP        = 4
+  SCREEN_FTP        = 4,
+  SCREEN_SD         = 5
 };
 
-#define NUM_INFO_SCREENS 4
+#define NUM_INFO_SCREENS 5
 
 ScreenMode currentScreen = SCREEN_STARTUP;
 
@@ -293,6 +297,57 @@ void displayAudioStatus(const char* filename, uint8_t volume, bool playing) {
 }
 
 // =====================================================================
+//  Audio Status — partial update (call every loop; skips redraws when
+//  state is unchanged, avoiding the SPI blocking that causes DMA glitches)
+// =====================================================================
+void displayAudioUpdate(const char* filename, uint8_t volume, bool playing) {
+  if (currentScreen != SCREEN_AUDIO) return;
+
+  static bool    lastPlaying = false;
+  static char    lastFile[17] = {0};
+  static uint8_t lastVolume   = 255;
+
+  const char* safeFile = (filename && filename[0]) ? filename : "";
+
+  bool stateChanged = (playing != lastPlaying);
+  bool fileChanged  = strncmp(lastFile, safeFile, 16) != 0;
+  bool volChanged   = (volume != lastVolume);
+
+  if (stateChanged) {
+    displayAudioStatus(filename, volume, playing);
+    lastPlaying = playing;
+    strncpy(lastFile, safeFile, 16);
+    lastFile[16] = '\0';
+    lastVolume = volume;
+    return;
+  }
+
+  if (fileChanged && playing) {
+    tft.fillRect(4, 40, 232, 18, ST77XX_BLACK);
+    tft.setCursor(4, 40);
+    tft.setTextSize(2);
+    tft.setTextColor(ST77XX_CYAN);
+    char truncName[17];
+    strncpy(truncName, safeFile, 16);
+    truncName[16] = '\0';
+    tft.print(truncName);
+    strncpy(lastFile, truncName, 16);
+    lastFile[16] = '\0';
+  }
+
+  if (volChanged && playing) {
+    // "Volume: " is 8 chars × 6px = 48px; number starts at x=52
+    tft.fillRect(52, 70, 80, 8, ST77XX_BLACK);
+    tft.setCursor(52, 70);
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.print(volume);
+    tft.print("%");
+    lastVolume = volume;
+  }
+}
+
+// =====================================================================
 //  FTP Status Screen (screen index 3)
 // =====================================================================
 void displayFtpStatus(bool running, IPAddress ip, uint16_t fileCount) {
@@ -355,6 +410,54 @@ void displayFtpStatus(bool running, IPAddress ip, uint16_t fileCount) {
   tft.setTextSize(1);
   tft.setTextColor(running ? ST77XX_YELLOW : 0x7BEF);
   tft.print(running ? "D1: Stop FTP" : "D1: Start FTP");
+}
+
+// =====================================================================
+//  SD Card Status Screen (screen index 4)
+// =====================================================================
+void displaySdStatus(bool ready, uint16_t fileCount) {
+  currentScreen = SCREEN_SD;
+  tft.fillScreen(ST77XX_BLACK);
+
+  tft.setCursor(4, 4);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.print(headerName());
+  tft.print(" | SD Card");
+  tft.drawFastHLine(0, 14, 240, ready ? ST77XX_GREEN : ST77XX_RED);
+
+  if (ready) {
+    tft.setCursor(4, 25);
+    tft.setTextSize(2);
+    tft.setTextColor(ST77XX_GREEN);
+    tft.print("SD READY");
+
+    tft.setCursor(4, 55);
+    tft.setTextSize(1);
+    tft.setTextColor(0x7BEF);
+    tft.print("Files: ");
+    tft.setTextColor(ST77XX_WHITE);
+    tft.print(fileCount);
+  } else {
+    tft.setCursor(4, 25);
+    tft.setTextSize(2);
+    tft.setTextColor(ST77XX_RED);
+    tft.print("NOT FOUND");
+
+    tft.setCursor(4, 55);
+    tft.setTextSize(1);
+    tft.setTextColor(ST77XX_YELLOW);
+    tft.print("Insert card, press D1");
+    tft.setCursor(4, 68);
+    tft.setTextColor(0x7BEF);
+    tft.print("to retry");
+  }
+
+  tft.drawFastHLine(0, 105, 240, 0x4208);
+  tft.setCursor(4, 110);
+  tft.setTextSize(1);
+  tft.setTextColor(0x7BEF);
+  tft.print("D1: Retry");
 }
 
 // =====================================================================

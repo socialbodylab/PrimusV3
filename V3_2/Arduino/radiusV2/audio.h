@@ -28,9 +28,10 @@ extern bool sdBusy;   // defined in the .ino
 // =====================================================================
 //  Internal state (shared across both implementations)
 // =====================================================================
-char   _audioCurrentFile[33] = {0};
-uint8_t _audioVolume = 80;
-bool   _audioLooping = false;
+char    _audioCurrentFile[33] = {0};
+uint8_t _audioVolume           = 80;
+bool    _audioLooping          = false;
+bool    _audioSdReady          = false;
 
 // =====================================================================
 //  Music Maker FeatherWing (VS1053B) — SPI hardware codec
@@ -45,21 +46,21 @@ Adafruit_VS1053_FilePlayer _musicMaker(
 void audioInit() {
   Serial.println("[Audio] Music Maker FeatherWing (VS1053)");
 
-  // VS1053 begin() initialises both the codec and the onboard SD card
   if (!_musicMaker.begin()) {
     Serial.println("[Audio] ERROR: VS1053 begin() failed");
     return;
   }
 
+  _musicMaker.setVolume(20, 20);
+  _musicMaker.useInterrupt(VS1053_FILEPLAYER_PIN_INT);
+  Serial.println("[Audio] VS1053 OK");
+
   if (!SD.begin(MM_SDCS_PIN)) {
-    Serial.println("[Audio] ERROR: SD card init failed (Music Maker)");
+    Serial.println("[Audio] WARNING: SD card not found — file playback unavailable");
     return;
   }
   Serial.println("[Audio] SD OK");
-
-  _musicMaker.setVolume(20, 20);  // VS1053: lower = louder; 20 ≈ 80% volume
-  _musicMaker.useInterrupt(VS1053_FILEPLAYER_PIN_INT);
-  Serial.println("[Audio] VS1053 OK");
+  _audioSdReady = true;
 }
 
 bool audioPlay(const char* filename, uint8_t volume) {
@@ -79,10 +80,12 @@ bool audioPlay(const char* filename, uint8_t volume) {
   uint8_t vs1053vol = (uint8_t)((100 - volume) * 254 / 100);
   _musicMaker.setVolume(vs1053vol, vs1053vol);
 
-  bool ok = _musicMaker.startPlayingFile(filename);
+  char trackPath[34];
+  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
+  bool ok = _musicMaker.startPlayingFile(trackPath);
   if (!ok) {
     Serial.print("[Audio] ERROR: could not open ");
-    Serial.println(filename);
+    Serial.println(trackPath);
     sdBusy = false;
     _audioCurrentFile[0] = '\0';
   } else {
@@ -118,6 +121,35 @@ void audioTestTone() {
   Serial.println("[Audio] Test tone complete");
 }
 
+void audioBootTest() {
+  Serial.println("[Boot] Sine test (1kHz, 500ms)...");
+  _musicMaker.sineTest(0x44, 500);
+  Serial.println("[Boot] Sine test complete");
+
+  if (!_audioSdReady) {
+    Serial.println("[Boot] SD not ready — skipping file playback");
+    return;
+  }
+
+  char filename[33] = {0};
+  File root = SD.open("/");
+  if (!root) { Serial.println("[Boot] Failed to open SD root"); return; }
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) { Serial.println("[Boot] No files found on SD"); break; }
+    if (!entry.isDirectory()) {
+      strncpy(filename, entry.name(), 32);
+      entry.close();
+      root.close();
+      Serial.print("[Boot] Playing: "); Serial.println(filename);
+      audioPlay(filename, 80);
+      return;
+    }
+    entry.close();
+  }
+  root.close();
+}
+
 void audioLoop(const char* filename, uint8_t volume) {
   _audioLooping = true;
   audioPlay(filename, volume);
@@ -150,38 +182,46 @@ const char* audioCurrentFile() {
 #elif AUDIO_BOARD == AUDIO_BOARD_BFF
 
 #include <AudioFileSourceSD.h>
-#include <AudioFileSourcePROGMEM.h>
+#include <AudioFileSourceFunction.h>
 #include <AudioGeneratorWAV.h>
-#include <AudioGeneratorRTTTL.h>
 #include <AudioOutputI2S.h>
 
-// A4 (440 Hz) for ~2 seconds — no SD card required
-static const char _testToneRTTTL[] PROGMEM = "test:d=2,o=4,b=60:a";
-
-AudioFileSourceSD*     _audioSource = nullptr;
-AudioGeneratorWAV*     _audioGen    = nullptr;
-AudioOutputI2S*        _audioOut    = nullptr;
-AudioFileSourcePROGMEM* _testSrc    = nullptr;
-AudioGeneratorRTTTL*   _testGen     = nullptr;
+AudioFileSourceSD*       _audioSource = nullptr;
+AudioGeneratorWAV*       _audioGen    = nullptr;
+AudioOutputI2S*          _audioOut    = nullptr;
+AudioFileSourceFunction* _testSrc     = nullptr;
+AudioGeneratorWAV*       _testGen     = nullptr;
 
 void audioInit() {
   Serial.println("[Audio] Audio BFF (MAX98357 I2S)");
 
+  // I2S output is independent of SD — create it first so test tone works without a card
+  _audioOut = new AudioOutputI2S();
+  _audioOut->SetPinout(BFF_BCK_PIN, BFF_WS_PIN, BFF_DATA_PIN);
+#if BFF_SWAP_CLOCKS
+  _audioOut->SwapClocks(true);
+#endif
+  _audioOut->SetBuffers(32, 2048);
+  _audioOut->SetGain(0.5f);
+  Serial.printf("[Audio] I2S pins — BCK:%d WS:%d DOUT:%d%s\n",
+    BFF_BCK_PIN, BFF_WS_PIN, BFF_DATA_PIN, BFF_SWAP_CLOCKS ? " (clocks SWAPPED)" : "");
+  Serial.println("[Audio] I2S output configured");
+
   if (!SD.begin(BFF_SDCS_PIN)) {
-    Serial.println("[Audio] ERROR: SD card init failed (BFF)");
+    Serial.println("[Audio] WARNING: SD card not found — file playback unavailable");
     return;
   }
   Serial.println("[Audio] SD OK");
-
-  _audioOut = new AudioOutputI2S();
-  _audioOut->SetPinout(BFF_BCK_PIN, BFF_WS_PIN, BFF_DATA_PIN);
-  _audioOut->SetGain(0.5f);   // 50% gain default
-  Serial.println("[Audio] I2S output configured");
+  _audioSdReady = true;
 }
 
 bool audioPlay(const char* filename, uint8_t volume) {
   if (sdBusy) {
     Serial.println("[Audio] SD busy (FTP running) — play ignored");
+    return false;
+  }
+  if (!_audioSdReady) {
+    Serial.println("[Audio] SD not ready — play ignored");
     return false;
   }
 
@@ -202,10 +242,12 @@ bool audioPlay(const char* filename, uint8_t volume) {
 
   _audioOut->SetGain(volume / 100.0f);
 
-  _audioSource = new AudioFileSourceSD(filename);
+  char trackPath[34];
+  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
+  _audioSource = new AudioFileSourceSD(trackPath);
   if (!_audioSource->isOpen()) {
     Serial.print("[Audio] ERROR: could not open ");
-    Serial.println(filename);
+    Serial.println(trackPath);
     delete _audioSource; _audioSource = nullptr;
     sdBusy = false;
     _audioCurrentFile[0] = '\0';
@@ -268,10 +310,14 @@ void audioTestTone() {
   delete _testGen; _testGen = nullptr;
   delete _testSrc; _testSrc = nullptr;
 
-  _testSrc = new AudioFileSourcePROGMEM(_testToneRTTTL, strlen_P(_testToneRTTTL));
-  _testGen = new AudioGeneratorRTTTL();
+  _testSrc = new AudioFileSourceFunction(2.0f, 1, 44100, 16);
+  _testSrc->addAudioGenerators([](float t) -> float {
+    return sinf(2.0f * M_PI * 440.0f * t);
+  });
+  _testGen = new AudioGeneratorWAV();
   _testGen->begin(_testSrc, _audioOut);
-  Serial.println("[Audio] Test tone: A4 (440 Hz)");
+  Serial.print("[Audio] Test tone started — isRunning=");
+  Serial.println(_testGen->isRunning() ? "YES" : "NO (generator failed to start)");
 }
 
 void audioLoop(const char* filename, uint8_t volume) {
@@ -318,7 +364,44 @@ bool audioIsPlaying() {
 }
 
 const char* audioCurrentFile() {
+  if (_testGen && _testGen->isRunning()) return "TEST TONE";
   return _audioCurrentFile;
+}
+
+void audioBootTest() {
+  Serial.println("[Boot] Test tone (A4, ~2s)...");
+  audioTestTone();
+  unsigned long start = millis();
+  while (audioIsPlaying() && millis() - start < 5000) {
+    audioUpdate();
+    delay(5);
+  }
+  Serial.print("[Boot] Test tone complete (");
+  Serial.print(millis() - start);
+  Serial.println("ms)");
+
+  if (!_audioSdReady) {
+    Serial.println("[Boot] SD not ready — skipping file playback");
+    return;
+  }
+
+  char filename[33] = {0};
+  File root = SD.open("/");
+  if (!root) { Serial.println("[Boot] Failed to open SD root"); return; }
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) { Serial.println("[Boot] No files found on SD"); break; }
+    if (!entry.isDirectory()) {
+      strncpy(filename, entry.name(), 32);
+      entry.close();
+      root.close();
+      Serial.print("[Boot] Playing: "); Serial.println(filename);
+      audioPlay(filename, 80);
+      return;
+    }
+    entry.close();
+  }
+  root.close();
 }
 
 #else
@@ -326,8 +409,22 @@ const char* audioCurrentFile() {
 #endif
 
 // =====================================================================
-//  SD file count helper (used by FTP status screen)
+//  SD helpers — board-agnostic
 // =====================================================================
+
+bool audioSdIsReady() { return _audioSdReady; }
+
+bool audioSdInit() {
+#if AUDIO_BOARD == AUDIO_BOARD_MUSIC_MAKER
+  _audioSdReady = SD.begin(MM_SDCS_PIN);
+#else
+  _audioSdReady = SD.begin(BFF_SDCS_PIN);
+#endif
+  if (_audioSdReady) Serial.println("[SD] Init OK");
+  else               Serial.println("[SD] Init failed — no card?");
+  return _audioSdReady;
+}
+
 uint16_t sdFileCount() {
   File root = SD.open("/");
   if (!root) return 0;

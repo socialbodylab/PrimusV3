@@ -47,17 +47,21 @@
   #define AUDIO_BOARD AUDIO_BOARD_BFF          // Reverse TFT + Audio BFF (current prototype)
 #endif
 
-// ── Music Maker FeatherWing pins (SPI-based, stacks on Feather header) ──
-#define MM_CS_PIN    6   // VS1053 chip select
-#define MM_DCS_PIN  10   // VS1053 data chip select
-#define MM_DREQ_PIN  9   // VS1053 data request
-#define MM_SDCS_PIN  5   // SD card chip select
+// ── Music Maker FeatherWing pins — HUZZAH32 GPIO numbers ─────────────
+// GPIO6–11 on ESP32 are internal flash SPI and must NOT be used as GPIO
+#define MM_CS_PIN    32  // GPIO32 (A7) — VS1053 chip select
+#define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
+#define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
+#define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
 
 // ── Audio BFF pins — wired to A-pin row (see HARDWARE_WIRING.md) ─────
 #define BFF_BCK_PIN  15  // A3 — I2S bit clock   (BCLK  on BFF)
 #define BFF_WS_PIN   16  // A2 — I2S word select (LRCLK on BFF)
 #define BFF_DATA_PIN 17  // A1 — I2S data in     (DIN   on BFF)
 #define BFF_SDCS_PIN 18  // A0 — SD chip select  (SD_CS on BFF)
+
+// Set to 1 to swap BCLK and LRCLK — try this if audio is silent but firmware reports playing
+#define BFF_SWAP_CLOCKS 0
 
 // =====================================================================
 //  Buttons
@@ -73,8 +77,8 @@
 // =====================================================================
 //  Network Defaults
 // =====================================================================
-#define DEFAULT_WIFI_SSID      "NETGEAR44"
-#define DEFAULT_WIFI_PASSWORD  "sweetgadfly251"
+#define DEFAULT_WIFI_SSID      "RUR"
+#define DEFAULT_WIFI_PASSWORD  "rurrurrur"
 
 #define DEFAULT_STATIC_IP      192, 168, 1, 100
 #define DEFAULT_GATEWAY        192, 168, 1, 1

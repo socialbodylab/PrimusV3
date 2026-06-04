@@ -168,7 +168,7 @@ fi
 ok "Using port: $PORT"
 
 info "Uploading to $PORT at ${BAUD} baud..."
-arduino-cli upload --fqbn "$FQBN" "${BUILD_PROPS[@]+"${BUILD_PROPS[@]}"}" --port "$PORT" "$SKETCH_DIR"
+arduino-cli upload --fqbn "$FQBN" --port "$PORT" "$SKETCH_DIR"
 ok "Upload complete!"
 echo ""
 info "Monitor serial output with: arduino-cli monitor -p $PORT -b $FQBN"

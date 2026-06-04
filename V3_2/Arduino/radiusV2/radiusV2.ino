@@ -351,6 +351,10 @@ void handleScreenCycle() {
     case 3:
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
       break;
+    case 4:
+      audioSdInit();
+      displaySdStatus(audioSdIsReady(), sdFileCount());
+      break;
   }
 }
 
@@ -363,6 +367,10 @@ void handleD1Press() {
     case 3:  // FTP screen — toggle FTP server
       if (ftpIsRunning()) ftpStop(); else ftpStart();
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
+      break;
+    case 4:  // SD screen — retry init
+      audioSdInit();
+      displaySdStatus(audioSdIsReady(), sdFileCount());
       break;
     default:
       break;
@@ -407,6 +415,7 @@ void setup() {
 
   // Audio
   audioInit();
+  audioBootTest();
 
   // FTP (init only — server starts on user request via D1 or Art-Net)
   ftpInit(SD);
@@ -432,6 +441,13 @@ void loop() {
 
   // ── Audio update ─────────────────────────────────────────────────
   audioUpdate();
+
+  // ── Audio screen live refresh ─────────────────────────────────────
+  static unsigned long lastAudioDisplay = 0;
+  if (infoScreenIndex == 2 && millis() - lastAudioDisplay > 500) {
+    lastAudioDisplay = millis();
+    displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  }
 
   // ── WiFi health ──────────────────────────────────────────────────
   checkWifiConnection();
