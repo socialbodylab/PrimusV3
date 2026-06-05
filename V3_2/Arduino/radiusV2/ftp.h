@@ -24,12 +24,9 @@
 #include "config.h"
 #include <SD.h>
 
-// Tell SimpleFTPServer to use SD on ESP32.
-// FtpServerKey.h only sets DEFAULT_STORAGE_TYPE_ESP32 inside
-// #ifndef DEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32 — so we must pre-define
-// the network type too, otherwise the library redefines storage to FFAT.
-#define DEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32 NETWORK_ESP32
-#define DEFAULT_STORAGE_TYPE_ESP32 STORAGE_SD
+// SimpleFTPServer storage type is set via compiler flags in upload.sh
+// (-DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5)
+// so that the values reach library compilation, not just the sketch.
 #include <SimpleFTPServer.h>
 
 // =====================================================================
@@ -48,19 +45,15 @@ static bool _ftpRunning = false;
 // =====================================================================
 
 void ftpInit(fs::FS& fsRef) {
-  // SD must already be initialised by audioInit() before FTP can start
+  // SD must already be initialised by audioInit() before FTP can start.
+  // Begin the TCP server once here — it stays bound for the life of the sketch.
+  // ftpStart/ftpStop only toggle the _ftpRunning flag; they never re-call begin().
+  _ftpServer.begin(FTP_USER, FTP_PASSWORD);
   Serial.println("[FTP] FTP subsystem ready (SimpleFTPServer/SD)");
 }
 
 void ftpStart() {
   if (_ftpRunning) return;
-
-  if (sdBusy) {
-    Serial.println("[FTP] SD busy (audio playing) — FTP start refused");
-    return;
-  }
-
-  _ftpServer.begin(FTP_USER, FTP_PASSWORD);
   _ftpRunning = true;
 
   Serial.print("[FTP] Server started — user: ");
@@ -76,7 +69,7 @@ void ftpStop() {
 }
 
 void ftpUpdate() {
-  if (_ftpRunning) {
+  if (_ftpRunning && !sdBusy) {
     _ftpServer.handleFTP();
   }
 }

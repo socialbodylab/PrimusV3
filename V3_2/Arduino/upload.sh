@@ -12,7 +12,13 @@ SKETCH_DIR="$(cd "$(dirname "$0")/radiusV2" && pwd)"
 
 FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
 BAUD=921600
-BUILD_PROPS=()
+# SimpleFTPServer storage flags — must be passed as compiler flags because
+# arduino-cli compiles libraries separately and sketch-level #defines don't reach them.
+FTP_FLAGS="-DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
+BUILD_PROPS=(
+  --build-property "compiler.cpp.extra_flags=${FTP_FLAGS}"
+  --build-property "compiler.c.extra_flags=${FTP_FLAGS}"
+)
 info_board="Adafruit ESP32-S3 Reverse TFT Feather"
 
 REQUIRED_LIBS=(
@@ -63,8 +69,8 @@ for (( i=1; i<=$#; i++ )); do
           FQBN="esp32:esp32:featheresp32"
           BAUD=460800
           BUILD_PROPS=(
-            --build-property "compiler.cpp.extra_flags=-DTARGET_BOARD=2"
-            --build-property "compiler.c.extra_flags=-DTARGET_BOARD=2"
+            --build-property "compiler.cpp.extra_flags=${FTP_FLAGS} -DTARGET_BOARD=2"
+            --build-property "compiler.c.extra_flags=${FTP_FLAGS} -DTARGET_BOARD=2"
           )
           info_board="Adafruit Feather HUZZAH32 (ESP32)"
           ;;

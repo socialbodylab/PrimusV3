@@ -23,11 +23,12 @@ ARTNET_OPCODE_FTP_CMD       = 0x8201
 ARTNET_VERSION = 14
 
 # Audio command values for send_audio_cmd()
-AUDIO_CMD_STOP   = 0
-AUDIO_CMD_PLAY   = 1
-AUDIO_CMD_LOOP   = 2
-AUDIO_CMD_PAUSE  = 3
-AUDIO_CMD_VOLUME = 4
+AUDIO_CMD_STOP      = 0
+AUDIO_CMD_PLAY      = 1
+AUDIO_CMD_LOOP      = 2
+AUDIO_CMD_PAUSE     = 3
+AUDIO_CMD_VOLUME    = 4
+AUDIO_CMD_TEST_TONE = 5
 
 FTP_PORT = 21
 FTP_USER = "primus"
@@ -387,7 +388,10 @@ def list_audio_files(ip):
     """Return sorted WAV filenames in the root of a V3.2 audio node's SD card."""
     try:
         entries = ftp_list_dir(ip, "/")
-        return sorted(e["name"] for e in entries if e["name"].lower().endswith(".wav"))
+        return sorted(
+            e["name"] for e in entries
+            if e["name"].lower().endswith(".wav") and not e["name"].startswith("._")
+        )
     except Exception as e:
         print(f"[audio] FTP list failed for {ip}: {e}")
         return []
@@ -402,10 +406,8 @@ import io as _io
 
 @_contextlib.contextmanager
 def _ftp_session(ip, timeout=8.0):
-    """Start FTP on device, connect, yield ftplib.FTP, then disconnect and stop."""
+    """Connect to device FTP server (always-on since firmware boot), yield ftplib.FTP."""
     import ftplib
-    send_ftp_cmd(ip, start=True)
-    time.sleep(0.5)
     ftp = ftplib.FTP()
     try:
         ftp.connect(ip, FTP_PORT, timeout=timeout)
@@ -421,20 +423,22 @@ def _ftp_session(ip, timeout=8.0):
         except Exception:
             pass
         raise
-    finally:
-        send_ftp_cmd(ip, start=False)
 
 
 def _parse_list_line(line):
-    """Parse a Unix-style FTP LIST line into {name, is_dir, size}."""
-    parts = line.split(None, 8)
-    if len(parts) < 9:
+    """Parse a SimpleFTPServer LIST line into {name, is_dir, size}.
+
+    SimpleFTPServer emits 8 fields (no group column):
+      permissions  links  owner  size  month  day  time  name
+    """
+    parts = line.split(None, 7)
+    if len(parts) < 8:
         return None
     try:
-        size = int(parts[4])
+        size = int(parts[3])
     except ValueError:
         size = 0
-    return {"name": parts[8], "is_dir": parts[0].startswith("d"), "size": size}
+    return {"name": parts[7], "is_dir": parts[0].startswith("d"), "size": size}
 
 
 def ftp_list_dir(ip, path="/"):
