@@ -255,19 +255,12 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   Serial.print(" file=");
   Serial.println(filename);
 
-  // Stop FTP before any audio operation so they don't share the SD bus
-  if (ftpIsRunning()) {
-    Serial.println("[ArtAudio] Stopping FTP to free SD bus");
-    ftpStop();
-    if (infoScreenIndex == 3)
-      displayFtpStatus(false, WiFi.localIP(), sdFileCount());
-  }
-
   switch (cmd) {
     case 1:  audioPlay(filename, volume);  break;
     case 2:  audioLoop(filename, volume);  break;
     case 3:  audioPause();                 break;
     case 4:  audioSetVolume(volume);       break;
+    case 5:  audioSetVolume(volume); audioTestTone(); break;
     default: audioStop();                  break;
   }
 
@@ -417,8 +410,9 @@ void setup() {
   audioInit();
   audioBootTest();
 
-  // FTP (init only — server starts on user request via D1 or Art-Net)
+  // FTP — start immediately at boot; always available
   ftpInit(SD);
+  ftpStart();
 
   lastFpsTime = millis();
 

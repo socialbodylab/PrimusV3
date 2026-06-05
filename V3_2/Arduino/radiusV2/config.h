@@ -80,8 +80,8 @@
 #define DEFAULT_WIFI_SSID      "RUR"
 #define DEFAULT_WIFI_PASSWORD  "rurrurrur"
 
-#define DEFAULT_STATIC_IP      192, 168, 1, 100
-#define DEFAULT_GATEWAY        192, 168, 1, 1
+#define DEFAULT_STATIC_IP      192, 168, 8, 150
+#define DEFAULT_GATEWAY        192, 168, 8, 1
 #define DEFAULT_SUBNET         255, 255, 255, 0
 
 // =====================================================================

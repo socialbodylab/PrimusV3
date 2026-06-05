@@ -187,9 +187,13 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/hello_device":
             di = data.get("device", -1)
+            try:
+                volume = max(0, min(100, int(data.get("volume", 80))))
+            except (TypeError, ValueError):
+                volume = 80
             threading.Thread(
                 target=self.controller_state.hello_device,
-                args=(di,), daemon=True).start()
+                args=(di, volume), daemon=True).start()
             self._ok()
 
         elif path == "/api/clip/preview":

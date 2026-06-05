@@ -65,7 +65,7 @@
                                 @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
                                 x-text="dev.connected ? 'Off' : 'On'"></button>
                         <button class="btn btn-sm" x-show="dev.connected"
-                                @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
+                                @click="api('POST', '/api/hello_device', { device: di, volume: dev.is_audio ? ($store.audio?.volume[di] ?? 80) : undefined })">Hello</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
                     </div>
                 </div>
@@ -962,12 +962,12 @@
                         </template>
 
                         <!-- Empty directory -->
-                        <template x-if="!loading[dev.di] && entries[dev.di] && entries[dev.di].length === 0 && !newFolderMode[dev.di]">
-                            <div class="audio-fm-empty text-muted">Empty directory</div>
+                        <template x-if="!loading[dev.di] && entries[dev.di] && wavFiles(dev.di).length === 0 && !newFolderMode[dev.di]">
+                            <div class="audio-fm-empty text-muted">No WAV files on SD card</div>
                         </template>
 
                         <!-- Entries -->
-                        <template x-for="entry in (entries[dev.di] || [])" :key="entry.name">
+                        <template x-for="entry in wavFiles(dev.di)" :key="entry.name">
                             <div class="audio-fm-row"
                                  :class="{ 'fm-row-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }">
 

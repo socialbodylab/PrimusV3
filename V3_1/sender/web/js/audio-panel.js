@@ -5,6 +5,8 @@
 
 document.addEventListener("alpine:init", () => {
 
+    Alpine.store("audio", { volume: {} });
+
     Alpine.data("audioPanel", () => ({
 
         // ── Playback ────────────────────────────────────────────────────
@@ -49,10 +51,10 @@ document.addEventListener("alpine:init", () => {
         // ── Directory navigation ─────────────────────────────────────────
 
         async loadDir(di) {
-            const path = this.cwd[di] || "/";
+            this.cwd = { ...this.cwd, [di]: "/" };
             this.loading = { ...this.loading, [di]: true };
             try {
-                const result = await api("POST", "/api/audio/files", { device: di, path });
+                const result = await api("POST", "/api/audio/files", { device: di, path: "/" });
                 this.entries = { ...this.entries, [di]: result.entries || [] };
             } catch (e) {
                 console.error("[audio] dir list failed:", e);
@@ -60,6 +62,14 @@ document.addEventListener("alpine:init", () => {
             } finally {
                 this.loading = { ...this.loading, [di]: false };
             }
+        },
+
+        wavFiles(di) {
+            return (this.entries[di] || []).filter(e =>
+                !e.is_dir &&
+                e.name.toLowerCase().endsWith(".wav") &&
+                !e.name.startsWith("._")
+            );
         },
 
         navigateInto(di, name) {
@@ -113,6 +123,7 @@ document.addEventListener("alpine:init", () => {
         onVolumeInput(di, value) {
             const vol = parseInt(value);
             this.volume = { ...this.volume, [di]: vol };
+            Alpine.store("audio").volume[di] = vol;
             const now = Date.now();
             if (!this._lastVolSent[di] || now - this._lastVolSent[di] > 50) {
                 this._lastVolSent[di] = now;

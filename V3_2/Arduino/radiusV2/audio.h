@@ -32,6 +32,7 @@ char    _audioCurrentFile[33] = {0};
 uint8_t _audioVolume           = 80;
 bool    _audioLooping          = false;
 bool    _audioSdReady          = false;
+bool    _audioHwReady          = false;
 
 // =====================================================================
 //  Music Maker FeatherWing (VS1053B) — SPI hardware codec
@@ -51,8 +52,10 @@ void audioInit() {
     return;
   }
 
-  _musicMaker.setVolume(20, 20);
-  _musicMaker.useInterrupt(VS1053_FILEPLAYER_PIN_INT);
+  _musicMaker.setVolume(254, 254);  // start muted — unmuted when playback begins
+  // No interrupt on ESP32 — SPI uses semaphores, can't be called from ISR.
+  // feedBuffer() is called from audioUpdate() in the main loop instead.
+  _audioHwReady = true;
   Serial.println("[Audio] VS1053 OK");
 
   if (!SD.begin(MM_SDCS_PIN)) {
@@ -97,6 +100,7 @@ bool audioPlay(const char* filename, uint8_t volume) {
 
 void audioStop() {
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  _musicMaker.setVolume(254, 254);
   _audioCurrentFile[0] = '\0';
   _audioLooping = false;
   sdBusy = false;
@@ -105,6 +109,7 @@ void audioStop() {
 
 void audioPause() {
   _musicMaker.pausePlaying(true);
+  _musicMaker.setVolume(254, 254);
   Serial.println("[Audio] Paused");
 }
 
@@ -156,12 +161,13 @@ void audioLoop(const char* filename, uint8_t volume) {
 }
 
 void audioUpdate() {
-  if (!_musicMaker.playingMusic) {
+  if (_musicMaker.playingMusic) {
+    _musicMaker.feedBuffer();
+  } else {
     if (_audioLooping && _audioCurrentFile[0] != '\0') {
-      // Restart the file for loop playback
       _musicMaker.startPlayingFile(_audioCurrentFile);
     } else if (_audioCurrentFile[0] != '\0') {
-      // Playback finished naturally
+      _musicMaker.setVolume(254, 254);
       _audioCurrentFile[0] = '\0';
       sdBusy = false;
     }

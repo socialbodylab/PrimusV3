@@ -447,7 +447,8 @@ class ControllerState:
 
             short_name = node_info.get("short_name", "")
             long_name  = node_info.get("long_name", "")
-            is_audio = "Audio" in short_name or "Audio" in long_name
+            is_audio = ("Audio" in short_name or "Audio" in long_name or
+                        "Radius" in short_name or "Radius" in long_name)
 
             dev = {
                 "name": short_name or "Node",
@@ -543,18 +544,25 @@ class ControllerState:
             _save_device_groups(self.device_groups)
             return True
 
-    def hello_device(self, di):
-        """Send a quick red flash to all outputs on a device to help locate it."""
+    def hello_device(self, di, volume=80):
+        """Locate a device: audio devices play a test tone; LED devices flash red."""
         with self.lock:
             if di < 0 or di >= len(self.devices):
                 return
             dev = self.devices[di]
             if not dev["sender"].connected:
                 return
+            is_audio = dev.get("is_audio", False)
+            ip = dev["ip"]
             outputs_info = []
             for o in dev["outputs"]:
                 outputs_info.append((o["universe"], o["count"]))
             sender = dev["sender"]
+
+        if is_audio:
+            from artnet import send_audio_cmd, AUDIO_CMD_TEST_TONE
+            send_audio_cmd(ip, AUDIO_CMD_TEST_TONE, volume=volume)
+            return
 
         # Flash red then black (outside lock to avoid blocking animation)
         for universe, count in outputs_info:
@@ -722,6 +730,10 @@ class ControllerState:
                 return False
             ip = self.devices[di]["ip"]
         code = self._AUDIO_CMDS.get(cmd, AUDIO_CMD_STOP)
+        if code == AUDIO_CMD_VOLUME:
+            with self.lock:
+                if 0 <= di < len(self.devices):
+                    self.devices[di]["audio_volume"] = volume
         send_audio_cmd(ip, code, filename=filename, volume=volume)
         return True
 
