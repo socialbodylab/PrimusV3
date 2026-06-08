@@ -249,6 +249,16 @@ document.addEventListener("alpine:init", () => {
         },
 
         async _uploadFile(di, file) {
+            // Check RIFF+WAVE header before sending anything
+            const header = await file.slice(0, 12).arrayBuffer();
+            const magic = new Uint8Array(header);
+            const isRiff = magic[0]===0x52 && magic[1]===0x49 && magic[2]===0x46 && magic[3]===0x46;
+            const isWave = magic[8]===0x57 && magic[9]===0x41 && magic[10]===0x56 && magic[11]===0x45;
+            if (!isRiff || !isWave) {
+                alert(`"${file.name}" is not a valid WAV file.\n\nThe device requires PCM WAV format. AIFF, MP3, and other formats are not supported.\n\nConvert with: afconvert -f WAVE -d LEI16@44100 input.aif output.wav`);
+                return;
+            }
+
             const cwd = this.cwd[di] || "/";
             const path = this.joinPath(cwd, file.name);
             const setStatus = (progress) => {
@@ -261,7 +271,16 @@ document.addEventListener("alpine:init", () => {
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable) setStatus(Math.round(e.loaded / e.total * 100));
                 };
-                xhr.onload = () => xhr.status === 200 ? resolve() : reject(new Error(`${xhr.status}: ${xhr.statusText}`));
+                xhr.upload.onload = () => setStatus(null);  // bytes sent; FTP transfer in progress
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        resolve();
+                    } else {
+                        let msg = `Upload failed (${xhr.status})`;
+                        try { msg = JSON.parse(xhr.responseText).error || msg; } catch (_) {}
+                        reject(new Error(msg));
+                    }
+                };
                 xhr.onerror = () => reject(new Error("network error"));
                 xhr.open("POST", `/api/audio/upload?${params}`);
                 xhr.setRequestHeader("Content-Type", "application/octet-stream");

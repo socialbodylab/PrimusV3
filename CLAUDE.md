@@ -14,7 +14,7 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 ### V3.1 Sender (`V3_1/sender/`)
 - `run.py` — Entry point. Starts HTTP server, Art-Net listener, and animation loop.
 - `state.py` — Core state management, animation loop (`tick()`), device tracking, playback source switching.
-- `server.py` — HTTP server (port 8080). Serves static web UI and 29 JSON API endpoints.
+- `server.py` — HTTP server (auto-selected port). Serves static web UI and 36 JSON API endpoints.
 - `effects.py` — 10 built-in effects computed per frame into pixel buffers.
 - `clips.py` — Clip CRUD, preview computation. Clips stored as JSON in `V3_1/sender/clips/`.
 - `mixer.py` — Look Mixer logic, crossfade between looks.
@@ -46,7 +46,7 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
   - `config.h` — Adds `AUDIO_BOARD` compile-time switch, `ARTNET_OPCODE_AUDIO_CMD 0x8200`, `ARTNET_OPCODE_FTP_CMD 0x8201`.
   - `radiusV2.ino` — Main sketch: all V3.1 features plus audio and FTP orchestration.
   - `audio.h` — WAV playback behind a unified API (VS1053 or MAX98357 I2S, selected at compile time).
-  - `ftp.h` — FTP server wrapper (SimpleFTPServer library). FTP starts off; started via Art-Net or D1 button.
+  - `ftp.h` — FTP server wrapper (SimpleFTPServer library). FTP starts automatically at boot; Art-Net 0x8201 and D1 button can toggle it.
   - `display.h` — Adds Audio screen and FTP screen to the V3.1 display.
   - `buttons.h` — Button input handling (unchanged from V3.1).
 - `V3_2/Arduino/upload.sh` — arduino-cli build/upload script.
@@ -64,9 +64,10 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 
 ## V3.2 Concepts
 
-- **Radius node**: A V3.2 receiver. Audio-only — no LED outputs or NeoPXL8 code. Plays WAV files from SD card on Art-Net command. Radius V1 = HUZZAH32 (headless); Radius V2 = ESP32-S3 Reverse TFT Feather (with display).
-- **SD bus mutex** (`sdBusy`): A boolean flag that prevents FTP and audio from accessing the SD card simultaneously. Set to `true` by audio playback, cleared when audio stops. FTP checks this flag before starting and refuses if set.
-- **FTP lifecycle**: FTP is off at boot. It is started explicitly (Art-Net 0x8201 cmd=1, or D1 button on FTP screen) and stopped explicitly (Art-Net 0x8201 cmd=0, or audio command, or D1 button). There is no auto-start or auto-restart.
+- **Radius node**: A V3.2 receiver. Audio-only — no LED outputs or NeoPXL8 code. Plays WAV files from SD card on Art-Net command. Radius V1 = HUZZAH32 (no display, uses VS1053 Music Maker FeatherWing); Radius V2 = ESP32-S3 Reverse TFT Feather (with 240x135 TFT display, uses MAX98357 Audio BFF). Both run the same `radiusV2` firmware via `TARGET_BOARD` compile-time switch.
+- **WAV format requirement**: Audio files must be RIFF PCM WAV (standard 16-bit, 44100 Hz recommended). AIFF, MP3, and other formats will be rejected by the sender before upload and by the firmware before playback. Convert with: `afconvert -f WAVE -d LEI16@44100 input.aif output.wav`
+- **SD bus mutex** (`sdBusy`): A boolean flag set `true` by `audioPlay()` and cleared when audio stops. `ftpUpdate()` skips `handleFTP()` while `sdBusy` is true — FTP stalls (TCP connection stays open) until audio finishes rather than failing immediately. Audio also refuses to start if `sdBusy` is already set.
+- **FTP lifecycle**: FTP starts automatically at boot (`setup()` calls `ftpInit()` + `ftpStart()`). Art-Net 0x8201 cmd=1/0 and the D1 button on the FTP screen can toggle it manually.
 - **Audio board switch**: `#define AUDIO_BOARD` in `config.h` selects between `AUDIO_BOARD_MUSIC_MAKER` (VS1053, SPI) and `AUDIO_BOARD_BFF` (MAX98357, I2S) at compile time. The `audio.h` API is identical for both.
 - **Audio commands (0x8200)**: cmd 0=stop, 1=play, 2=loop, 3=pause, 4=volume. Cmd 4 calls the hardware volume register without interrupting playback — used for live slider updates.
 - **Audio UI**: The V3.1 sender has an "Audio" tab (`audio-panel.js`) that shows audio-capable devices, lists their SD card files via FTP, and provides play/loop/stop/pause controls and a live volume slider (throttled to 50 ms).
@@ -83,9 +84,10 @@ The sender and receiver must agree on:
 
 ## How to build and run
 
-**V3.1 Sender**: `python3 V3_1/sender/run.py` — opens web UI at http://localhost:8080
+**V3.1 Sender**: `python3 V3_1/sender/run.py` — opens web UI at an auto-selected port (printed on startup, browser opens automatically)
 **V3.0 Sender**: `python3 sender/led_controller.py` — opens web UI at http://localhost:8080
-**Firmware**: `cd Arduino && ./upload.sh` — auto-detects ESP32-S3 port, compiles, uploads
+**Radius firmware (V2, ESP32-S3)**: `cd V3_2/Arduino && ./upload.sh` — specify port explicitly to avoid wrong detection: `./upload.sh /dev/cu.usbmodemXXXX`
+**Radius firmware (V1, HUZZAH32)**: `cd V3_2/Arduino && ./upload.sh --board feather-esp32 /dev/cu.usbserialXXXX`
 
 ## Conventions
 
@@ -101,14 +103,14 @@ The sender and receiver must agree on:
 
 none, solid, pulse, linear, constrainbow, rainbow, knight_rider, chase, radial (grid), spiral (grid)
 
-## V3.1 API endpoints (29 total)
+## V3.1 API endpoints (36 total)
 
 **GET**: `/` (web UI), `/api/state`, `/api/clips`, `/api/clips/<id>`, `/api/looks`, `/api/looks/<id>`, `/api/cues`
 **POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_playback_source`
 **POST (clips)**: `/api/clip/preview`, `/api/clips/save`, `/api/clips/save_single`
 **POST (looks/mixer)**: `/api/looks/save`, `/api/mixer/preview`, `/api/device_groups/save`
 **POST (cues)**: `/api/cues` (save), `/api/cues/go`
-**POST (audio — Radius nodes only)**: `/api/audio/cmd`, `/api/audio/files`
+**POST (audio — Radius nodes only)**: `/api/audio/cmd`, `/api/audio/files`, `/api/audio/upload`, `/api/audio/rename`, `/api/audio/delete`, `/api/audio/mkdir`
 **DELETE**: `/api/clips/<id>`, `/api/looks/<id>`, `/api/device_groups/<id>`
 
 ## Hardware

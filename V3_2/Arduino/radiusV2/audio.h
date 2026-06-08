@@ -71,6 +71,26 @@ bool audioPlay(const char* filename, uint8_t volume) {
     Serial.println("[Audio] SD busy (FTP running) — play ignored");
     return false;
   }
+
+  char trackPath[34];
+  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
+
+  // Verify RIFF/WAVE header before committing SD bus
+  {
+    File f = SD.open(trackPath);
+    if (!f) {
+      Serial.print("[Audio] ERROR: file not found: "); Serial.println(trackPath);
+      return false;
+    }
+    uint8_t magic[12] = {0};
+    f.read(magic, 12);
+    f.close();
+    if (memcmp(magic, "RIFF", 4) != 0 || memcmp(magic + 8, "WAVE", 4) != 0) {
+      Serial.print("[Audio] ERROR: not a WAV file: "); Serial.println(trackPath);
+      return false;
+    }
+  }
+
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
 
   strncpy(_audioCurrentFile, filename, 32);
@@ -83,8 +103,6 @@ bool audioPlay(const char* filename, uint8_t volume) {
   uint8_t vs1053vol = (uint8_t)((100 - volume) * 254 / 100);
   _musicMaker.setVolume(vs1053vol, vs1053vol);
 
-  char trackPath[34];
-  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
   bool ok = _musicMaker.startPlayingFile(trackPath);
   if (!ok) {
     Serial.print("[Audio] ERROR: could not open ");
@@ -231,6 +249,25 @@ bool audioPlay(const char* filename, uint8_t volume) {
     return false;
   }
 
+  char trackPath[34];
+  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
+
+  // Verify RIFF/WAVE header before committing SD bus
+  {
+    File f = SD.open(trackPath);
+    if (!f) {
+      Serial.print("[Audio] ERROR: file not found: "); Serial.println(trackPath);
+      return false;
+    }
+    uint8_t magic[12] = {0};
+    f.read(magic, 12);
+    f.close();
+    if (memcmp(magic, "RIFF", 4) != 0 || memcmp(magic + 8, "WAVE", 4) != 0) {
+      Serial.print("[Audio] ERROR: not a WAV file: "); Serial.println(trackPath);
+      return false;
+    }
+  }
+
   // Stop test tone or existing playback
   if (_testGen && _testGen->isRunning()) _testGen->stop();
   delete _testGen; _testGen = nullptr;
@@ -248,8 +285,6 @@ bool audioPlay(const char* filename, uint8_t volume) {
 
   _audioOut->SetGain(volume / 100.0f);
 
-  char trackPath[34];
-  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
   _audioSource = new AudioFileSourceSD(trackPath);
   if (!_audioSource->isOpen()) {
     Serial.print("[Audio] ERROR: could not open ");

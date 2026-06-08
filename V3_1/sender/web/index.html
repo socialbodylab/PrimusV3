@@ -1054,10 +1054,11 @@
                             <span class="audio-fm-upload-name" x-text="uploadStatus[dev.di].name"></span>
                             <div class="audio-fm-upload-bar">
                                 <div class="audio-fm-upload-fill"
-                                     :style="'width:' + uploadStatus[dev.di].progress + '%'"></div>
+                                     :class="{ 'audio-fm-upload-sending': uploadStatus[dev.di].progress === null }"
+                                     :style="'width:' + (uploadStatus[dev.di].progress ?? 100) + '%'"></div>
                             </div>
                             <span class="audio-fm-upload-pct"
-                                  x-text="uploadStatus[dev.di].progress + '%'"></span>
+                                  x-text="uploadStatus[dev.di].progress !== null ? uploadStatus[dev.di].progress + '%' : 'Sending…'"></span>
                         </div>
                     </template>
 

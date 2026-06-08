@@ -1388,6 +1388,15 @@ input[type="color"] {
     transition: width 0.1s linear;
 }
 
+.audio-fm-upload-sending {
+    animation: upload-pulse 1s ease-in-out infinite;
+}
+
+@keyframes upload-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}
+
 .audio-fm-upload-pct {
     width: 32px;
     text-align: right;
