@@ -1,6 +1,6 @@
 # PrimusV3 Hardware Wiring — Radius V2
 
-Breadboard wiring guide for the Radius V2 using the Adafruit ESP32-S3 Reverse TFT Feather and the Adafruit Audio BFF.
+Wiring guide for the Radius V2 audio node: ESP32-S3 Reverse TFT Feather + Music Maker FeatherWing.
 
 ---
 
@@ -9,49 +9,7 @@ Breadboard wiring guide for the Radius V2 using the Adafruit ESP32-S3 Reverse TF
 | Board                        | Adafruit Product                               | Role                                     |
 |------------------------------|------------------------------------------------|------------------------------------------|
 | ESP32-S3 Reverse TFT Feather | [#5691](https://www.adafruit.com/product/5691) | Main controller (WiFi, Art-Net, display) |
-| Audio BFF                    | [#5769](https://www.adafruit.com/product/5769) | MAX98357 I2S amplifier + microSD card    |
-
----
-
-## Adafruit Audio BFF (#5769)
-
-**Form factor:** QT Py / Xiao (7 pins per side). Designed to stack on the back of a QT Py, but wired manually to the Feather headers on a breadboard.
-
-```
-        Adafruit Audio BFF (#5769)
-        ┌──────────────────────────────┐
-        ║   [Speaker PicoBlade ±]      ║  ← JST speaker connector (pin 1 end)
-        ╠═══╗                    ╔═══╣
-L1   5V ║ ○ ║                    ║ ○ ║ SD_CS  R1
-L2  GND ║ ○ ║                    ║ ○ ║ DIN    R2
-L3 3.3V ║ ○ ║     MAX98357A      ║ ○ ║ LRCLK  R3
-L4 MOSI ║ ○ ║                    ║ ○ ║ BCLK   R4
-L5 MISO ║ ○ ║    [microSD slot]  ║ ○ ║ SDA    R5
-L6  SCK ║ ○ ║                    ║ ○ ║ SCL    R6
-L7   RX ║ ○ ║                    ║ ○ ║ TX     R7
-        ╚═══╝                    ╚═══╝
-```
-
-**Pin descriptions:**
-
-| BFF pin   | Function                   | Notes                              |
-|-----------|----------------------------|------------------------------------|
-| SD_CS     | SD card chip select        |                                    |
-| DIN       | I2S audio data in          |                                    |
-| LRCLK     | I2S word select (LR clock) |                                    |
-| BCLK      | I2S bit clock              |                                    |
-| MOSI      | SD card SPI data out       |                                    |
-| MISO      | SD card SPI data in        |                                    |
-| SCK       | SD card SPI clock          |                                    |
-| VO+ / VO− | Speaker output             | 2-pin PicoBlade connector on board |
-
-**Back of board — gain jumper:**
-
-| Solder pad                      | Gain  |
-|---------------------------------|-------|
-| Top (connects GAIN → 5V)        | 6 dB  |
-| Centre (default, GAIN floating) | 9 dB  |
-| Bottom (connects GAIN → GND)    | 12 dB |
+| Music Maker FeatherWing      | [#3357](https://www.adafruit.com/product/3357) | VS1053 codec + microSD card (stacks on Feather) |
 
 ---
 
@@ -99,13 +57,154 @@ L12  │  ○ SDA   GPIO3    GPIO35   MOSI ○ │   R12
 
 ---
 
-## Breadboard Wiring — Audio BFF → Feather
+## Adafruit Music Maker FeatherWing (#3357)
 
-Radius nodes never carry NeoPXL8 / LED outputs — those are separate V3.1 (Primus) hardware. The BFF signals connect to the A-pin row, which is free on Radius nodes.
+**Form factor:** Standard Feather (stacks directly on Feather headers — no breadboard wiring needed).
+
+**Chip:** VLSI VS1053B — hardware audio codec. Decodes WAV, MP3, AAC, OGG, MIDI, FLAC in silicon. The host MCU streams raw file bytes over SPI; the VS1053 handles all decoding and drives the audio output directly. No audio processing required in firmware.
+
+**Outputs:** 3.5mm stereo headphone jack (also usable as line-out into an amplifier).
+
+**Storage:** MicroSD card slot, accessed over a separate SPI chip select. Shares MOSI/MISO/SCK with the VS1053 but uses an independent CS line.
+
+```
+        Adafruit Music Maker FeatherWing (#3357)
+        ┌──────────────[USB passthrough]────────────┐  ← RST end
+        │                                           │
+ L1  RST│  ○                               ○  │BAT    R1
+ L2   3V│  ○                               ○  │EN     R2
+ L3 AREF│  ○                               ○  │USB    R3
+ L4  GND│  ○                               ○  │D13    R4
+ L5   A0│  ○                               ○  │D12    R5
+ L6   A1│  ○    [VS1053B]  [microSD]       ○  │D11    R6
+ L7   A2│  ○                               ○  │D10    R7
+ L8   A3│  ○                               ○  │D9     R8
+ L9   A6│  ○  ← SD_CS                     ○  │D6     R9
+L10   A7│  ○  ← VS1053 CS                 ○  │D5     R10
+L11   A8│  ○  ← DREQ (data request)       ○  │RX     R11
+L12   A9│  ○  ← DCS  (data chip select)   ○  │TX     R12
+        │                   [3.5mm jack]   ○  │SDA    R13
+        │                                  ○  │SCL    R14
+        │                                  ○  │SCK    R15
+        │                                  ○  │MOSI   R16
+        │                                  ○  │MISO   (inner row)
+        └───────────────────────────────────────┘
+```
+
+### SPI connections (HUZZAH32)
+
+The Music Maker uses 4 dedicated control pins plus the shared SPI bus.
+
+**Control pins**
+
+| Signal       | HUZZAH32 Label | GPIO | Function                                   |
+|--------------|----------------|------|--------------------------------------------|
+| VS1053 CS    | A7             | 32   | Chip select — command/data SPI access      |
+| VS1053 DCS   | A9             | 33   | Data chip select — streaming audio data    |
+| VS1053 DREQ  | A8             | 15   | Data request — signals VS1053 buffer ready |
+| SD CS        | A6             | 14   | SD card chip select                        |
+
+**Shared SPI bus** (standard Feather SPI pins, shared with other devices)
+
+| Signal | HUZZAH32 Label | GPIO |
+|--------|----------------|------|
+| MOSI   | MOSI           | 18   |
+| MISO   | MISO           | 19   |
+| SCK    | SCK            | 5    |
+
+### Pin definitions in `config.h`
+
+```cpp
+// GPIO6–11 on ESP32 are internal flash SPI and must NOT be used as GPIO
+#define MM_CS_PIN    32  // GPIO32 (A7) — VS1053 chip select
+#define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
+#define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
+#define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
+```
+
+### Volume
+
+The VS1053 has a hardware volume register: 0 = max, 254 = silent. The firmware maps the 0–100 UI range to this scale:
+
+```cpp
+uint8_t vs1053vol = (uint8_t)((100 - volume) * 254 / 100);
+_musicMaker.setVolume(vs1053vol, vs1053vol);  // left, right
+```
+
+`setVolume()` can be called at any time without interrupting playback — used for the live volume slider in the sender UI.
+
+---
+
+## References
+
+| Source | URL / Path |
+|--------|------------|
+| Music Maker FeatherWing overview | https://learn.adafruit.com/adafruit-music-maker-featherwing |
+| Music Maker FeatherWing pinouts | https://learn.adafruit.com/adafruit-music-maker-featherwing/pinouts |
+| VS1053B datasheet | https://www.vlsi.fi/fileadmin/datasheets/vs1053.pdf |
+| ESP32-S3 Reverse TFT Feather pinout | https://learn.adafruit.com/esp32-s3-reverse-tft-feather/pinouts |
+| ESP32-S3 Reverse TFT Feather Fritzing part (physical layout) | https://github.com/adafruit/Fritzing-Library/blob/master/parts/Adafruit%20ESP32-S3%20Reverse%20TFT%20Feather.fzpz |
+| ESP32-S3 Reverse TFT Feather official pinout SVG | https://github.com/adafruit/Adafruit-ESP32-S3-Reverse-TFT-Feather-PCB/blob/main/Adafruit_ESP32-S3_Reverse_TFT_Feather_Pinout.svg |
+| GPIO numbers (`pins_arduino.h`) | `~/Library/Arduino15/packages/esp32/hardware/esp32/3.3.5/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h` |
+| PrimusV3 firmware config | `V3_2/Arduino/radiusV2/config.h` |
+
+---
+
+---
+
+# Future Research / Archived Audio Hardware
+
+The following hardware was tested as alternatives to the Music Maker FeatherWing but was not successful. Kept here for future reference.
+
+---
+
+## Adafruit Audio BFF (#5769)
+
+**Status:** Unsuccessful. I2S audio via ESP8266Audio library did not produce reliable output. All firmware support removed as of 2026-06-11.
+
+**Form factor:** QT Py / Xiao (7 pins per side). Designed to stack on the back of a QT Py, but wired manually to the Feather headers on a breadboard.
+
+```
+        Adafruit Audio BFF (#5769)
+        ┌──────────────────────────────┐
+        ║   [Speaker PicoBlade ±]      ║  ← JST speaker connector (pin 1 end)
+        ╠═══╗                    ╔═══╣
+L1   5V ║ ○ ║                    ║ ○ ║ SD_CS  R1
+L2  GND ║ ○ ║                    ║ ○ ║ DIN    R2
+L3 3.3V ║ ○ ║     MAX98357A      ║ ○ ║ LRCLK  R3
+L4 MOSI ║ ○ ║                    ║ ○ ║ BCLK   R4
+L5 MISO ║ ○ ║    [microSD slot]  ║ ○ ║ SDA    R5
+L6  SCK ║ ○ ║                    ║ ○ ║ SCL    R6
+L7   RX ║ ○ ║                    ║ ○ ║ TX     R7
+        ╚═══╝                    ╚═══╝
+```
+
+**Pin descriptions:**
+
+| BFF pin   | Function                   | Notes                              |
+|-----------|----------------------------|------------------------------------|
+| SD_CS     | SD card chip select        |                                    |
+| DIN       | I2S audio data in          |                                    |
+| LRCLK     | I2S word select (LR clock) |                                    |
+| BCLK      | I2S bit clock              |                                    |
+| MOSI      | SD card SPI data out       |                                    |
+| MISO      | SD card SPI data in        |                                    |
+| SCK       | SD card SPI clock          |                                    |
+| VO+ / VO− | Speaker output             | 2-pin PicoBlade connector on board |
+
+**Back of board — gain jumper:**
+
+| Solder pad                      | Gain  |
+|---------------------------------|-------|
+| Top (connects GAIN → 5V)        | 6 dB  |
+| Centre (default, GAIN floating) | 9 dB  |
+| Bottom (connects GAIN → GND)    | 12 dB |
+
+### Breadboard Wiring — Audio BFF → Feather
 
 Position counting:
 - **BFF** — L or R side, numbered from the **JST speaker connector end** (closest pin = 1)
-- **Feather** — all used pins are on the right side, numbered from the **USB-C connector end** (closest pin = 1). Labels are on the underside when the board is mounted, so counting from USB-C is the reliable reference.
+- **Feather** — all used pins are on the right side, numbered from the **USB-C connector end** (closest pin = 1)
 
 **Power**
 
@@ -131,30 +230,21 @@ Position counting:
 | MISO      | L5      | SPI MISO    | MISO          | R13         |
 | SCK       | L6      | SPI clock   | SCK           | R11         |
 
-These are the default pin definitions in `config.h`:
-```cpp
-#define BFF_BCK_PIN  15  // A3 — I2S bit clock
-#define BFF_WS_PIN   16  // A2 — I2S word select
-#define BFF_DATA_PIN 17  // A1 — I2S data
-#define BFF_SDCS_PIN 18  // A0 — SD chip select
-```
+### References
 
-The firmware selects the audio board automatically based on the target hardware:
-
-| Build target                        | `AUDIO_BOARD` default              | Wiring                                                              |
-|-------------------------------------|------------------------------------|---------------------------------------------------------------------|
-| ESP32-S3 Reverse TFT Feather        | `AUDIO_BOARD_BFF` (MAX98357 I2S)   | Breadboard wires per table above                                    |
-| Huzzah32 (`--board feather-esp32`)  | `AUDIO_BOARD_MUSIC_MAKER` (VS1053) | Music Maker stacks on Feather header, no breadboard wiring needed   |
-
-To override the default for a given build, define `AUDIO_BOARD` before `config.h` is included, or edit the conditional block in `config.h` directly.
-
----
+| Source | URL / Path |
+|--------|------------|
+| Audio BFF pinout | https://learn.adafruit.com/adafruit-audio-bff/pinouts |
+| Audio BFF Fritzing part (physical layout) | https://github.com/adafruit/Fritzing-Library/blob/master/parts/Adafruit%20Audio%20BFF.fzpz |
+| Audio BFF downloads page | https://learn.adafruit.com/adafruit-audio-bff/downloads |
 
 ---
 
 ## Adafruit PCM5102 Stereo I2S DAC (#6250)
 
-**Form factor:** Small breakout board (32.5 × 20.3 mm) with 3.5mm stereo jack and solder pads. Line-level output — requires powered speakers or amplifier (minimum 1 kΩ load; cannot drive headphones directly).
+**Status:** Researched but not tested in firmware. Line-level output — requires powered speakers or amplifier.
+
+**Form factor:** Small breakout board (32.5 × 20.3 mm) with 3.5mm stereo jack and solder pads. Cannot drive headphones directly (minimum 1 kΩ load).
 
 **Chip:** Texas Instruments PCM5102A. The chip datasheet calls the word clock pin **LRCK**; Adafruit's silkscreen labels it **WSEL** — these are the same signal.
 
@@ -173,7 +263,7 @@ To override the default for a given build, define `AUDIO_BOARD` before `config.h
      └──────────────────────────────────────────────────────────────┘
 ```
 
-Bottom row — 8 pads in a single line, labels offset on silkscreen:
+Bottom row — 8 pads in a single line:
 
 | # | Pad  | Function |
 |---|------|----------|
@@ -199,12 +289,12 @@ Top control pads (T1–T6, left → right with jack at right):
 
 ### Breadboard Wiring — PCM5102 → Feather
 
-**Power and configuration (5 connections)**
+**Power and configuration (4 connections)**
 
 | PCM5102 Pad | Connect to    | Notes |
 |-------------|---------------|-------|
-| VIN (B1 upper) | Feather 3V (R2) | Power |
-| GND (B1 lower) | Feather GND (R4) | Ground |
+| VIN (pad 1) | Feather 3V (R2) | Power |
+| GND (pad 2) | Feather GND (R4) | Ground |
 | MU  (T4)    | Feather 3V    | Un-mute — **required or output is silent** |
 | FM  (T5)    | GND           | I²S format — **required or audio is garbled** |
 
@@ -216,25 +306,4 @@ Top control pads (T1–T6, left → right with jack at right):
 | WSEL (pad 3) | Word select (LRCK) | A2            | R7          | 16   |
 | DIN  (pad 4) | Data in            | A1            | R6          | 17   |
 
-### Config.h pin definitions (same as BFF — no firmware changes needed)
-
-```cpp
-#define BFF_BCK_PIN  15  // A3 — I2S bit clock  → PCM5102 BCK
-#define BFF_WS_PIN   16  // A2 — I2S word select → PCM5102 WSEL (LRCK)
-#define BFF_DATA_PIN 17  // A1 — I2S data out   → PCM5102 DIN
-```
-
----
-
-## References
-
-| Source | URL / Path |
-|--------|------------|
-| Audio BFF pinout | https://learn.adafruit.com/adafruit-audio-bff/pinouts |
-| Audio BFF Fritzing part (physical layout) | https://github.com/adafruit/Fritzing-Library/blob/master/parts/Adafruit%20Audio%20BFF.fzpz |
-| Audio BFF downloads page | https://learn.adafruit.com/adafruit-audio-bff/downloads |
-| ESP32-S3 Reverse TFT Feather pinout | https://learn.adafruit.com/esp32-s3-reverse-tft-feather/pinouts |
-| ESP32-S3 Reverse TFT Feather Fritzing part (physical layout) | https://github.com/adafruit/Fritzing-Library/blob/master/parts/Adafruit%20ESP32-S3%20Reverse%20TFT%20Feather.fzpz |
-| ESP32-S3 Reverse TFT Feather official pinout SVG | https://github.com/adafruit/Adafruit-ESP32-S3-Reverse-TFT-Feather-PCB/blob/main/Adafruit_ESP32-S3_Reverse_TFT_Feather_Pinout.svg |
-| GPIO numbers (`pins_arduino.h`) | `~/Library/Arduino15/packages/esp32/hardware/esp32/3.3.5/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h` |
-| PrimusV3 firmware config | `V3_2/Arduino/radiusV2/config.h` |
+Note: I2S pins are the same as the Audio BFF wiring above — both share the A1/A2/A3 signals.

@@ -124,11 +124,7 @@ void displayStartup() {
 
   tft.setCursor(10, 80);
   tft.setTextColor(0x7BEF);
-#if AUDIO_BOARD == AUDIO_BOARD_MUSIC_MAKER
   tft.println("Audio: Music Maker (VS1053)");
-#else
-  tft.println("Audio: BFF (MAX98357 I2S)");
-#endif
 }
 
 // =====================================================================
@@ -285,11 +281,7 @@ void displayAudioStatus(const char* filename, uint8_t volume, bool playing) {
   tft.setCursor(4, 110);
   tft.setTextSize(1);
   tft.setTextColor(0x7BEF);
-#if AUDIO_BOARD == AUDIO_BOARD_MUSIC_MAKER
   tft.print("Board: Music Maker (VS1053)");
-#else
-  tft.print("Board: BFF (MAX98357 I2S)");
-#endif
 
   tft.setCursor(4, 124);
   tft.setTextColor(0x4208);

@@ -429,7 +429,7 @@ class Handler(BaseHTTPRequestHandler):
         file_data = self.rfile.read(length)
         if len(file_data) < 12 or file_data[:4] != b'RIFF' or file_data[8:12] != b'WAVE':
             self._respond(400, "application/json",
-                          b'{"error":"not a WAV file — device requires PCM WAV format"}')
+                          b'{"error":"not a WAV file - device requires PCM WAV format"}')
             return
         try:
             self.controller_state.ftp_upload(di, ftp_path, file_data)

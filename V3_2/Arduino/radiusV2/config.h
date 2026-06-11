@@ -2,7 +2,8 @@
  * config.h — PrimusV3 Audio Receiver Configuration
  * ==================================================
  * Hardware: Adafruit ESP32-S3 Reverse TFT Feather (#5691)
- *           + Adafruit Audio BFF (#5769) or Music Maker FeatherWing (#3357)
+ *           or Adafruit Feather HUZZAH32 (#3405)
+ *           + Adafruit Music Maker FeatherWing (#3357)
  *
  * Audio nodes never carry NeoPXL8 / LED outputs — LED output is handled
  * by separate V3.1 receiver nodes.
@@ -36,16 +37,8 @@
 #endif
 
 // =====================================================================
-//  Audio Board Selection  (compile-time switch)
+//  Audio Board — Music Maker FeatherWing (VS1053, Adafruit 3357)
 // =====================================================================
-#define AUDIO_BOARD_MUSIC_MAKER 1   // Adafruit Music Maker FeatherWing (VS1053, Adafruit 3357)
-#define AUDIO_BOARD_BFF         2   // Adafruit Audio BFF (MAX98357 I2S, Adafruit 5769)
-
-#if TARGET_BOARD == BOARD_FEATHER_ESP32
-  #define AUDIO_BOARD AUDIO_BOARD_MUSIC_MAKER  // Huzzah + Music Maker FeatherWing (established device)
-#else
-  #define AUDIO_BOARD AUDIO_BOARD_BFF          // Reverse TFT + Audio BFF (current prototype)
-#endif
 
 // ── Music Maker FeatherWing pins — HUZZAH32 GPIO numbers ─────────────
 // GPIO6–11 on ESP32 are internal flash SPI and must NOT be used as GPIO
@@ -53,15 +46,6 @@
 #define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
 #define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
 #define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
-
-// ── Audio BFF pins — wired to A-pin row (see HARDWARE_WIRING.md) ─────
-#define BFF_BCK_PIN  15  // A3 — I2S bit clock   (BCLK  on BFF)
-#define BFF_WS_PIN   16  // A2 — I2S word select (LRCLK on BFF)
-#define BFF_DATA_PIN 17  // A1 — I2S data in     (DIN   on BFF)
-#define BFF_SDCS_PIN 18  // A0 — SD chip select  (SD_CS on BFF)
-
-// Set to 1 to swap BCLK and LRCLK — try this if audio is silent but firmware reports playing
-#define BFF_SWAP_CLOCKS 0
 
 // =====================================================================
 //  Buttons

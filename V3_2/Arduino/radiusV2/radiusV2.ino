@@ -1,8 +1,8 @@
 /*
  * primusV3_audio_receiver.ino — PrimusV3 Audio Receiver
  * =====================================================
- * Dedicated audio node — ESP32-S3 Reverse TFT Feather + Audio BFF or
- * Music Maker FeatherWing. No LED / NeoPXL8 output — LED nodes are
+ * Dedicated audio node — ESP32-S3 Reverse TFT Feather or HUZZAH32
+ * + Music Maker FeatherWing. No LED / NeoPXL8 output — LED nodes are
  * separate V3.1 hardware.
  *
  * Receives Art-Net audio commands (opcode 0x8200) and FTP commands
@@ -17,7 +17,7 @@
  *   [14..N] filename       — null-terminated, max 32 chars (e.g. "cue01.wav")
  *
  * Libraries: Adafruit_ST7789, Adafruit_GFX,
- *            Adafruit VS1053 Library (Music Maker) or ESP8266Audio (BFF),
+ *            Adafruit VS1053 Library (Music Maker),
  *            SimpleFTPServer (xreef/Mischianti) [Library Manager: "SimpleFTPServer"]
  */
 

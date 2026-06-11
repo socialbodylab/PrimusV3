@@ -43,9 +43,9 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 
 ### Audio Receiver Firmware (V3.2)
 - `V3_2/Arduino/radiusV2/` — Extends V3.1 receiver with audio and FTP.
-  - `config.h` — Adds `AUDIO_BOARD` compile-time switch, `ARTNET_OPCODE_AUDIO_CMD 0x8200`, `ARTNET_OPCODE_FTP_CMD 0x8201`.
+  - `config.h` — Adds Music Maker pin config, `ARTNET_OPCODE_AUDIO_CMD 0x8200`, `ARTNET_OPCODE_FTP_CMD 0x8201`.
   - `radiusV2.ino` — Main sketch: all V3.1 features plus audio and FTP orchestration.
-  - `audio.h` — WAV playback behind a unified API (VS1053 or MAX98357 I2S, selected at compile time).
+  - `audio.h` — WAV playback via VS1053 (Music Maker FeatherWing, SPI).
   - `ftp.h` — FTP server wrapper (SimpleFTPServer library). FTP starts automatically at boot; Art-Net 0x8201 and D1 button can toggle it.
   - `display.h` — Adds Audio screen and FTP screen to the V3.1 display.
   - `buttons.h` — Button input handling (unchanged from V3.1).
@@ -64,11 +64,10 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 
 ## V3.2 Concepts
 
-- **Radius node**: A V3.2 receiver. Audio-only — no LED outputs or NeoPXL8 code. Plays WAV files from SD card on Art-Net command. Radius V1 = HUZZAH32 (no display, uses VS1053 Music Maker FeatherWing); Radius V2 = ESP32-S3 Reverse TFT Feather (with 240x135 TFT display, uses MAX98357 Audio BFF). Both run the same `radiusV2` firmware via `TARGET_BOARD` compile-time switch.
+- **Radius node**: A V3.2 receiver. Audio-only — no LED outputs or NeoPXL8 code. Plays WAV files from SD card on Art-Net command. Radius V1 = HUZZAH32 (no display); Radius V2 = ESP32-S3 Reverse TFT Feather (with 240x135 TFT display). Both use the Music Maker FeatherWing (VS1053) and run the same `radiusV2` firmware via `TARGET_BOARD` compile-time switch.
 - **WAV format requirement**: Audio files must be RIFF PCM WAV (standard 16-bit, 44100 Hz recommended). AIFF, MP3, and other formats will be rejected by the sender before upload and by the firmware before playback. Convert with: `afconvert -f WAVE -d LEI16@44100 input.aif output.wav`
 - **SD bus mutex** (`sdBusy`): A boolean flag set `true` by `audioPlay()` and cleared when audio stops. `ftpUpdate()` skips `handleFTP()` while `sdBusy` is true — FTP stalls (TCP connection stays open) until audio finishes rather than failing immediately. Audio also refuses to start if `sdBusy` is already set.
 - **FTP lifecycle**: FTP starts automatically at boot (`setup()` calls `ftpInit()` + `ftpStart()`). Art-Net 0x8201 cmd=1/0 and the D1 button on the FTP screen can toggle it manually.
-- **Audio board switch**: `#define AUDIO_BOARD` in `config.h` selects between `AUDIO_BOARD_MUSIC_MAKER` (VS1053, SPI) and `AUDIO_BOARD_BFF` (MAX98357, I2S) at compile time. The `audio.h` API is identical for both.
 - **Audio commands (0x8200)**: cmd 0=stop, 1=play, 2=loop, 3=pause, 4=volume. Cmd 4 calls the hardware volume register without interrupting playback — used for live slider updates.
 - **Audio UI**: The V3.1 sender has an "Audio" tab (`audio-panel.js`) that shows audio-capable devices, lists their SD card files via FTP, and provides play/loop/stop/pause controls and a live volume slider (throttled to 50 ms).
 
