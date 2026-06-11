@@ -69,7 +69,7 @@ L12  │  ○ SDA   GPIO3    GPIO35   MOSI ○ │   R12
 
 ```
         Adafruit Music Maker FeatherWing (#3357)
-        ┌──────────────[USB passthrough]────────────┐  ← RST end
+        ┌──────────────[USB passthrough]────────────┐  ← RST/USB end
         │                                           │
  L1  RST│  ○                               ○  │BAT    R1
  L2   3V│  ○                               ○  │EN     R2
@@ -77,12 +77,12 @@ L12  │  ○ SDA   GPIO3    GPIO35   MOSI ○ │   R12
  L4  GND│  ○                               ○  │D13    R4
  L5   A0│  ○                               ○  │D12    R5
  L6   A1│  ○    [VS1053B]  [microSD]       ○  │D11    R6
- L7   A2│  ○                               ○  │D10    R7
- L8   A3│  ○                               ○  │D9     R8
- L9   A6│  ○  ← SD_CS                     ○  │D6     R9
-L10   A7│  ○  ← VS1053 CS                 ○  │D5     R10
-L11   A8│  ○  ← DREQ (data request)       ○  │RX     R11
-L12   A9│  ○  ← DCS  (data chip select)   ○  │TX     R12
+ L7   A2│  ○                     DCS →     ○  │D10    R7
+ L8   A3│  ○                    DREQ →     ○  │D9     R8
+ L9   A4│  ○              VS1053 CS →      ○  │D6     R9
+L10   A5│  ○                  SD_CS →      ○  │D5     R10
+L11  SCK│  ○                               ○  │RX     R11
+L12 MOSI│  ○                               ○  │TX     R12
         │                   [3.5mm jack]   ○  │SDA    R13
         │                                  ○  │SCL    R14
         │                                  ○  │SCK    R15
@@ -91,35 +91,56 @@ L12   A9│  ○  ← DCS  (data chip select)   ○  │TX     R12
         └───────────────────────────────────────┘
 ```
 
-### SPI connections (HUZZAH32)
+The 4 control signals connect through the 16-pin (right/D-pin) side of the header at D5, D6, D9, D10. The GPIO numbers at those positions differ by Feather board — see the tables below.
 
-The Music Maker uses 4 dedicated control pins plus the shared SPI bus.
+### Control pin connections by board
 
-**Control pins**
+The Music Maker's 4 control pins land on different GPIOs depending on which Feather it stacks on. The physical header positions are identical — the GPIO numbers differ because the two MCUs number their pins differently.
 
-| Signal       | HUZZAH32 Label | GPIO | Function                                   |
-|--------------|----------------|------|--------------------------------------------|
-| VS1053 CS    | A7             | 32   | Chip select — command/data SPI access      |
-| VS1053 DCS   | A9             | 33   | Data chip select — streaming audio data    |
-| VS1053 DREQ  | A8             | 15   | Data request — signals VS1053 buffer ready |
-| SD CS        | A6             | 14   | SD card chip select                        |
+**Radius V1 — HUZZAH32 (#3405)**
 
-**Shared SPI bus** (standard Feather SPI pins, shared with other devices)
+| Signal      | Feather Label | GPIO | Header Position |
+|-------------|---------------|------|-----------------|
+| VS1053 CS   | A7            | 32   | L10             |
+| VS1053 DCS  | A9            | 33   | L12             |
+| VS1053 DREQ | A8            | 15   | L11             |
+| SD CS       | A6            | 14   | L9              |
+| MOSI        | MOSI          | 18   | L12 inner row   |
+| MISO        | MISO          | 19   | inner row       |
+| SCK         | SCK           | 5    | L11 inner row   |
 
-| Signal | HUZZAH32 Label | GPIO |
-|--------|----------------|------|
-| MOSI   | MOSI           | 18   |
-| MISO   | MISO           | 19   |
-| SCK    | SCK            | 5    |
+**Radius V2 — ESP32-S3 Reverse TFT Feather (#5691)**
+
+| Signal      | Feather Label | GPIO | Header Position |
+|-------------|---------------|------|-----------------|
+| VS1053 CS   | D6            | 6    | L9              |
+| VS1053 DCS  | D10           | 10   | L7              |
+| VS1053 DREQ | D9            | 9    | L8              |
+| SD CS       | D5            | 5    | L10             |
+| MOSI        | MOSI          | 35   | L12             |
+| MISO        | MISO          | 37   | R13             |
+| SCK         | SCK           | 36   | R11             |
+
+Source: `Adafruit_VS1053_Library/examples/feather_player/feather_player.ino` (installed library).
 
 ### Pin definitions in `config.h`
 
+Board-conditional — selected automatically at compile time based on `TARGET_BOARD`:
+
 ```cpp
-// GPIO6–11 on ESP32 are internal flash SPI and must NOT be used as GPIO
-#define MM_CS_PIN    32  // GPIO32 (A7) — VS1053 chip select
-#define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
-#define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
-#define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
+#if TARGET_BOARD == BOARD_FEATHER_ESP32
+  // HUZZAH32 — control pins land on A6/A7/A8/A9
+  #define MM_CS_PIN    32  // GPIO32 (A7) — VS1053 chip select
+  #define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
+  #define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
+  #define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
+#else
+  // ESP32-S3 Reverse TFT Feather — control pins land on D5/D6/D9/D10
+  #define MM_CS_PIN     6  // GPIO6  (D6)  — VS1053 chip select
+  #define MM_DCS_PIN   10  // GPIO10 (D10) — VS1053 data chip select
+  #define MM_DREQ_PIN   9  // GPIO9  (D9)  — VS1053 data request
+  #define MM_SDCS_PIN   5  // GPIO5  (D5)  — SD card chip select
+#endif
 ```
 
 ### Volume

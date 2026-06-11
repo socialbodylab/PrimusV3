@@ -39,13 +39,24 @@
 // =====================================================================
 //  Audio Board — Music Maker FeatherWing (VS1053, Adafruit 3357)
 // =====================================================================
+// The FeatherWing stacks directly on the Feather headers. The control
+// pins land on different GPIOs depending on the target board.
+// Reference: Adafruit VS1053 library examples/feather_player/feather_player.ino
 
-// ── Music Maker FeatherWing pins — HUZZAH32 GPIO numbers ─────────────
-// GPIO6–11 on ESP32 are internal flash SPI and must NOT be used as GPIO
-#define MM_CS_PIN    32  // GPIO32 (A7) — VS1053 chip select
-#define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
-#define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
-#define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
+#if TARGET_BOARD == BOARD_FEATHER_ESP32
+  // HUZZAH32 — Music Maker control pins land on A6/A7/A8/A9
+  // GPIO6–11 on this chip are internal flash SPI and must NOT be used as GPIO
+  #define MM_CS_PIN    32  // GPIO32 (A7) — VS1053 chip select
+  #define MM_DCS_PIN   33  // GPIO33 (A9) — VS1053 data chip select
+  #define MM_DREQ_PIN  15  // GPIO15 (A8) — VS1053 data request
+  #define MM_SDCS_PIN  14  // GPIO14 (A6) — SD card chip select
+#else
+  // ESP32-S3 Reverse TFT Feather — Music Maker control pins land on D5/D6/D9/D10
+  #define MM_CS_PIN     6  // GPIO6  (D6)  — VS1053 chip select
+  #define MM_DCS_PIN   10  // GPIO10 (D10) — VS1053 data chip select
+  #define MM_DREQ_PIN   9  // GPIO9  (D9)  — VS1053 data request
+  #define MM_SDCS_PIN   5  // GPIO5  (D5)  — SD card chip select
+#endif
 
 // =====================================================================
 //  Buttons
