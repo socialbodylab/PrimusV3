@@ -411,7 +411,7 @@ void setup() {
   audioBootTest();
 
   // FTP — start immediately at boot; always available
-  ftpInit(SD);
+  ftpInit();
   ftpStart();
 
   lastFpsTime = millis();

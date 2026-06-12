@@ -44,7 +44,7 @@ static bool _ftpRunning = false;
 //  API
 // =====================================================================
 
-void ftpInit(fs::FS& fsRef) {
+void ftpInit() {
   // SD must already be initialised by audioInit() before FTP can start.
   // Begin the TCP server once here — it stays bound for the life of the sketch.
   // ftpStart/ftpStop only toggle the _ftpRunning flag; they never re-call begin().
