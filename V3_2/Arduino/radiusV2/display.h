@@ -38,7 +38,7 @@ inline void displayAudioStatus(const char*, uint8_t, bool)       {}
 inline void displayAudioUpdate(const char*, uint8_t, bool)       {}
 inline void displayFtpStatus(bool, IPAddress, uint16_t)          {}
 inline void displaySdStatus(bool, uint16_t)                      {}
-inline void displayUpdateFooter(float, IPAddress = IPAddress(0,0,0,0)) {}
+inline void displayUpdateFooter(float) {}
 
 #else  // full TFT implementation below
 
@@ -455,7 +455,7 @@ void displaySdStatus(bool ready, uint16_t fileCount) {
 // =====================================================================
 //  Quick footer update — connection screen packet-rate counter
 // =====================================================================
-void displayUpdateFooter(float pktRate, IPAddress sourceIP = IPAddress(0,0,0,0)) {
+void displayUpdateFooter(float pktRate) {
   if (currentScreen != SCREEN_CONNECTION) return;
 
   // "P/s: " is 5 chars × 6px = 30px; number starts at x=4+30=34

@@ -483,7 +483,7 @@ void loop() {
     Serial.println("dBm");
 
     sendFpsTelemetry((uint16_t)pktRate);
-    displayUpdateFooter(pktRate, senderKnown ? senderIP : IPAddress(0,0,0,0));
+    displayUpdateFooter(pktRate);
 
     packetCount = 0;
     lastFpsTime = now;
