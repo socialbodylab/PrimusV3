@@ -164,12 +164,24 @@ The visible app name remains `PrimusCentral.app`; build-to-build tracking belong
 One-time local setup:
 
 ```bash
+./V3_6/scripts/setup_notary_profile.sh
+```
+
+That script wraps:
+
+```bash
 xcrun notarytool store-credentials "PrimusCentral Notary" \
 	--apple-id "dev@puckettrand.com" \
 	--team-id "SAV2V7GXQ5"
 ```
 
-When prompted, paste the app-specific password generated at `appleid.apple.com`. Do not store Apple passwords, private keys, `.p12` files, certificate signing requests, or notarization credentials in the repository.
+When prompted, paste the app-specific password generated at `appleid.apple.com`. For non-interactive setup, pass the password once through `APPLE_NOTARY_APP_PASSWORD` when running the script. Do not store Apple passwords, private keys, `.p12` files, certificate signing requests, or notarization credentials in the repository.
+
+Verify the profile with:
+
+```bash
+xcrun notarytool history --keychain-profile "PrimusCentral Notary"
+```
 
 Build, sign, notarize, staple, and verify the macOS app:
 

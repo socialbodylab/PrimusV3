@@ -29,13 +29,17 @@ function api(method, path, body) {
 const PRIMUS_UI_PROFILES = {
     workshop: {
         name: "Workshop",
-        outputTypes: ["none", "small_grid", "short_strip", "extra_long_strip"],
-        defaultOutputs: ["small_grid", "short_strip"],
+        outputTypes: ["none", "small_grid", "long_strip", "extra_long_strip"],
+        defaultOutputs: ["small_grid", "long_strip"],
         outputTypeLabels: {
             none: "None",
             small_grid: "Badge",
-            short_strip: "Collar",
+            long_strip: "Collar",
             extra_long_strip: "Belt",
+        },
+        // Existing Collar clips may still be saved as short_strip (30 px).
+        clipOutputTypeAliases: {
+            long_strip: ["short_strip"],
         },
     },
     full: {
@@ -116,6 +120,17 @@ document.addEventListener("alpine:init", () => {
         isOutputTypeVisible(type) {
             const allowed = this.uiProfile.outputTypes;
             return !Array.isArray(allowed) || allowed.includes(type);
+        },
+
+        clipOutputTypesFor(type) {
+            const aliases = this.uiProfile.clipOutputTypeAliases?.[type];
+            if (!Array.isArray(aliases) || !aliases.length) return [type];
+            return [type, ...aliases.filter(item => item !== type)];
+        },
+
+        clipMatchesOutputType(clipType, type) {
+            if (!clipType || !type) return false;
+            return this.clipOutputTypesFor(type).includes(clipType);
         },
 
         defaultOutputType(index, currentType = null) {

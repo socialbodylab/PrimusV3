@@ -293,16 +293,6 @@
             </div>
             <div class="btn-group" x-show="subMode === 'designer'">
                 <button class="btn" @click="openImportFile()">Import Clip</button>
-                <div class="transport-field transport-field-speed" style="min-width:230px">
-                    <label class="form-label">FPS</label>
-                    <div class="flex items-center gap-1">
-                        <input type="range" class="form-range" min="1" max="120" step="1"
-                               :value="state?.fps || 30"
-                               @input.debounce.120ms="updateFps($event.target.value)"
-                               @change="updateFps($event.target.value)">
-                        <span class="text-sm" x-text="(state?.fps || 30) + ' fps'"></span>
-                    </div>
-                </div>
                 <span class="text-sm text-muted" x-text="designerReceiverFpsLabel()"></span>
             </div>
         </div>

@@ -1,16 +1,21 @@
-PrimusCentral v0.5 macOS Install Notes
+PrimusCentral macOS Install Notes
 
-1. Move PrimusCentral.app to your Applications folder.
+Signed and notarized releases (0.65 and later)
 
-2. Because this v0.5 build is not Apple Developer ID notarized yet, macOS may show a malware verification warning after download. After moving the app to Applications, open Terminal and run:
+1. Open the release DMG, for example PrimusCentral-0.7-macOS-arm64.dmg.
+2. Drag PrimusCentral.app into Applications.
+3. Open PrimusCentral from Applications or Launchpad.
 
-   xattr -dr com.apple.quarantine "/Applications/PrimusCentral.app"
+Developer ID signed, notarized, and stapled releases should open without the old quarantine-removal workaround. If macOS still warns after download, confirm the release DMG checksum matches the published .sha256 file before overriding the warning.
 
-3. Open the app:
+Local unsigned test builds
 
-   open "/Applications/PrimusCentral.app"
+Unsigned builds from build_sender_app.py without --sign-identity are for local testing only. macOS may block them until you allow the app in System Settings > Privacy & Security, or remove quarantine after you trust the build:
 
-Notes:
-- You only need to run the xattr command once per downloaded copy of the app.
-- The app must be on the same network as your Primus receiver hardware.
-- Future signed and notarized releases should not need this quarantine-removal step.
+  xattr -dr com.apple.quarantine "/path/to/PrimusCentral.app"
+
+Notes
+
+- PrimusCentral must be on the same network as your Primus receiver hardware.
+- Packaged app data is stored under ~/Library/Application Support/PrimusV3/V3_6/sender/
+- For release build steps, see V3_6/PACKAGING.md

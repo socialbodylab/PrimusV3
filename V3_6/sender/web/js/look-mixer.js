@@ -67,7 +67,9 @@ document.addEventListener("alpine:init", () => {
 
         visibleClips(clips) {
             const app = Alpine.store("app");
-            return (clips || []).filter(clip => app.isOutputTypeVisible(clip.output_type));
+            return (clips || []).filter(clip =>
+                app.outputTypes.some(type => app.clipMatchesOutputType(clip.output_type, type))
+            );
         },
 
         get devices() {
@@ -566,10 +568,12 @@ document.addEventListener("alpine:init", () => {
             const state = Alpine.store("app").state;
             if (!state) return;
             const outputs = state.look?.outputs || [];
-            let targetIdx = outputs.findIndex(o => o.type === clip.output_type);
+            const app = Alpine.store("app");
+            let targetIdx = outputs.findIndex(o => app.clipMatchesOutputType(clip.output_type, o.type));
             if (targetIdx < 0) targetIdx = 0;
+            const targetType = outputs[targetIdx]?.type || clip.output_type;
 
-            await api("POST", "/api/update", { output: targetIdx, output_type: clip.output_type });
+            await api("POST", "/api/update", { output: targetIdx, output_type: targetType });
             await api("POST", "/api/update", {
                 output: targetIdx,
                 effect: clip.effect,
@@ -1427,7 +1431,8 @@ document.addEventListener("alpine:init", () => {
 
             // Reject if clip output type doesn't match the track
             const trackType = this.look?.outputs[trackIdx]?.type;
-            if (trackType && data.output_type && data.output_type !== trackType) {
+            const app = Alpine.store("app");
+            if (trackType && data.output_type && !app.clipMatchesOutputType(data.output_type, trackType)) {
                 const track = event.currentTarget;
                 track.classList.add('drag-type-mismatch');
                 setTimeout(() => track.classList.remove('drag-type-mismatch'), 600);
@@ -1511,7 +1516,7 @@ document.addEventListener("alpine:init", () => {
 
         clipsForType(type) {
             if (!type || type === "none" || !Alpine.store("app").isOutputTypeVisible(type)) return [];
-            return this.allClips.filter(c => c.output_type === type);
+            return this.allClips.filter(c => Alpine.store("app").clipMatchesOutputType(c.output_type, type));
         },
 
         // ── Look Save/Load ──

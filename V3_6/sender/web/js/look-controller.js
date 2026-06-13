@@ -195,6 +195,9 @@ document.addEventListener("alpine:init", () => {
             if (this.controllerPrepared || this.preparingController) return;
             this.preparingController = true;
             try {
+                if (Alpine.store("app").uiProfileKey === "workshop") {
+                    await this.applyWorkshopOutputPreset();
+                }
                 await Alpine.store("conn").connectAll();
                 await api("POST", "/api/controller/blackout", { fade_time: 0 });
                 this.controllerPrepared = true;
@@ -204,6 +207,17 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").showApiError("Cue Controller setup failed", e);
             } finally {
                 this.preparingController = false;
+            }
+        },
+
+        async applyWorkshopOutputPreset() {
+            const app = Alpine.store("app");
+            const defaults = app.uiProfile?.defaultOutputs;
+            if (!Array.isArray(defaults)) return;
+            for (let oi = 0; oi < defaults.length; oi++) {
+                const type = defaults[oi];
+                if (!type || type === "none" || !app.isOutputTypeVisible(type)) continue;
+                await api("POST", "/api/update", { output: oi, output_type: type });
             }
         },
 

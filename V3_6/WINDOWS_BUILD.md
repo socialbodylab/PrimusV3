@@ -410,6 +410,16 @@ The current installer intentionally stays simple:
 
 A signed installer or ZIP should reduce warnings compared with an unsigned raw executable, but users may still need manual firewall approval and occasional SmartScreen confirmation while the app builds Windows reputation.
 
+## macOS-Side Builder Validation
+
+Before the first Windows laptop pass, you can validate the shared builder logic from macOS:
+
+```bash
+python3 -m unittest discover -s V3_6/sender/tests -k packaging
+```
+
+That runs [test_packaging_builder.py](sender/tests/test_packaging_builder.py), which checks Windows PyInstaller command shape, macOS bundle ID/icon handling, notary zip paths, and staple/spctl verification commands. This does not produce a Windows `.exe`; the real executable build and launch checklist below still must run on Windows 11.
+
 ## Windows Build Checklist
 
 Run this checklist from a fresh Windows checkout when possible.
