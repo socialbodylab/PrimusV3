@@ -23,13 +23,15 @@
 extern bool sdBusy;   // defined in the .ino
 
 // =====================================================================
-//  Internal state (shared across both implementations)
+//  Internal state
 // =====================================================================
-char    _audioCurrentFile[33] = {0};
-uint8_t _audioVolume           = 80;
-bool    _audioLooping          = false;
-bool    _audioSdReady          = false;
-bool    _audioHwReady          = false;
+char     _audioCurrentFile[33] = {0};
+uint8_t  _audioVolume           = 80;
+bool     _audioLooping          = false;
+bool     _audioSdReady          = false;
+bool     _audioHwReady          = false;
+uint16_t _audioDuration         = 0;    // seconds, 0 = play full file
+uint32_t _audioStartMillis      = 0;
 
 // =====================================================================
 //  Music Maker FeatherWing (VS1053B) — SPI hardware codec
@@ -62,7 +64,7 @@ void audioInit() {
   _audioSdReady = true;
 }
 
-bool audioPlay(const char* filename, uint8_t volume) {
+bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   if (sdBusy) {
     Serial.println("[Audio] SD busy (FTP running) — play ignored");
     return false;
@@ -91,8 +93,10 @@ bool audioPlay(const char* filename, uint8_t volume) {
 
   strncpy(_audioCurrentFile, filename, 32);
   _audioCurrentFile[32] = '\0';
-  _audioVolume  = volume;
-  _audioLooping = false;
+  _audioVolume    = volume;
+  _audioLooping   = false;
+  _audioDuration  = duration;
+  _audioStartMillis = millis();
   sdBusy = true;
 
   // VS1053 volume: 0=max, 254=silent. Map 0-100 → 100-0 (scale to 0-100 range)
@@ -116,7 +120,9 @@ void audioStop() {
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
   _musicMaker.setVolume(254, 254);
   _audioCurrentFile[0] = '\0';
-  _audioLooping = false;
+  _audioLooping   = false;
+  _audioDuration  = 0;
+  _audioStartMillis = 0;
   sdBusy = false;
   Serial.println("[Audio] Stopped");
 }
@@ -169,12 +175,20 @@ void audioBootTest() {
   root.close();
 }
 
-void audioLoop(const char* filename, uint8_t volume) {
+void audioLoop(const char* filename, uint8_t volume, uint16_t duration = 0) {
   _audioLooping = true;
-  audioPlay(filename, volume);
+  audioPlay(filename, volume, duration);
 }
 
 void audioUpdate() {
+  // Duration cutoff — takes priority over looping
+  if (_audioDuration > 0 && _audioCurrentFile[0] != '\0') {
+    if ((millis() - _audioStartMillis) >= (uint32_t)_audioDuration * 1000) {
+      audioStop();
+      return;
+    }
+  }
+
   if (_musicMaker.playingMusic) {
     _musicMaker.feedBuffer();
   } else {

@@ -25,6 +25,7 @@ REQUIRED_LIBS=(
   "Adafruit ST7735 and ST7789 Library"
   "Adafruit GFX Library"
   "Adafruit VS1053 Library"
+  "ArduinoJson"
   "SimpleFTPServer"
 )
 

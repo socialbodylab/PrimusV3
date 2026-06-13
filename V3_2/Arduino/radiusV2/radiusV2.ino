@@ -12,12 +12,14 @@
  *   [0-7]  "Art-Net\0"
  *   [8-9]  0x00, 0x82      — opcode LE
  *   [10-11] 0x00, 0x0E     — protocol version 14
- *   [12]   command         — 0=stop, 1=play, 2=loop, 3=pause, 4=volume
- *   [13]   volume          — 0–100
- *   [14..N] filename       — null-terminated, max 32 chars (e.g. "cue01.wav")
+ *   [12]   command         — 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 6=play cue, 7=loop cue
+ *   [13]   volume (0–100) or cue number (cmd 6/7)
+ *   [14..N] filename       — null-terminated, max 32 chars (cmd 1/2 only)
+ *   [N+1..N+2] duration   — uint16_t LE, seconds, 0=full file (cmd 1/2, optional)
  *
  * Libraries: Adafruit_ST7789, Adafruit_GFX,
  *            Adafruit VS1053 Library (Music Maker),
+ *            ArduinoJson (cue map parsing),
  *            SimpleFTPServer (xreef/Mischianti) [Library Manager: "SimpleFTPServer"]
  */
 
@@ -30,6 +32,7 @@
 #include "display.h"
 #include "buttons.h"
 #include "audio.h"
+#include "cues.h"
 #include "ftp.h"
 
 // =====================================================================
@@ -248,20 +251,43 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (fnLen > 32) fnLen = 32;
   memcpy(filename, data + 14, fnLen);
 
+  // Optional duration: uint16_t LE in the 2 bytes after the filename null terminator
+  uint16_t duration = 0;
+  uint16_t nullPos = 14;
+  while (nullPos < len && data[nullPos] != 0) nullPos++;
+  if (len >= nullPos + 3) {
+    duration = (uint16_t)data[nullPos + 1] | ((uint16_t)data[nullPos + 2] << 8);
+  }
+
   Serial.print("[ArtAudio] cmd=");
   Serial.print(cmd);
   Serial.print(" vol=");
   Serial.print(volume);
-  Serial.print(" file=");
-  Serial.println(filename);
+  if (cmd == 1 || cmd == 2) {
+    Serial.print(" file="); Serial.print(filename);
+    if (duration > 0) { Serial.print(" dur="); Serial.print(duration); Serial.print("s"); }
+  }
+  if (cmd == 6 || cmd == 7) { Serial.print(" cue="); Serial.print(volume); }
+  Serial.println();
 
   switch (cmd) {
-    case 1:  audioPlay(filename, volume);  break;
-    case 2:  audioLoop(filename, volume);  break;
-    case 3:  audioPause();                 break;
-    case 4:  audioSetVolume(volume);       break;
+    case 1:  audioPlay(filename, volume, duration); break;
+    case 2:  audioLoop(filename, volume, duration); break;
+    case 3:  audioPause();                          break;
+    case 4:  audioSetVolume(volume);                break;
     case 5:  audioSetVolume(volume); audioTestTone(); break;
-    default: audioStop();                  break;
+    case 6:
+    case 7: {
+      AudioCue cue;
+      if (cueLookup(volume, &cue)) {
+        if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
+        else          audioLoop(cue.filename, _audioVolume, cue.duration);
+      } else {
+        Serial.printf("[ArtAudio] Cue %d not found\n", volume);
+      }
+      break;
+    }
+    default: audioStop(); break;
   }
 
   if (infoScreenIndex == 2)
@@ -408,6 +434,7 @@ void setup() {
 
   // Audio
   audioInit();
+  cuesLoad();
   audioBootTest();
 
   // FTP — start immediately at boot; always available
