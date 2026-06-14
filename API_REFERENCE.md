@@ -190,8 +190,9 @@ Radius nodes support WAV file playback triggered over Art-Net. Audio files are s
 | 8–9 | 2 | Opcode | `0x8200` (little-endian) |
 | 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
 | 12 | 1 | Command | See table below |
-| 13 | 1 | Volume | 0–100 |
-| 14–N | ≤33 | Filename | Null-terminated, max 32 chars (e.g. `cue01.wav`) |
+| 13 | 1 | Volume / Cue | 0–100 for cmd 0–5; cue number (1–255) for cmd 6–7 |
+| 14–N | ≤33 | Filename | Null-terminated, max 32 chars. cmd 1/2 only |
+| N+1–N+2 | 2 | Duration | uint16_t LE, seconds. 0 or omitted = play full file. cmd 1/2 only |
 
 **Minimum size: 15 bytes** (header + opcode + version + cmd + volume + at least one filename byte).
 
@@ -200,24 +201,44 @@ Radius nodes support WAV file playback triggered over Art-Net. Audio files are s
 | Value | Command | Description |
 |-------|---------|-------------|
 | 0 | Stop | Stop playback immediately |
-| 1 | Play | Play file once |
-| 2 | Loop | Play file on repeat |
+| 1 | Play | Play file once. Optional duration (bytes N+1–N+2) stops early |
+| 2 | Loop | Play file on repeat. Duration stops looping after N seconds |
 | 3 | Pause | Pause playback |
 | 4 | Volume | Set volume without interrupting playback (filename ignored) |
+| 5 | Test tone | Play a sine wave test tone (~500ms). No filename or SD card needed |
+| 6 | Play cue | Play cue number (byte 13) once, resolved via `/cues.json` on SD |
+| 7 | Loop cue | Loop cue number (byte 13), resolved via `/cues.json` on SD |
 
 ### Notes
 
 - If the FTP server is currently running, the node stops it automatically before starting playback to free the SD bus.
 - Filenames are relative to the SD root (e.g. `cue01.wav`, not `/cue01.wav`).
 - Volume 0 = silent, 100 = maximum. The firmware maps this to the hardware codec's native range.
-- Stop, Pause, and Volume commands ignore the filename field.
+- Cmd 0, 3, 4, 5 ignore the filename field.
+- Cmd 6/7 use byte 13 as the cue number (1–255); volume for cue playback uses the last-set level.
 - Command 4 (Volume) calls the codec's hardware volume register directly — the file keeps playing uninterrupted. The sender UI uses this for live slider updates, throttled to one packet per 50 ms.
+- Duration (cmd 1/2): append 2 bytes (uint16_t LE, seconds) immediately after the filename null terminator. Omitting these bytes or sending 0 plays the full file. Duration takes priority over looping — a looping file with duration stops after the time elapses.
+
+### Cue Map — `/cues.json`
+
+Radius nodes load a cue map from the SD card at boot. Upload via FTP to update without reflashing. Both value forms are supported:
+
+```json
+{
+  "1": "problemforest2.wav",
+  "2": { "file": "pairing2.wav", "duration": 30 },
+  "3": "static.wav",
+  "4": { "file": "liftoff.wav", "duration": 8 }
+}
+```
+
+Keys are cue numbers (strings). Values are either a filename string (plays full file) or an object with `file` and optional `duration` (seconds). Max 64 cues. The node logs all loaded cues to Serial on boot.
 
 ---
 
 ## 7. FTP Server Control — ArtFtpCmd (custom opcode 0x8201)
 
-Radius nodes include an FTP server (TCP port 21) for managing WAV files on the SD card. The server is off by default and must be explicitly started — either via this opcode or the D1 button on the node's FTP screen. This opcode is only implemented in the `radiusV2` firmware.
+Radius nodes include an FTP server (TCP port 21) for managing WAV files on the SD card. The server starts automatically at boot and can be toggled via this opcode or the D1 button on the node's FTP screen. This opcode is only implemented in the `radiusV2` firmware.
 
 ### ArtFtpCmd Packet (sender → node)
 

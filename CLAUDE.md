@@ -68,7 +68,8 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - **WAV format requirement**: Audio files must be RIFF PCM WAV (standard 16-bit, 44100 Hz recommended). AIFF, MP3, and other formats will be rejected by the sender before upload and by the firmware before playback. Convert with: `afconvert -f WAVE -d LEI16@44100 input.aif output.wav`
 - **SD bus mutex** (`sdBusy`): A boolean flag set `true` by `audioPlay()` and cleared when audio stops. `ftpUpdate()` skips `handleFTP()` while `sdBusy` is true — FTP stalls (TCP connection stays open) until audio finishes rather than failing immediately. Audio also refuses to start if `sdBusy` is already set.
 - **FTP lifecycle**: FTP starts automatically at boot (`setup()` calls `ftpInit()` + `ftpStart()`). Art-Net 0x8201 cmd=1/0 and the D1 button on the FTP screen can toggle it manually.
-- **Audio commands (0x8200)**: cmd 0=stop, 1=play, 2=loop, 3=pause, 4=volume. Cmd 4 calls the hardware volume register without interrupting playback — used for live slider updates.
+- **Audio commands (0x8200)**: cmd 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 5=test tone, 6=play cue, 7=loop cue. Cmd 4 calls the hardware volume register without interrupting playback. Cmd 1/2 accept an optional uint16_t duration (seconds) in the 2 bytes after the filename null terminator; 0 or omitted = play full file. Cmd 6/7 use byte 13 as a cue number resolved via `/cues.json` on the SD card.
+- **Cue map**: `cues.h` loads `/cues.json` from SD at boot (ArduinoJson). Values can be a plain filename string or `{"file": "x.wav", "duration": 30}`. Max 64 cues.
 - **Audio UI**: The V3.1 sender has an "Audio" tab (`audio-panel.js`) that shows audio-capable devices, lists their SD card files via FTP, and provides play/loop/stop/pause controls and a live volume slider (throttled to 50 ms).
 
 ## Critical sync points
@@ -77,7 +78,7 @@ The sender and receiver must agree on:
 - **Output type IDs**: `LOOK_OUTPUT_TYPES` list (Python) indices = `OutputType` enum (C++) values
 - **Pixel counts**: `OUTPUT_TYPES` dict (Python, in state.py) = `OUTPUT_TYPE_TABLE` (C++)
 - **Custom opcode 0x8100**: ArtOutputConfig for runtime output type changes
-- **Custom opcode 0x8200**: ArtAudioCmd — 15-byte minimum packet, cmd/volume/filename
+- **Custom opcode 0x8200**: ArtAudioCmd — 15-byte minimum packet, cmd/volume/filename + optional 2-byte duration after filename null terminator
 - **Custom opcode 0x8201**: ArtFtpCmd — 13-byte packet, cmd byte only
 - **FPS telemetry**: 7-byte `PFP` packets on UDP 6455
 

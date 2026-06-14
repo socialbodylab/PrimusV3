@@ -159,7 +159,7 @@ There are two firmware variants to distribute:
 | `primusV3_receiver` | `V3_1/Arduino/` | LED-only nodes (V3.0 / V3.1) |
 | `radiusV2` | `V3_2/Arduino/` | Radius nodes (V3.2) |
 
-The Radius firmware also has a compile-time board switch (`AUDIO_BOARD` in `config.h`), so two `.bin` files are needed for V3.2: one for Music Maker FeatherWing (Radius V1) and one for Audio BFF (Radius V2).
+The Radius firmware has a compile-time board switch (`TARGET_BOARD` in `config.h`), so two `.bin` files are needed for V3.2: one for HUZZAH32 (Radius V1, `--board feather-esp32`) and one for the ESP32-S3 Reverse TFT Feather (Radius V2, default). Both use the Music Maker FeatherWing.
 
 For end-user flashing without `arduino-cli`:
 

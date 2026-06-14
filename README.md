@@ -70,9 +70,10 @@ flowchart LR
 A firmware-only variant for audio-only nodes — no LED outputs. No V3.2 sender exists yet; audio nodes are managed over Art-Net using two custom opcodes for audio and FTP control.
 
 New in V3.2:
-- **WAV playback** triggered by Art-Net opcode `0x8200` — commands: play, loop, stop, pause, and live volume (cmd 4, no file restart)
-- **FTP server** on TCP port 21 for uploading/managing audio files on the SD card, controlled by Art-Net opcode `0x8201` or the D1 button on the FTP screen
-- **Dual audio board support** — compile-time switch in `config.h` between Adafruit Music Maker FeatherWing (VS1053 SPI codec) and Adafruit Audio BFF (MAX98357 I2S)
+- **WAV playback** triggered by Art-Net opcode `0x8200` — play, loop, stop, pause, live volume (cmd 4, no file restart), and test tone (cmd 5)
+- **Cue map** — load `/cues.json` from the SD card at boot; trigger playback by cue number (cmd 6/7) instead of filename. Supports optional per-cue duration for playing a subset of a file
+- **Duration control** — optional 2-byte duration field (seconds) appended to cmd 1/2 packets; firmware stops playback after the specified time. Omitting duration plays the full file
+- **FTP server** on TCP port 21 for uploading/managing audio files on the SD card; starts automatically at boot, toggleable via Art-Net opcode `0x8201` or the D1 button on the FTP screen
 - **SD bus safety** — FTP and audio share the SD card; audio automatically stops FTP before playing, and FTP refuses to start while audio is active
 - **Sender UI integration** — V3.1 sender detects Radius nodes (via `is_audio` flag in ArtPollReply), shows a ♪ badge on device cards, and exposes an Audio tab for file browsing and playback control
 
@@ -115,11 +116,8 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script auto-detects the 
 - **Display:** Built-in 240×135 ST7789 TFT — shows device name, WiFi status, IP, RSSI, live FPS
 - **Buttons:** D0 cycles display screens, D1 is context-sensitive (Audio screen: test tone; FTP screen: FTP toggle; other screens: no action)
 
-**Additional hardware for Radius nodes (one of):**
-- **Adafruit Music Maker FeatherWing** (VS1053B SPI codec, Adafruit #3357) — plays WAV/MP3/OGG via SPI, includes SD slot
-- **Adafruit Audio BFF** (MAX98357 I2S amp, Adafruit #5769) — I2S DAC/amp, SD card via SPI
-
-Audio board is selected at compile time by setting `AUDIO_BOARD` in `config.h`.
+**Additional hardware for Radius nodes:**
+- **Adafruit Music Maker FeatherWing** (VS1053B SPI codec, Adafruit #3357) — stacks directly on the Feather, plays WAV/MP3/OGG via SPI, includes SD slot
 
 ### Output Types
 
@@ -170,9 +168,10 @@ PrimusV3/
 ├── V3_2/                            # Audio receiver firmware (in development)
 │   └── Arduino/
 │       └── radiusV2/
-│           ├── radiusV2.ino  # Main sketch (Art-Net + audio + FTP)
-│           ├── config.h             # Output types, pins, audio board selection
-│           ├── audio.h              # WAV playback (VS1053 or MAX98357 I2S)
+│           ├── radiusV2.ino         # Main sketch (Art-Net + audio + FTP)
+│           ├── config.h             # Pins, network config, board selection
+│           ├── audio.h              # WAV playback via VS1053 (duration support)
+│           ├── cues.h               # Cue map loader (/cues.json on SD card)
 │           ├── ftp.h                # FTP server wrapper (SimpleFTPServer)
 │           ├── display.h            # TFT display (adds Audio + FTP screens)
 │           └── buttons.h            # Button input handling
