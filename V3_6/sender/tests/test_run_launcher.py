@@ -55,6 +55,7 @@ class RunLauncherTests(unittest.TestCase):
             ui_lifecycle_started_at = 90.0
             ui_last_heartbeat = 99.0
             ui_close_requested_at = 100.0
+            controller_state = None
 
             def __init__(self):
                 self.shutdown_called = False
@@ -65,6 +66,86 @@ class RunLauncherTests(unittest.TestCase):
 
         server = FakeServer()
         with mock.patch.object(run.time, "monotonic", return_value=103.0), \
+                mock.patch.object(run.time, "sleep"), \
+                mock.patch("builtins.print"):
+            run._ui_lifecycle_monitor(server)
+
+        self.assertTrue(server.shutdown_called)
+        self.assertFalse(server.ui_lifecycle_enabled)
+
+    def test_ui_has_live_output_true_for_controller(self):
+        class FakeState:
+            playback_source = run.ControllerState.SOURCE_CONTROLLER
+
+        class FakeServer:
+            controller_state = FakeState()
+
+        self.assertTrue(run._ui_has_live_output(FakeServer()))
+
+    def test_ui_has_live_output_false_for_idle(self):
+        class FakeState:
+            playback_source = run.ControllerState.SOURCE_IDLE
+
+        class FakeServer:
+            controller_state = FakeState()
+
+        self.assertFalse(run._ui_has_live_output(FakeServer()))
+
+    def test_ui_lifecycle_monitor_defers_heartbeat_shutdown_during_live_output(self):
+        class FakeState:
+            playback_source = run.ControllerState.SOURCE_CONTROLLER
+
+        class FakeServer:
+            ui_lifecycle_enabled = True
+            ui_lifecycle_started_at = 90.0
+            ui_last_heartbeat = 100.0
+            ui_close_requested_at = None
+            controller_state = FakeState()
+
+            def __init__(self):
+                self.shutdown_called = False
+
+            def shutdown(self):
+                self.shutdown_called = True
+                self.ui_lifecycle_enabled = False
+
+        server = FakeServer()
+        times = iter([146.1, 146.35, 146.6])
+
+        def fake_monotonic():
+            value = next(times)
+            if value >= 146.6:
+                server.ui_lifecycle_enabled = False
+            return value
+
+        with mock.patch.object(run.time, "monotonic", side_effect=fake_monotonic), \
+                mock.patch.object(run.time, "sleep"), \
+                mock.patch("builtins.print"):
+            run._ui_lifecycle_monitor(server)
+
+        self.assertFalse(server.shutdown_called)
+        self.assertGreater(server.ui_last_heartbeat, 100.0)
+
+    def test_ui_lifecycle_monitor_shutdown_after_heartbeat_timeout_when_idle(self):
+        class FakeState:
+            playback_source = run.ControllerState.SOURCE_IDLE
+
+        class FakeServer:
+            ui_lifecycle_enabled = True
+            ui_lifecycle_started_at = 90.0
+            ui_last_heartbeat = 100.0
+            ui_close_requested_at = None
+            controller_state = FakeState()
+
+            def __init__(self):
+                self.shutdown_called = False
+
+            def shutdown(self):
+                self.shutdown_called = True
+                self.ui_lifecycle_enabled = False
+
+        server = FakeServer()
+        with mock.patch.object(run.time, "monotonic", return_value=146.1), \
                 mock.patch.object(run.time, "sleep"), \
                 mock.patch("builtins.print"):
             run._ui_lifecycle_monitor(server)

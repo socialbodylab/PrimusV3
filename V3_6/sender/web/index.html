@@ -991,49 +991,51 @@
                             <button class="btn btn-sm btn-danger" @click="addBlackoutAssignment()">Add Blackout</button>
                         </div>
                     </div>
-                    <template x-for="(assignment, ai) in cueForm.assignments" :key="ai">
+                    <template x-for="(assignment, ai) in cueForm.assignments" :key="assignment._key || ('assignment-' + ai)">
                         <div class="cue-assignment-row">
-                            <template x-if="assignment.action === 'blackout'">
-                                <div class="cue-assignment-blackout">
-                                    <div class="cue-assignment-preview blackout-preview"></div>
-                                    <div>
-                                        <div class="look-card-name">Blackout</div>
-                                        <div class="text-sm text-muted">Fade every target to black.</div>
-                                    </div>
+                            <div class="cue-assignment-blackout" x-show="assignment.action === 'blackout'">
+                                <div class="cue-assignment-preview blackout-preview"></div>
+                                <div>
+                                    <div class="look-card-name">Blackout</div>
+                                    <div class="text-sm text-muted">Fade every target to black.</div>
                                 </div>
-                            </template>
-                            <template x-if="assignment.action === 'look'">
-                                <div class="cue-assignment-look-grid">
-                                    <div class="cue-assignment-preview" :style="lookThumbStyle(assignmentLook(assignment))"></div>
-                                    <div class="form-group">
-                                        <label class="form-label">Look</label>
-                                        <select class="form-select" x-model="assignment.look_id">
-                                            <template x-for="look in looks" :key="look.id">
-                                                <option :value="look.id" x-text="look.name"></option>
-                                            </template>
-                                        </select>
-                                        <div class="text-sm text-muted" x-text="lookOutputs(assignmentLook(assignment)) || 'No outputs'"></div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Target</label>
-                                        <select class="form-select" x-model="assignment.target_mode">
-                                            <option value="look">Look target</option>
-                                            <option value="all">All devices</option>
-                                            <option value="group">Device group</option>
-                                            <option value="devices">Selected devices</option>
-                                        </select>
-                                        <div class="text-sm text-muted" x-text="assignmentTargetLabel(assignment)"></div>
-                                    </div>
+                            </div>
+                            <div class="cue-assignment-look-grid" x-show="assignment.action === 'look'">
+                                <div class="cue-assignment-preview" :style="lookThumbStyle(assignmentLook(assignment))"></div>
+                                <div class="form-group">
+                                    <label class="form-label">Look</label>
+                                    <select class="form-select"
+                                            :value="assignment.look_id"
+                                            @change="setAssignmentLookId(assignment, $event.target.value)">
+                                        <template x-for="look in cueModalLooks" :key="look.id">
+                                            <option :value="look.id" x-text="look.name"></option>
+                                        </template>
+                                    </select>
+                                    <div class="text-sm text-muted" x-text="lookOutputs(assignmentLook(assignment)) || 'No outputs'"></div>
                                 </div>
-                            </template>
+                                <div class="form-group">
+                                    <label class="form-label">Target</label>
+                                    <select class="form-select"
+                                            :value="assignment.target_mode"
+                                            @change="setAssignmentTargetMode(assignment, $event.target.value)">
+                                        <option value="look">Look target</option>
+                                        <option value="all">All devices</option>
+                                        <option value="group">Device group</option>
+                                        <option value="devices">Selected devices</option>
+                                    </select>
+                                    <div class="text-sm text-muted" x-text="assignmentTargetLabel(assignment)"></div>
+                                </div>
+                            </div>
                             <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'group'">
                                 <label class="form-label">Group</label>
-                                <select class="form-select" x-model="assignment.device_group_id">
-                                    <template x-for="group in deviceGroups" :key="group.id">
+                                <select class="form-select"
+                                        :value="assignment.device_group_id"
+                                        @change="setAssignmentGroupId(assignment, $event.target.value)">
+                                    <template x-for="group in cueModalGroups" :key="group.id">
                                         <option :value="group.id" x-text="group.name"></option>
                                     </template>
                                 </select>
-                                <p class="text-muted text-sm" x-show="deviceGroups.length === 0">No groups defined.</p>
+                                <p class="text-muted text-sm" x-show="cueModalGroups.length === 0">No groups defined.</p>
                             </div>
                             <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'devices'">
                                 <label class="form-label">Devices</label>

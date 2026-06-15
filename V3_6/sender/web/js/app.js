@@ -262,10 +262,42 @@ document.addEventListener("alpine:init", () => {
             if (!this.runtime?.ui_lifecycle) return;
 
             const heartbeat = () => {
+                // #region agent log
+                fetch('http://127.0.0.1:7695/ingest/abbd0204-dcc0-4721-9f61-f71dfdc607c5', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f67d00' },
+                    body: JSON.stringify({
+                        sessionId: 'f67d00',
+                        location: 'app.js:heartbeat',
+                        message: 'ui heartbeat sent',
+                        data: { hidden: document.hidden },
+                        timestamp: Date.now(),
+                        hypothesisId: 'H5',
+                    }),
+                }).catch(() => {});
+                // #endregion
                 api("POST", "/api/ui/heartbeat", {}).catch(() => {});
             };
             heartbeat();
             this._lifecycleHeartbeat = setInterval(heartbeat, 2000);
+
+            document.addEventListener('visibilitychange', () => {
+                // #region agent log
+                fetch('http://127.0.0.1:7695/ingest/abbd0204-dcc0-4721-9f61-f71dfdc607c5', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f67d00' },
+                    body: JSON.stringify({
+                        sessionId: 'f67d00',
+                        location: 'app.js:visibilitychange',
+                        message: 'visibility changed',
+                        data: { hidden: document.hidden },
+                        timestamp: Date.now(),
+                        hypothesisId: 'H5',
+                    }),
+                }).catch(() => {});
+                // #endregion
+                if (!document.hidden) heartbeat();
+            });
 
             window.addEventListener('pagehide', () => {
                 if (this._lifecycleHeartbeat) {

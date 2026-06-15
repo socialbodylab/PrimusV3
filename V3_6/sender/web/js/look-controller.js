@@ -3,6 +3,23 @@
  * Manual button board for cue playback.
  */
 
+// #region agent log
+function _cueDbgLog(location, message, data, hypothesisId) {
+    fetch('http://127.0.0.1:7695/ingest/abbd0204-dcc0-4721-9f61-f71dfdc607c5', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f67d00' },
+        body: JSON.stringify({
+            sessionId: 'f67d00',
+            location,
+            message,
+            data,
+            timestamp: Date.now(),
+            hypothesisId,
+        }),
+    }).catch(() => {});
+}
+// #endregion
+
 document.addEventListener("alpine:init", () => {
     Alpine.data("lookController", () => ({
         looks: [],
@@ -29,6 +46,8 @@ document.addEventListener("alpine:init", () => {
 
         cueModal: false,
         cueEditIndex: -1,
+        cueModalLooks: [],
+        cueModalGroups: [],
         cueForm: {
             number: 1,
             name: 'Cue 1',
@@ -230,9 +249,9 @@ document.addEventListener("alpine:init", () => {
             if (action === 'blackout') return { action: 'blackout' };
             const assignment = {
                 action: 'look',
-                look_id: raw.look_id || '',
+                look_id: String(raw.look_id || ''),
                 target_mode: this.cleanTargetMode(raw.target_mode || cue.target_mode || 'look'),
-                device_group_id: raw.device_group_id || cue.device_group_id || '',
+                device_group_id: String(raw.device_group_id || cue.device_group_id || ''),
                 device_ips: Array.isArray(raw.device_ips) ? [...raw.device_ips] : (Array.isArray(cue.device_ips) ? [...cue.device_ips] : []),
                 note: raw.note || '',
             };
@@ -307,7 +326,8 @@ document.addEventListener("alpine:init", () => {
         },
 
         lookById(lookId) {
-            return this.looks.find(look => look.id === lookId) || null;
+            const id = String(lookId || '');
+            return this.looks.find(look => String(look.id) === id) || null;
         },
 
         lookName(lookId) {
@@ -371,7 +391,7 @@ document.addEventListener("alpine:init", () => {
             if (assignment?.action === 'blackout') return 'All devices';
             if (assignment.target_mode === 'all') return 'All devices';
             if (assignment.target_mode === 'group') {
-                const group = this.deviceGroups.find(item => item.id === assignment.device_group_id);
+                const group = this.deviceGroups.find(item => String(item.id) === String(assignment.device_group_id));
                 return group ? group.name : 'Missing group';
             }
             if (assignment.target_mode === 'devices') {
@@ -457,10 +477,53 @@ document.addEventListener("alpine:init", () => {
             };
         },
 
+        snapshotCueModalOptions() {
+            this.cueModalLooks = this.looks.map(look => ({ id: String(look.id), name: look.name }));
+            this.cueModalGroups = this.deviceGroups.map(group => ({
+                id: String(group.id),
+                name: group.name,
+            }));
+        },
+
+        ensureAssignmentKeys(form = this.cueForm) {
+            if (!form?.assignments) return;
+            form.assignments.forEach((assignment) => {
+                if (!assignment._key) assignment._key = crypto.randomUUID();
+            });
+        },
+
+        setAssignmentLookId(assignment, lookId) {
+            assignment.look_id = String(lookId || '');
+            // #region agent log
+            _cueDbgLog('look-controller.js:setAssignmentLookId', 'look select changed', {
+                lookId: assignment.look_id,
+                options: (this.cueModalLooks || []).map(look => look.id),
+            }, 'H3');
+            // #endregion
+        },
+
+        setAssignmentTargetMode(assignment, targetMode) {
+            assignment.target_mode = this.cleanTargetMode(targetMode);
+            if (assignment.target_mode !== 'group') assignment.device_group_id = '';
+            if (assignment.target_mode !== 'devices') assignment.device_ips = [];
+        },
+
+        setAssignmentGroupId(assignment, groupId) {
+            assignment.device_group_id = String(groupId || '');
+            // #region agent log
+            _cueDbgLog('look-controller.js:setAssignmentGroupId', 'group select changed', {
+                groupId: assignment.device_group_id,
+                options: (this.cueModalGroups || []).map(group => group.id),
+            }, 'H1');
+            // #endregion
+        },
+
         openAddCue() {
             this.cueEditIndex = -1;
             this.cueForm = this.blankCueForm();
             if (this.looks.length) this.addLookAssignment();
+            this.ensureAssignmentKeys();
+            this.snapshotCueModalOptions();
             this.cueModal = true;
         },
 
@@ -468,6 +531,19 @@ document.addEventListener("alpine:init", () => {
             const normalized = this.normalizeCue(cue, idx + 1);
             this.cueEditIndex = idx;
             this.cueForm = JSON.parse(JSON.stringify(normalized));
+            this.ensureAssignmentKeys();
+            this.snapshotCueModalOptions();
+            // #region agent log
+            _cueDbgLog('look-controller.js:openEditCue', 'edit cue hydrated', {
+                cueName: this.cueForm.name,
+                assignments: (this.cueForm.assignments || []).map(assignment => ({
+                    look_id: assignment.look_id,
+                    target_mode: assignment.target_mode,
+                    device_group_id: assignment.device_group_id,
+                })),
+                lookOptions: this.cueModalLooks.map(look => look.id),
+            }, 'H3');
+            // #endregion
             this.cueModal = true;
         },
 
@@ -475,16 +551,19 @@ document.addEventListener("alpine:init", () => {
             this.cueModal = false;
             this.cueEditIndex = -1;
             this.cueForm = this.blankCueForm();
+            this.cueModalLooks = [];
+            this.cueModalGroups = [];
         },
 
         addLookAssignment() {
             if (!this.cueForm) this.cueForm = this.blankCueForm();
             this.cueForm.assignments = this.cueForm.assignments.filter(item => item.action !== 'blackout');
             this.cueForm.assignments.push({
+                _key: crypto.randomUUID(),
                 action: 'look',
-                look_id: this.looks[0]?.id || '',
+                look_id: String(this.cueModalLooks[0]?.id || this.looks[0]?.id || ''),
                 target_mode: 'look',
-                device_group_id: this.deviceGroups[0]?.id || '',
+                device_group_id: String(this.cueModalGroups[0]?.id || this.deviceGroups[0]?.id || ''),
                 device_ips: [],
                 note: '',
             });
@@ -492,7 +571,7 @@ document.addEventListener("alpine:init", () => {
 
         addBlackoutAssignment() {
             if (!this.cueForm) this.cueForm = this.blankCueForm();
-            this.cueForm.assignments = [{ action: 'blackout' }];
+            this.cueForm.assignments = [{ _key: crypto.randomUUID(), action: 'blackout' }];
             if (!this.cueForm.name || this.cueForm.name.startsWith('Cue ')) this.cueForm.name = 'Blackout';
         },
 

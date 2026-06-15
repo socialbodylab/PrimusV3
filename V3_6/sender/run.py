@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import errno
+import json
 import os
 import signal
 import shutil
@@ -37,6 +38,41 @@ UI_CLOSE_GRACE_SECONDS = 2.0
 UI_HEARTBEAT_TIMEOUT_SECONDS = 45.0
 UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
 _MACOS_ACTIVITY_TOKEN = None
+_DEBUG_LOG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    ".cursor",
+    "debug-f67d00.log",
+)
+
+
+def _debug_log(location, message, data, hypothesis_id):
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "f67d00",
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+            "hypothesisId": hypothesis_id,
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(payload) + "\n")
+    except OSError:
+        pass
+    # #endregion
+
+
+def _ui_has_live_output(server):
+    state = getattr(server, "controller_state", None)
+    if state is None:
+        return False
+    source = getattr(state, "playback_source", None)
+    return source in (
+        ControllerState.SOURCE_CONTROLLER,
+        ControllerState.SOURCE_MIXER,
+        ControllerState.SOURCE_DESIGNER,
+    )
 
 
 def _handle_sigterm(signum, frame):
@@ -153,6 +189,12 @@ def _ui_lifecycle_monitor(server):
                 and (last_heartbeat is None or last_heartbeat < close_requested_at)
                 and now - close_requested_at >= UI_CLOSE_GRACE_SECONDS):
             print("UI window closed; shutting down PrimusCentral.")
+            # #region agent log
+            _debug_log("run.py:_ui_lifecycle_monitor", "shutdown after window close", {
+                "close_requested_at": close_requested_at,
+                "last_heartbeat": last_heartbeat,
+            }, "H5")
+            # #endregion
             server.ui_lifecycle_enabled = False
             server.shutdown()
             return
@@ -164,6 +206,20 @@ def _ui_lifecycle_monitor(server):
             baseline = last_heartbeat
             timeout = UI_HEARTBEAT_TIMEOUT_SECONDS
         if now - baseline >= timeout:
+            live_output = _ui_has_live_output(server)
+            # #region agent log
+            _debug_log("run.py:_ui_lifecycle_monitor", "heartbeat timeout evaluated", {
+                "elapsed": round(now - baseline, 2),
+                "timeout": timeout,
+                "live_output": live_output,
+                "last_heartbeat": last_heartbeat,
+            }, "H5")
+            # #endregion
+            if live_output:
+                if last_heartbeat is not None:
+                    server.ui_last_heartbeat = now
+                time.sleep(0.25)
+                continue
             print("UI heartbeat stopped; shutting down PrimusCentral.")
             server.ui_lifecycle_enabled = False
             server.shutdown()
