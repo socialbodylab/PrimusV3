@@ -10,6 +10,8 @@
 <script src="/js/look-mixer.js"></script>
 <script src="/js/look-controller.js"></script>
 <script src="/js/audio-panel.js"></script>
+<script src="/js/audio-cues.js"></script>
+<script src="/js/net-log.js"></script>
 </head>
 <body>
 
@@ -1068,6 +1070,255 @@
         </template>
 
     </div>
+
+    <!-- ──── AUDIO CUES PANEL ──── -->
+    <div class="panel" x-show="$store.app.mode === 'cues'" x-data="audioCues">
+
+        <!-- Top bar -->
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Audio Cues</span>
+            <div class="btn-group">
+                <button class="btn btn-sm" @click="addCue()">+ Cue</button>
+                <button class="btn btn-sm" @click="exportCueSheet()">↓ Export</button>
+                <button class="btn btn-sm" @click="triggerCueImport()">↑ Import</button>
+                <button class="btn btn-sm btn-primary" @click="startSync()">⟳ Sync All</button>
+            </div>
+        </div>
+
+        <!-- Two-column header: project library + devices -->
+        <div class="cues-header-cols">
+
+            <!-- Project audio library -->
+            <div class="cues-col-box">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="form-label" style="margin:0">Project Library</span>
+                    <button class="btn btn-sm" @click="triggerProjectImport()">+ WAV</button>
+                </div>
+                <template x-if="projectFiles.length === 0">
+                    <p class="text-muted text-sm">No WAV files imported yet.</p>
+                </template>
+                <template x-for="f in projectFiles" :key="f.name">
+                    <div class="cues-library-row">
+                        <span class="text-sm" x-text="f.name"></span>
+                        <span class="text-muted" style="font-size:11px" x-text="formatSize(f.size)"></span>
+                        <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Radius devices -->
+            <div class="cues-col-box">
+                <div class="form-label mb-2">Radius Devices</div>
+                <template x-if="audioDevices.length === 0">
+                    <p class="text-muted text-sm">No Radius nodes connected.</p>
+                </template>
+                <template x-for="dev in audioDevices" :key="dev.ip">
+                    <div class="cues-device-row">
+                        <span class="audio-badge">♪</span>
+                        <span class="text-sm" x-text="dev.name"></span>
+                        <span class="device-ip" x-text="dev.ip"></span>
+                        <span class="cues-dev-status"
+                              :class="dev.connected ? 'cues-dev-online' : 'cues-dev-offline'"
+                              x-text="dev.connected ? '●' : '○'"
+                              :title="dev.connected ? 'connected' : 'disconnected'"></span>
+                    </div>
+                </template>
+            </div>
+
+        </div><!-- /.cues-header-cols -->
+
+        <!-- Cue list -->
+        <template x-if="cues.length === 0">
+            <p class="text-muted text-sm mt-4">No cues yet. Click "+ Cue" to add one.</p>
+        </template>
+
+        <template x-for="(cue, idx) in sortedCues" :key="cue.number">
+            <div class="cue-card">
+
+                <!-- Cue header row -->
+                <div class="cue-card-header">
+                    <div class="flex items-center gap-2">
+                        <span class="form-label" style="margin:0;white-space:nowrap">Cue</span>
+                        <input type="number" class="form-input" min="1" max="255" style="width:60px"
+                               :value="cue.number"
+                               @change="updateCueField(idx, 'number', parseInt($event.target.value) || 1)">
+                        <input type="text" class="form-input" placeholder="note…" style="flex:1"
+                               :value="cue.note"
+                               @input="updateCueField(idx, 'note', $event.target.value)">
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-primary" @click="fireCue(idx)">▶ Fire</button>
+                        <button class="btn btn-sm btn-danger" @click="removeCue(idx)">✕</button>
+                    </div>
+                </div>
+
+                <!-- Per-device action rows -->
+                <template x-if="audioDevices.length === 0">
+                    <p class="text-muted text-sm" style="padding:4px 0">No Radius devices.</p>
+                </template>
+
+                <template x-for="dev in audioDevices" :key="dev.ip">
+                    <div class="cue-action-row"
+                         :class="{ 'cue-action-inactive': !actionIsActive(idx, dev.ip) }">
+
+                        <!-- Device name -->
+                        <span class="cue-action-device"
+                              :class="dev.connected ? '' : 'text-muted'"
+                              x-text="dev.name"
+                              :title="dev.connected ? dev.ip : dev.ip + ' (disconnected)'"></span>
+
+                        <!-- Fire result badge -->
+                        <template x-if="fireStatusForDevice(cue.number, dev.ip)">
+                            <span class="fire-result-badge"
+                                  :class="fireStatusClass(fireStatusForDevice(cue.number, dev.ip))"
+                                  :title="fireStatusForDevice(cue.number, dev.ip).reason || ''"
+                                  x-text="fireStatusIcon(fireStatusForDevice(cue.number, dev.ip))"></span>
+                        </template>
+                        <template x-if="!fireStatusForDevice(cue.number, dev.ip) && !dev.connected">
+                            <span class="fire-result-badge fire-skipped" title="disconnected">○</span>
+                        </template>
+
+                        <!-- Command select -->
+                        <select class="form-select" style="width:80px"
+                                :value="getAction(idx, dev.ip).cmd"
+                                @change="setActionField(idx, dev.ip, 'cmd', $event.target.value)">
+                            <option value="none">—</option>
+                            <option value="play">Play</option>
+                            <option value="loop">Loop</option>
+                            <option value="stop">Stop</option>
+                        </select>
+
+                        <!-- Filename select (hidden when cmd is none/stop) -->
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <select class="form-select" style="flex:1;min-width:120px"
+                                    :value="getAction(idx, dev.ip).filename"
+                                    @change="setActionField(idx, dev.ip, 'filename', $event.target.value)">
+                                <option value="">— select file —</option>
+                                <template x-for="f in projectFiles" :key="f.name">
+                                    <option :value="f.name" x-text="f.name"></option>
+                                </template>
+                            </select>
+                        </template>
+
+                        <!-- Volume (hidden when none/stop) -->
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <div class="flex items-center gap-1">
+                                <span class="text-muted" style="font-size:11px">Vol</span>
+                                <input type="number" class="form-input" min="0" max="100" style="width:52px"
+                                       :value="getAction(idx, dev.ip).volume"
+                                       @change="setActionField(idx, dev.ip, 'volume', parseInt($event.target.value))">
+                            </div>
+                        </template>
+
+                        <!-- Duration (hidden when none/stop) -->
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <div class="flex items-center gap-1">
+                                <span class="text-muted" style="font-size:11px">Dur</span>
+                                <input type="number" class="form-input" min="0" max="3600" style="width:60px"
+                                       :value="getAction(idx, dev.ip).duration"
+                                       @change="setActionField(idx, dev.ip, 'duration', parseInt($event.target.value))"
+                                       placeholder="0=full">
+                                <span class="text-muted" style="font-size:11px">s</span>
+                            </div>
+                        </template>
+
+                    </div>
+                </template>
+
+            </div>
+        </template>
+
+        <!-- Sync modal -->
+        <template x-teleport="body">
+            <div class="modal-overlay" x-show="syncModal" @click.self="closeSyncModal()" style="z-index:200">
+                <div class="modal" style="max-width:600px;width:95vw">
+                    <div class="modal-title">
+                        <span x-text="syncJob?.status === 'planning' ? 'Planning sync…' :
+                                      syncJob?.status === 'running'  ? 'Syncing…' :
+                                      syncJob?.status === 'done'     ? 'Sync complete' :
+                                      syncJob?.status === 'error'    ? 'Sync error' : 'Sync'"></span>
+                        <span class="text-muted text-sm" style="margin-left:12px"
+                              x-text="syncSummary()"></span>
+                    </div>
+
+                    <!-- Planning spinner -->
+                    <template x-if="syncJob?.status === 'planning' || (syncJob?.items || []).length === 0">
+                        <p class="text-muted text-sm" style="padding:12px 0">Checking devices…</p>
+                    </template>
+
+                    <!-- Item list -->
+                    <div class="sync-item-list" x-show="(syncJob?.items || []).length > 0">
+                        <template x-for="(item, i) in (syncJob?.items || [])" :key="i">
+                            <div class="sync-item" :class="syncItemClass(item)">
+
+                                <span class="sync-item-icon" x-text="syncItemIcon(item)"></span>
+
+                                <div class="sync-item-info">
+                                    <span class="sync-item-device" x-text="item.device_name || item.device_ip"></span>
+                                    <template x-if="item.filename">
+                                        <span class="sync-item-file" x-text="item.filename"></span>
+                                    </template>
+                                    <template x-if="item.error">
+                                        <span class="sync-item-error" x-text="item.error"></span>
+                                    </template>
+                                </div>
+
+                                <!-- Progress bar (uploading only) -->
+                                <template x-if="item.status === 'uploading' && item.bytes_total > 0">
+                                    <div class="sync-progress-bar">
+                                        <div class="sync-progress-fill"
+                                             :style="'width:' + syncProgress(item) + '%'"></div>
+                                    </div>
+                                </template>
+                                <template x-if="item.status === 'uploading' && item.bytes_total > 0">
+                                    <span class="sync-pct text-muted"
+                                          x-text="syncProgress(item) + '%'"></span>
+                                </template>
+
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn" @click="closeSyncModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+    </div><!-- /.Audio Cues panel -->
+
+    <!-- ──── NET LOG PANEL ──── -->
+    <div class="panel" x-show="$store.app.mode === 'log'" x-data="netLog">
+
+        <div class="flex justify-between items-center mb-3">
+            <span class="section-title" style="margin:0">Network Log</span>
+            <div class="btn-group">
+                <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px">
+                    <input type="checkbox" x-model="autoScroll">
+                    <span>Auto-scroll</span>
+                </label>
+                <button class="btn btn-sm" @click="clear()">Clear</button>
+                <button class="btn btn-sm" @click="download()">↓ Download</button>
+            </div>
+        </div>
+
+        <div class="log-list" x-ref="logList">
+            <template x-if="entries.length === 0">
+                <p class="text-muted text-sm" style="padding:8px">No events logged yet.</p>
+            </template>
+            <template x-for="entry in entries" :key="entry.id">
+                <div class="log-row">
+                    <span class="log-time" x-text="formatTime(entry.ts)"></span>
+                    <span class="log-dir" :class="dirClass(entry.dir)" x-text="entry.dir"></span>
+                    <span class="log-type" :class="typeClass(entry.type)"
+                          x-text="typeLabel(entry.type)"></span>
+                    <span class="log-summary" x-text="entry.summary"></span>
+                </div>
+            </template>
+        </div>
+
+    </div><!-- /.Net Log panel -->
 
 </div>
 

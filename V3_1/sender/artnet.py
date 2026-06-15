@@ -8,6 +8,8 @@ import struct
 import threading
 import time
 
+import netlog
+
 # ======================================================================
 #  ART-NET CONSTANTS
 # ======================================================================
@@ -29,6 +31,13 @@ AUDIO_CMD_LOOP      = 2
 AUDIO_CMD_PAUSE     = 3
 AUDIO_CMD_VOLUME    = 4
 AUDIO_CMD_TEST_TONE = 5
+AUDIO_CMD_PLAY_CUE  = 6
+AUDIO_CMD_LOOP_CUE  = 7
+
+_AUDIO_CMD_NAMES = {
+    0: "stop", 1: "play", 2: "loop", 3: "pause",
+    4: "volume", 5: "test_tone", 6: "play_cue", 7: "loop_cue",
+}
 
 FTP_PORT = 21
 FTP_USER = "primus"
@@ -134,6 +143,7 @@ class FpsListener:
                 self.data[addr[0]] = {
                     "fps": fps, "pkt_rate": pkt, "ts": time.monotonic()
                 }
+            netlog.log_fps(addr[0], fps, pkt)
 
     def get(self, ip):
         with self.lock:
@@ -222,6 +232,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
                 sock.sendto(bytes(poll), (dest, ARTNET_PORT))
             except OSError:
                 pass
+        netlog.log("OUT", "artpoll", f"ArtPoll broadcast → {len(targets)} address(es)")
 
         nodes = {}
         deadline = time.monotonic() + timeout
@@ -252,6 +263,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0):
                 "num_ports": num_ports,
                 "universes": universes,
             }
+            netlog.log("IN", "pollreply", f"ArtPollReply ← {ip} ({short_name})")
 
     finally:
         sock.close()
@@ -310,6 +322,7 @@ def send_art_address(ip, short_name):
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
     finally:
         sock.close()
+    netlog.log("OUT", "art_address", f"Rename → {ip}: \"{short_name}\"")
 
 
 # ======================================================================
@@ -334,21 +347,26 @@ def send_output_config(ip, output_types, type_to_id_map):
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
     finally:
         sock.close()
+    netlog.log("OUT", "output_config", f"OutputConfig → {ip}: {output_types}")
 
 
 # ======================================================================
 #  AUDIO COMMAND — ArtAudioCmd (opcode 0x8200)  [V3.2 audio nodes only]
 # ======================================================================
 
-def send_audio_cmd(ip, cmd, filename="", volume=100):
+def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0):
     """Send ArtAudioCmd packet to a V3.2 audio node.
 
-    cmd:      AUDIO_CMD_STOP / AUDIO_CMD_PLAY / AUDIO_CMD_LOOP / AUDIO_CMD_PAUSE
+    cmd:      AUDIO_CMD_* constant
     filename: WAV filename on the SD card (e.g. "cue01.wav"), max 32 chars.
               Ignored for STOP and PAUSE.
     volume:   0–100.
+    duration: seconds to play (0 = full file). Appended after filename null
+              terminator as uint16 LE; omitted when 0 for backward compat.
     """
     name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
+    if duration and duration > 0:
+        name_bytes += struct.pack("<H", min(int(duration), 65535))
     pkt = bytearray(14 + len(name_bytes))
     pkt[0:8] = ARTNET_HEADER
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_AUDIO_CMD)
@@ -361,6 +379,11 @@ def send_audio_cmd(ip, cmd, filename="", volume=100):
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
     finally:
         sock.close()
+    cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
+    dur_str = f" [{duration}s]" if duration else ""
+    file_str = f" \"{filename}\"" if filename else ""
+    netlog.log("OUT", "audio_cmd",
+               f"AudioCmd {cmd_name}{file_str} vol={volume}{dur_str} → {ip}")
 
 
 # ======================================================================
@@ -382,6 +405,7 @@ def send_ftp_cmd(ip, start):
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
     finally:
         sock.close()
+    netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")
 
 
 def list_audio_files(ip):
@@ -457,16 +481,30 @@ def ftp_list_dir(ip, path="/"):
     return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
 
 
-def ftp_upload(ip, path, data):
-    """Upload bytes to path on the SD card."""
+def ftp_upload(ip, path, data, progress_callback=None):
+    """Upload bytes to path on the SD card.
+
+    progress_callback: optional callable(bytes_sent, bytes_total) called after
+                       each 8 KB block, allowing the caller to track progress.
+    """
+    total = len(data)
     with _ftp_session(ip) as ftp:
-        ftp.storbinary(f"STOR {path}", _io.BytesIO(data))
+        if progress_callback:
+            transferred = [0]
+            def _cb(block):
+                transferred[0] += len(block)
+                progress_callback(transferred[0], total)
+            ftp.storbinary(f"STOR {path}", _io.BytesIO(data), callback=_cb)
+        else:
+            ftp.storbinary(f"STOR {path}", _io.BytesIO(data))
+    netlog.log("OUT", "ftp_upload", f"FTP upload {path} ({total} bytes) → {ip}")
 
 
 def ftp_rename(ip, src, dst):
     """Rename or move a file/folder on the SD card."""
     with _ftp_session(ip) as ftp:
         ftp.rename(src, dst)
+    netlog.log("OUT", "ftp_rename", f"FTP rename {src} → {dst} on {ip}")
 
 
 def ftp_delete(ip, path, is_dir=False):
@@ -476,9 +514,11 @@ def ftp_delete(ip, path, is_dir=False):
             ftp.rmd(path)
         else:
             ftp.delete(path)
+    netlog.log("OUT", "ftp_delete", f"FTP delete {path} on {ip}")
 
 
 def ftp_mkdir(ip, path):
     """Create a directory on the SD card."""
     with _ftp_session(ip) as ftp:
         ftp.mkd(path)
+    netlog.log("OUT", "ftp_mkdir", f"FTP mkdir {path} on {ip}")

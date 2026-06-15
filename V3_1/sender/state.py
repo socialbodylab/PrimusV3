@@ -787,6 +787,61 @@ class ControllerState:
         return True
 
     # ------------------------------------------------------------------
+    #  Audio cue firing  (V3.2 nodes only)
+    # ------------------------------------------------------------------
+
+    def fire_audio_cue(self, cue):
+        """Fire a sender-side audio cue: send play/loop/stop to each Radius device.
+
+        Returns dict {ip: {"status": "sent"|"skipped"|"error", "reason": str|None}}
+        Disconnected devices are skipped (not errored).
+        """
+        CMD_MAP = {
+            "play": AUDIO_CMD_PLAY,
+            "loop": AUDIO_CMD_LOOP,
+            "stop": AUDIO_CMD_STOP,
+        }
+        actions = cue.get("actions", {})
+        with self.lock:
+            snapshot = [
+                (d["ip"], d["name"],
+                 d.get("is_audio", False),
+                 d["sender"].connected)
+                for d in self.devices
+            ]
+
+        results = {}
+        for ip, name, is_audio, connected in snapshot:
+            if ip not in actions:
+                continue
+            action = actions[ip]
+            cmd_name = action.get("cmd", "none")
+            if cmd_name == "none":
+                results[ip] = {"status": "skipped", "reason": "no action"}
+                continue
+            if not is_audio:
+                results[ip] = {"status": "skipped", "reason": "not an audio device"}
+                continue
+            if not connected:
+                results[ip] = {"status": "skipped", "reason": "disconnected",
+                               "name": name}
+                continue
+            cmd_code = CMD_MAP.get(cmd_name)
+            if cmd_code is None:
+                results[ip] = {"status": "skipped", "reason": f"unknown cmd: {cmd_name}"}
+                continue
+            filename = action.get("filename", "")
+            volume = max(0, min(100, int(action.get("volume", 80))))
+            duration = int(action.get("duration", 0))
+            try:
+                send_audio_cmd(ip, cmd_code, filename=filename,
+                               volume=volume, duration=duration)
+                results[ip] = {"status": "sent"}
+            except Exception as e:
+                results[ip] = {"status": "error", "reason": str(e)}
+        return results
+
+    # ------------------------------------------------------------------
 
     def shutdown(self):
         self.running = False
