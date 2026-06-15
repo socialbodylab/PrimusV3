@@ -90,7 +90,10 @@ class ArtNetSender:
         if not self.connected or not self.sock:
             return
         pkt = self._build_packet(universe, rgb_data)
-        self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+        try:
+            self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+        except OSError:
+            pass
 
     def advance_sequence(self):
         self.sequence = (self.sequence % 255) + 1
@@ -320,6 +323,8 @@ def send_art_address(ip, short_name):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    except OSError:
+        pass
     finally:
         sock.close()
     netlog.log("OUT", "art_address", f"Rename → {ip}: \"{short_name}\"")
@@ -345,6 +350,8 @@ def send_output_config(ip, output_types, type_to_id_map):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    except OSError:
+        pass
     finally:
         sock.close()
     netlog.log("OUT", "output_config", f"OutputConfig → {ip}: {output_types}")
@@ -377,6 +384,8 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    except OSError:
+        pass
     finally:
         sock.close()
     cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
@@ -403,6 +412,8 @@ def send_ftp_cmd(ip, start):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(bytes(pkt), (ip, ARTNET_PORT))
+    except OSError:
+        pass
     finally:
         sock.close()
     netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")

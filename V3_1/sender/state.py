@@ -7,6 +7,8 @@ import os
 import threading
 import time
 
+import netlog
+
 from effects import (
     EFFECTS, fx_none, compute_anim_factor,
     apply_serpentine, apply_grid_rotation,
@@ -565,6 +567,8 @@ class ControllerState:
             return
 
         # Flash red then black (outside lock to avoid blocking animation)
+        netlog.log("OUT", "artdmx",
+                   f"Hello flash → {ip}: {len(outputs_info)} output(s)")
         for universe, count in outputs_info:
             red = bytes([255, 0, 0] * count)
             sender.send_output(universe, red)

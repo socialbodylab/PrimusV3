@@ -65,10 +65,9 @@ void audioInit() {
 }
 
 bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
-  if (sdBusy) {
-    Serial.println("[Audio] SD busy (FTP running) — play ignored");
-    return false;
-  }
+  // Note: sdBusy is not checked here — audio can always interrupt itself or
+  // start fresh. FTP is protected in the other direction: ftpUpdate() skips
+  // handleFTP() while sdBusy is true, so audio always holds the SD bus.
 
   char trackPath[34];
   snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);

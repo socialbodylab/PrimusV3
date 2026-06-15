@@ -1206,7 +1206,7 @@
                                 <span class="text-muted" style="font-size:11px">Vol</span>
                                 <input type="number" class="form-input" min="0" max="100" style="width:52px"
                                        :value="getAction(idx, dev.ip).volume"
-                                       @change="setActionField(idx, dev.ip, 'volume', parseInt($event.target.value))">
+                                       @input="setActionField(idx, dev.ip, 'volume', parseInt($event.target.value) || 0)">
                             </div>
                         </template>
 
@@ -1216,7 +1216,7 @@
                                 <span class="text-muted" style="font-size:11px">Dur</span>
                                 <input type="number" class="form-input" min="0" max="3600" style="width:60px"
                                        :value="getAction(idx, dev.ip).duration"
-                                       @change="setActionField(idx, dev.ip, 'duration', parseInt($event.target.value))"
+                                       @input="setActionField(idx, dev.ip, 'duration', parseInt($event.target.value) || 0)"
                                        placeholder="0=full">
                                 <span class="text-muted" style="font-size:11px">s</span>
                             </div>
@@ -1298,16 +1298,20 @@
                     <input type="checkbox" x-model="autoScroll">
                     <span>Auto-scroll</span>
                 </label>
+                <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px">
+                    <input type="checkbox" x-model="showFps">
+                    <span>FPS</span>
+                </label>
                 <button class="btn btn-sm" @click="clear()">Clear</button>
                 <button class="btn btn-sm" @click="download()">↓ Download</button>
             </div>
         </div>
 
         <div class="log-list" x-ref="logList">
-            <template x-if="entries.length === 0">
+            <template x-if="entries.filter(e => showFps || e.type !== 'fps_telemetry').length === 0">
                 <p class="text-muted text-sm" style="padding:8px">No events logged yet.</p>
             </template>
-            <template x-for="entry in entries" :key="entry.id">
+            <template x-for="entry in entries.filter(e => showFps || e.type !== 'fps_telemetry')" :key="entry.id">
                 <div class="log-row">
                     <span class="log-time" x-text="formatTime(entry.ts)"></span>
                     <span class="log-dir" :class="dirClass(entry.dir)" x-text="entry.dir"></span>

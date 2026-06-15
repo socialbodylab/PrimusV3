@@ -1,0 +1,16 @@
+{
+  "cues": [
+    {
+      "number": 1,
+      "note": "Start of the opera",
+      "actions": {
+        "192.168.8.150": {
+          "cmd": "play",
+          "filename": "thunk_pcm.wav",
+          "volume": 80,
+          "duration": 4
+        }
+      }
+    }
+  ]
+}

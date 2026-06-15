@@ -9,6 +9,7 @@ document.addEventListener("alpine:init", () => {
         entries:    [],
         lastId:     0,
         autoScroll: true,
+        showFps:    false,
         _timer:     null,
 
         TYPE_LABELS: {
