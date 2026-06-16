@@ -81,16 +81,20 @@ function hexToRgb(hex) {
 // ── Alpine stores ───────────────────────────────────────
 document.addEventListener("alpine:init", () => {
 
+    const _cfg = window.PAGE_CONFIG || {};
+    const _defaultModes = ["mixer", "controller", "firmware", "settings"];
+    const _defaultLabels = {
+        mixer: "Look Designer",
+        controller: "Cue Controller",
+        firmware: "Firmware",
+        settings: "Settings",
+    };
+
     // --- App store: mode, polling ---
     Alpine.store("app", {
-        mode: "mixer",
-        modes: ["mixer", "controller", "firmware", "settings"],
-        modeLabels: {
-            mixer: "Look Designer",
-            controller: "Cue Controller",
-            firmware: "Firmware",
-            settings: "Settings",
-        },
+        mode: (_cfg.modes || _defaultModes)[0],
+        modes: _cfg.modes || _defaultModes,
+        modeLabels: _cfg.modeLabels || _defaultLabels,
         state: null,
         network: null,
         polling: null,
