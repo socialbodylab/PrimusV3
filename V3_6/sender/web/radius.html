@@ -340,7 +340,12 @@ window.PAGE_CONFIG = {
                 <button class="btn btn-sm" @click="addCue()">+ Cue</button>
                 <button class="btn btn-sm" @click="exportCueSheet()">↓ Export</button>
                 <button class="btn btn-sm" @click="triggerCueImport()">↑ Import</button>
-                <button class="btn btn-sm btn-primary" @click="startSync()">⟳ Sync All</button>
+                <button class="btn btn-sm" @click="rescan()" :disabled="rescanning"
+                        :title="'Device inventory: ' + inventoryAgeLabel()"
+                        x-text="rescanning ? '…' : '↺ Scan'"></button>
+                <button class="btn btn-sm" @click="startPull()"
+                        title="Download files from devices to project library">↓ Pull</button>
+                <button class="btn btn-sm btn-primary" @click="startSync()">↑ Push</button>
             </div>
         </div>
 
@@ -349,15 +354,29 @@ window.PAGE_CONFIG = {
             <div class="cues-col-box">
                 <div class="flex justify-between items-center mb-2">
                     <span class="form-label" style="margin:0">Project Library</span>
-                    <button class="btn btn-sm" @click="triggerProjectImport()">+ WAV</button>
+                    <div class="flex items-center gap-2">
+                        <span class="text-muted" style="font-size:10px"
+                              x-text="'devices scanned: ' + inventoryAgeLabel()"
+                              x-show="Object.keys(deviceInventory).length > 0"></span>
+                        <button class="btn btn-sm" @click="triggerProjectImport()">+ WAV</button>
+                    </div>
                 </div>
                 <template x-if="projectFiles.length === 0">
                     <p class="text-muted text-sm">No WAV files imported yet.</p>
                 </template>
                 <template x-for="f in projectFiles" :key="f.name">
                     <div class="cues-library-row">
-                        <span class="text-sm" x-text="f.name"></span>
-                        <span class="text-muted" style="font-size:11px" x-text="formatSize(f.size)"></span>
+                        <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
+                            <span class="text-sm" x-text="f.name"></span>
+                            <div class="flex items-center gap-1" x-show="(f.sources || []).length > 1">
+                                <template x-for="src in (f.sources || [])" :key="src">
+                                    <span class="source-badge"
+                                          :class="src === 'local' ? 'source-local' : 'source-device'"
+                                          x-text="fileSourceLabel(src)"></span>
+                                </template>
+                            </div>
+                        </div>
+                        <span class="text-muted" style="font-size:11px;white-space:nowrap" x-text="formatSize(f.size)"></span>
                         <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
                     </div>
                 </template>
@@ -475,20 +494,18 @@ window.PAGE_CONFIG = {
             </div>
         </template>
 
-        <!-- Sync modal -->
+        <!-- Push sync modal -->
         <template x-teleport="body">
             <div class="modal-overlay" x-show="syncModal" @click.self="closeSyncModal()" style="z-index:200">
                 <div class="modal" style="max-width:600px;width:95vw">
                     <div class="modal-title">
-                        <span x-text="syncJob?.status === 'planning' ? 'Planning sync…' :
-                                      syncJob?.status === 'running'  ? 'Syncing…' :
-                                      syncJob?.status === 'done'     ? 'Sync complete' :
-                                      syncJob?.status === 'error'    ? 'Sync error' : 'Sync'"></span>
+                        <span x-text="syncStatusLabel()"></span>
                         <span class="text-muted text-sm" style="margin-left:12px"
                               x-text="syncSummary()"></span>
                     </div>
-                    <template x-if="syncJob?.status === 'planning' || (syncJob?.items || []).length === 0">
-                        <p class="text-muted text-sm" style="padding:12px 0">Checking devices…</p>
+                    <template x-if="['planning','stopping'].includes(syncJob?.status) || (syncJob?.items || []).length === 0">
+                        <p class="text-muted text-sm" style="padding:12px 0"
+                           x-text="syncJob?.status === 'stopping' ? 'Stopping audio on devices…' : 'Checking devices…'"></p>
                     </template>
                     <div class="sync-item-list" x-show="(syncJob?.items || []).length > 0">
                         <template x-for="(item, i) in (syncJob?.items || [])" :key="i">
@@ -518,6 +535,131 @@ window.PAGE_CONFIG = {
                     </div>
                     <div class="modal-actions">
                         <button class="btn" @click="closeSyncModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Pull sync modal -->
+        <template x-teleport="body">
+            <div class="modal-overlay" x-show="pullModal" @click.self="closePullModal()" style="z-index:200">
+                <div class="modal" style="max-width:640px;width:95vw">
+
+                    <div class="modal-title">
+                        <span x-text="pullStatusLabel()"></span>
+                        <span class="text-muted text-sm" style="margin-left:12px"
+                              x-text="pullSummary()"></span>
+                    </div>
+
+                    <!-- Planning / stopping -->
+                    <template x-if="['planning','stopping'].includes(pullJob?.status) || (pullJob?.items || []).length === 0">
+                        <p class="text-muted text-sm" style="padding:12px 0"
+                           x-text="pullJob?.status === 'stopping' ? 'Stopping audio on devices…' : 'Scanning devices…'"></p>
+                    </template>
+
+                    <!-- Download progress -->
+                    <div class="sync-item-list" x-show="(pullJob?.items || []).length > 0">
+                        <template x-for="(item, i) in (pullJob?.items || [])" :key="i">
+                            <div class="sync-item" :class="pullItemClass(item)">
+                                <span class="sync-item-icon" x-text="pullItemIcon(item)"></span>
+                                <div class="sync-item-info">
+                                    <span class="sync-item-device" x-text="item.device_name || item.device_ip"></span>
+                                    <template x-if="item.filename">
+                                        <span class="sync-item-file" x-text="item.filename"></span>
+                                    </template>
+                                    <template x-if="item.error">
+                                        <span class="sync-item-error" x-text="item.error"></span>
+                                    </template>
+                                </div>
+                                <template x-if="item.status === 'downloading' && item.bytes_total > 0">
+                                    <div class="sync-progress-bar">
+                                        <div class="sync-progress-fill"
+                                             :style="'width:' + pullProgress(item) + '%'"></div>
+                                    </div>
+                                </template>
+                                <template x-if="item.status === 'downloading' && item.bytes_total > 0">
+                                    <span class="sync-pct text-muted"
+                                          x-text="pullProgress(item) + '%'"></span>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Job errors -->
+                    <template x-if="(pullJob?.errors || []).length > 0">
+                        <div style="margin-top:12px">
+                            <div class="form-label" style="color:var(--color-error)">Errors</div>
+                            <template x-for="(err, i) in (pullJob?.errors || [])" :key="i">
+                                <div class="sync-item sync-error" style="margin-bottom:4px">
+                                    <span class="sync-item-icon">✗</span>
+                                    <div class="sync-item-info">
+                                        <span class="sync-item-device" x-text="err.device_name || err.device_ip || ''"></span>
+                                        <span class="sync-item-error" x-text="err.error"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Conflict resolution -->
+                    <template x-if="pullJob?.status === 'done' && (pullJob?.conflicts || []).length > 0">
+                        <div style="margin-top:16px;border-top:1px solid var(--color-border);padding-top:16px">
+                            <div class="flex justify-between items-center mb-3">
+                                <span class="form-label" style="margin:0;color:var(--color-warning)">
+                                    Conflicts — same filename, different content
+                                </span>
+                                <button class="btn btn-sm btn-primary"
+                                        x-show="(pullJob?.conflicts || []).length > 1"
+                                        @click="resolveAll()">Apply All</button>
+                            </div>
+
+                            <template x-for="conflict in (pullJob?.conflicts || [])" :key="conflict.filename">
+                                <div class="conflict-card">
+                                    <div class="conflict-filename" x-text="conflict.filename"></div>
+
+                                    <template x-for="(group, gi) in conflict.groups" :key="group.checksum">
+                                        <div class="conflict-group">
+                                            <!-- Sources -->
+                                            <div class="conflict-sources">
+                                                <template x-for="src in group.sources" :key="(src.type||'') + (src.device_ip||'')">
+                                                    <span class="source-badge"
+                                                          :class="src.type === 'local' ? 'source-local' : 'source-device'"
+                                                          x-text="src.type === 'local' ? 'Local' : (src.device_name || src.device_ip)"></span>
+                                                </template>
+                                                <span class="text-muted" style="font-size:11px" x-text="formatSize(group.size)"></span>
+                                                <span class="checksum-short text-muted"
+                                                      x-text="checksumShort(group.checksum)"
+                                                      :title="group.checksum"></span>
+                                            </div>
+                                            <!-- Action -->
+                                            <div class="conflict-action">
+                                                <select class="form-select" style="width:90px;font-size:12px"
+                                                        :value="resolutionFor(conflict.filename, group.checksum).action"
+                                                        @change="setResolutionAction(conflict.filename, group.checksum, $event.target.value)">
+                                                    <option value="save">Save as</option>
+                                                    <option value="discard">Discard</option>
+                                                </select>
+                                                <template x-if="resolutionFor(conflict.filename, group.checksum).action === 'save'">
+                                                    <input type="text" class="form-input" style="flex:1;font-size:12px"
+                                                           :value="resolutionFor(conflict.filename, group.checksum).save_as || group.suggested_name"
+                                                           @input="setResolutionSaveAs(conflict.filename, group.checksum, $event.target.value)"
+                                                           placeholder="filename.wav">
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                                        <button class="btn btn-sm btn-primary"
+                                                @click="resolveConflict(conflict.filename)">Apply</button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <div class="modal-actions">
+                        <button class="btn" @click="closePullModal()">Close</button>
                     </div>
                 </div>
             </div>
