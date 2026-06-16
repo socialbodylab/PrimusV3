@@ -1,12 +1,16 @@
 """
-artnet.py — Art-Net transport, discovery, naming, output config, and FPS telemetry.
+artnet.py — Art-Net transport, discovery, naming, output config, FPS telemetry, and Radius audio control.
 """
 
+import contextlib
+import io
 import re
 import socket
 import struct
 import threading
 import time
+
+import netlog
 
 # ======================================================================
 #  ART-NET CONSTANTS
@@ -18,7 +22,28 @@ ARTNET_OPCODE_POLL = 0x2000
 ARTNET_OPCODE_POLLREPLY = 0x2100
 ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
-ARTNET_OPCODE_IP_CONFIG = 0x8200
+ARTNET_OPCODE_IP_CONFIG     = 0x8200  # V3.x LED nodes
+ARTNET_OPCODE_AUDIO_CMD     = 0x8300  # V3.2 Radius audio nodes
+ARTNET_OPCODE_FTP_CMD       = 0x8301  # V3.2 Radius audio nodes
+
+# Audio command values for send_audio_cmd()
+AUDIO_CMD_STOP      = 0
+AUDIO_CMD_PLAY      = 1
+AUDIO_CMD_LOOP      = 2
+AUDIO_CMD_PAUSE     = 3
+AUDIO_CMD_VOLUME    = 4
+AUDIO_CMD_TEST_TONE = 5
+AUDIO_CMD_PLAY_CUE  = 6
+AUDIO_CMD_LOOP_CUE  = 7
+
+_AUDIO_CMD_NAMES = {
+    0: "stop", 1: "play", 2: "loop", 3: "pause",
+    4: "volume", 5: "test_tone", 6: "play_cue", 7: "loop_cue",
+}
+
+FTP_PORT     = 21
+FTP_USER     = "primus"
+FTP_PASSWORD = "primus"
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
 NODE_CAPS_PREFIX = "PV3CAP1"
@@ -590,3 +615,166 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_i
     elif mode == 1:
         raise ValueError("static IP mode requires ip, gateway, and subnet")
     _send_udp_packet(ip, pkt, source_ip=source_ip)
+
+
+# ======================================================================
+#  AUDIO COMMAND — ArtAudioCmd (opcode 0x8300)  [V3.2 Radius nodes only]
+# ======================================================================
+
+def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None):
+    """Send ArtAudioCmd packet to a V3.2 Radius node.
+
+    cmd:      AUDIO_CMD_* constant
+    filename: WAV filename on the SD card (e.g. "cue01.wav"), max 32 chars.
+              Ignored for STOP and PAUSE.
+    volume:   0–100.
+    duration: seconds to play (0 = full file). Appended after filename null
+              terminator as uint16 LE; omitted when 0 for backward compat.
+    """
+    name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
+    if duration and duration > 0:
+        name_bytes += struct.pack("<H", min(int(duration), 65535))
+    pkt = bytearray(14 + len(name_bytes))
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_AUDIO_CMD)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = cmd & 0xFF
+    pkt[13] = max(0, min(100, volume)) & 0xFF
+    pkt[14:14 + len(name_bytes)] = name_bytes
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
+    dur_str = f" [{duration}s]" if duration else ""
+    file_str = f" \"{filename}\"" if filename else ""
+    netlog.log("OUT", "audio_cmd",
+               f"AudioCmd {cmd_name}{file_str} vol={volume}{dur_str} → {ip}")
+
+
+# ======================================================================
+#  FTP CONTROL — ArtFtpCmd (opcode 0x8301)  [V3.2 Radius nodes only]
+# ======================================================================
+
+def send_ftp_cmd(ip, start, source_ip=None):
+    """Send ArtFtpCmd packet to start or stop the FTP server on a V3.2 Radius node."""
+    pkt = bytearray(13)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_FTP_CMD)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = 1 if start else 0
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")
+
+
+def list_audio_files(ip):
+    """Return sorted WAV filenames in the root of a V3.2 Radius node's SD card."""
+    try:
+        entries = ftp_list_dir(ip, "/")
+        return sorted(
+            e["name"] for e in entries
+            if e["name"].lower().endswith(".wav") and not e["name"].startswith("._")
+        )
+    except Exception as e:
+        print(f"[audio] FTP list failed for {ip}: {e}")
+        return []
+
+
+# ======================================================================
+#  FTP FILE MANAGEMENT  [V3.2 Radius nodes only]
+# ======================================================================
+
+@contextlib.contextmanager
+def _ftp_session(ip, timeout=8.0):
+    """Connect to Radius node FTP server (auto-started at boot), yield ftplib.FTP."""
+    import ftplib
+    ftp = ftplib.FTP()
+    try:
+        ftp.connect(ip, FTP_PORT, timeout=timeout)
+        ftp.login(FTP_USER, FTP_PASSWORD)
+        yield ftp
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            ftp.close()
+        except Exception:
+            pass
+        raise
+
+
+def _parse_list_line(line):
+    """Parse a SimpleFTPServer LIST line into {name, is_dir, size}."""
+    parts = line.split(None, 7)
+    if len(parts) < 8:
+        return None
+    try:
+        size = int(parts[3])
+    except ValueError:
+        size = 0
+    return {"name": parts[7], "is_dir": parts[0].startswith("d"), "size": size}
+
+
+def ftp_list_dir(ip, path="/"):
+    """Return list of {name, is_dir, size} for entries in path on the SD card."""
+    entries = []
+    with _ftp_session(ip) as ftp:
+        lines = []
+        try:
+            ftp.retrlines(f"LIST {path}", lines.append)
+        except Exception:
+            ftp.retrlines("LIST", lines.append)
+        for line in lines:
+            entry = _parse_list_line(line)
+            if entry and entry["name"] not in (".", ".."):
+                entries.append(entry)
+    return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
+
+
+def ftp_download(ip, path):
+    """Download and return bytes from path on the SD card."""
+    buf = io.BytesIO()
+    with _ftp_session(ip) as ftp:
+        ftp.retrbinary(f"RETR {path}", buf.write)
+    return buf.getvalue()
+
+
+def ftp_upload(ip, path, data, progress_callback=None):
+    """Upload bytes to path on the SD card.
+
+    progress_callback: optional callable(bytes_sent, bytes_total).
+    """
+    total = len(data)
+    with _ftp_session(ip) as ftp:
+        if progress_callback:
+            transferred = [0]
+            def _cb(block):
+                transferred[0] += len(block)
+                progress_callback(transferred[0], total)
+            ftp.storbinary(f"STOR {path}", io.BytesIO(data), callback=_cb)
+        else:
+            ftp.storbinary(f"STOR {path}", io.BytesIO(data))
+    netlog.log("OUT", "ftp_upload", f"FTP upload {path} ({total} bytes) → {ip}")
+
+
+def ftp_rename(ip, src, dst):
+    """Rename or move a file/folder on the SD card."""
+    with _ftp_session(ip) as ftp:
+        ftp.rename(src, dst)
+    netlog.log("OUT", "ftp_rename", f"FTP rename {src} → {dst} on {ip}")
+
+
+def ftp_delete(ip, path, is_dir=False):
+    """Delete a file or empty directory on the SD card."""
+    with _ftp_session(ip) as ftp:
+        if is_dir:
+            ftp.rmd(path)
+        else:
+            ftp.delete(path)
+    netlog.log("OUT", "ftp_delete", f"FTP delete {path} on {ip}")
+
+
+def ftp_mkdir(ip, path):
+    """Create a directory on the SD card."""
+    with _ftp_session(ip) as ftp:
+        ftp.mkd(path)
+    netlog.log("OUT", "ftp_mkdir", f"FTP mkdir {path} on {ip}")
