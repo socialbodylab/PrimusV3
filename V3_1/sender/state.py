@@ -676,6 +676,8 @@ class ControllerState:
             for di, dev in enumerate(self.devices):
                 if not dev["sender"].connected:
                     continue
+                if dev.get("is_audio"):
+                    continue
                 if dev_filter is not None and di not in dev_filter:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:

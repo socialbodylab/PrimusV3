@@ -193,6 +193,8 @@ def main():
         description="PrimusV3.1 LED Controller")
     parser.add_argument("--port", type=int, default=0,
                         help="HTTP port (0 = auto-select)")
+    parser.add_argument("--mode", choices=["primus", "radius"], default="primus",
+                        help="UI to open on launch (default: primus)")
     parser.add_argument("--no-browser", action="store_true",
                         help="Don't open browser on startup")
     args = parser.parse_args()
@@ -213,6 +215,8 @@ def main():
     server = create_server("127.0.0.1", args.port, state, cue_list)
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}"
+    if args.mode == "radius":
+        url += "/radius"
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
     anim.start()

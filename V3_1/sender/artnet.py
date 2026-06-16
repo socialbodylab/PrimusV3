@@ -492,6 +492,15 @@ def ftp_list_dir(ip, path="/"):
     return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
 
 
+def ftp_download(ip, path):
+    """Download and return bytes from path on the SD card."""
+    import io
+    buf = io.BytesIO()
+    with _ftp_session(ip) as ftp:
+        ftp.retrbinary(f"RETR {path}", buf.write)
+    return buf.getvalue()
+
+
 def ftp_upload(ip, path, data, progress_callback=None):
     """Upload bytes to path on the SD card.
 

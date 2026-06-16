@@ -11,6 +11,7 @@ document.addEventListener("alpine:init", () => {
         autoScroll: true,
         showFps:    false,
         _timer:     null,
+        _polling:   false,
 
         TYPE_LABELS: {
             artpoll:       "Poll",
@@ -28,6 +29,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         init() {
+            this.poll();
             this._timer = setInterval(() => this.poll(), 500);
         },
 
@@ -36,22 +38,28 @@ document.addEventListener("alpine:init", () => {
         },
 
         async poll() {
+            if (this._polling) return;
+            this._polling = true;
             try {
                 const res = await fetch(`/api/netlog?since=${this.lastId}`).then(r => r.json());
                 const fresh = res.entries || [];
-                if (fresh.length === 0) return;
-                this.entries = [...this.entries, ...fresh];
-                if (this.entries.length > 1000) {
-                    this.entries = this.entries.slice(-1000);
-                }
-                this.lastId = fresh[fresh.length - 1].id;
-                if (this.autoScroll) {
-                    this.$nextTick(() => {
-                        const el = this.$refs.logList;
-                        if (el) el.scrollTop = el.scrollHeight;
-                    });
+                if (fresh.length > 0) {
+                    this.entries = [...this.entries, ...fresh];
+                    if (this.entries.length > 1000) {
+                        this.entries = this.entries.slice(-1000);
+                    }
+                    this.lastId = fresh[fresh.length - 1].id;
+                    if (this.autoScroll) {
+                        this.$nextTick(() => {
+                            const el = this.$refs.logList;
+                            if (el) el.scrollTop = el.scrollHeight;
+                        });
+                    }
                 }
             } catch (_) { /* ignore */ }
+            finally {
+                this._polling = false;
+            }
         },
 
         async clear() {

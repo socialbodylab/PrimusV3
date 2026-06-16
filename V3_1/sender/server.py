@@ -15,7 +15,7 @@ import clips
 import mixer
 import netlog
 import audio_cues as _audio_cues_mod
-from artnet import discover_artnet_nodes, ftp_list_dir, ftp_upload
+from artnet import discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download
 
 
 # ── Sync job state ──────────────────────────────────────────────────────────
@@ -121,6 +121,25 @@ class Handler(BaseHTTPRequestHandler):
             entries = netlog.get_entries(since_id=since)
             self._json_response({"entries": entries})
             return
+        if path == "/api/audio/cue_map":
+            params = self._query_params()
+            try:
+                di = int(params.get("device", -1))
+            except (ValueError, TypeError):
+                di = -1
+            devices = self.controller_state.devices
+            if not (0 <= di < len(devices)) or not devices[di].get("is_audio"):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+                return
+            ip = devices[di]["ip"]
+            try:
+                raw = ftp_download(ip, "/cues.json")
+                self._json_response(json.loads(raw.decode()))
+            except Exception as e:
+                self._respond(500, "application/json",
+                              json.dumps({"error": str(e)}).encode())
+            return
+
         if path == "/api/audio_sync/status":
             with _sync_lock:
                 job = dict(_sync_job) if _sync_job else None
@@ -134,8 +153,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # Static files
-        if path == "/" or path == "":
+        if path in ("/", "", "/primus"):
             path = "/index.html"
+        elif path == "/radius":
+            path = "/radius.html"
         self._serve_static(path)
 
     # ------------------------------------------------------------------
@@ -428,6 +449,25 @@ class Handler(BaseHTTPRequestHandler):
                                   json.dumps({"error": str(e)}).encode())
 
         # ── Audio cues ─────────────────────────────────────────────────
+        elif path == "/api/audio/cue_map":
+            di = data.get("device", -1)
+            cues = data.get("cues")
+            devices = self.controller_state.devices
+            if not (0 <= di < len(devices)) or not devices[di].get("is_audio"):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+                return
+            if not isinstance(cues, dict):
+                self._respond(400, "application/json", b'{"error":"cues must be an object"}')
+                return
+            ip = devices[di]["ip"]
+            try:
+                raw = json.dumps(cues, indent=2).encode()
+                ftp_upload(ip, "/cues.json", raw)
+                self._ok()
+            except Exception as e:
+                self._respond(500, "application/json",
+                              json.dumps({"error": str(e)}).encode())
+
         elif path == "/api/audio_cues":
             with self.audio_cues_lock:
                 Handler.audio_cues_data = data

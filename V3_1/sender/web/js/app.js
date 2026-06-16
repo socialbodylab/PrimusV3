@@ -29,9 +29,7 @@ function hexToRgb(hex) {
 // ── Alpine stores ───────────────────────────────────────
 document.addEventListener("alpine:init", () => {
 
-    // --- App store: mode, polling ---
-    Alpine.store("app", {
-        mode: "mixer",
+    const _cfg = window.PAGE_CONFIG || {
         modes: ["mixer", "controller", "audio", "cues", "log"],
         modeLabels: {
             mixer:      "Look Mixer",
@@ -40,6 +38,13 @@ document.addEventListener("alpine:init", () => {
             cues:       "Audio Cues",
             log:        "Net Log",
         },
+    };
+
+    // --- App store: mode, polling ---
+    Alpine.store("app", {
+        mode: _cfg.modes[0],
+        modes: _cfg.modes,
+        modeLabels: _cfg.modeLabels,
         state: null,
         polling: null,
         mixerPreviewDevices: null,

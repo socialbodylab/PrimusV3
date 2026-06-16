@@ -7,7 +7,7 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 ## Active versions
 
 - **V3.1** — Active sender + receiver under `V3_1/`. The original V3.0 single-file sender (`sender/led_controller.py`) is archived but still functional.
-- **V3.2** — Active Radius firmware under `V3_2/`. Firmware-only variant; there is no V3.2 sender yet. Radius nodes (V3.2) are audio-only and controlled by the V3.1 sender via direct Art-Net opcodes for audio and FTP.
+- **V3.2** — Active Radius firmware under `V3_2/`. Radius nodes (V3.2) are audio-only and controlled by the V3.1 sender via direct Art-Net opcodes for audio and FTP. The V3.1 sender also hosts **Radius Central** (`/radius`), a dedicated audio-only web UI for Radius workflows.
 
 ## Repository layout
 
@@ -19,10 +19,12 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - `clips.py` — Clip CRUD, preview computation. Clips stored as JSON in `V3_1/sender/clips/`.
 - `mixer.py` — Look Mixer logic, crossfade between looks.
 - `controller.py` — Cue Controller for sequential look playback with transitions.
-- `artnet.py` — Art-Net protocol: ArtPoll, ArtPollReply, ArtDmx, ArtAddress, ArtOutputConfig.
+- `artnet.py` — Art-Net protocol: ArtPoll, ArtPollReply, ArtDmx, ArtAddress, ArtOutputConfig. Includes `ftp_download` for reading files from Radius SD cards.
 - `web/` — Static web UI files (Alpine.js SPA):
-  - `web/index.html` — Single-page app shell
-  - `web/js/` — Alpine.js components (look-mixer.js, look-controller.js, audio-panel.js)
+  - `web/index.html` — Primus page (LED + audio). Route: `/` or `/primus`.
+  - `web/radius.html` — Radius Central page (audio-only). Route: `/radius`.
+  - `web/js/app.js` — Shared Alpine store init. Reads `window.PAGE_CONFIG` to configure tabs/labels per page.
+  - `web/js/` — Alpine.js components: look-mixer.js, look-controller.js, audio-panel.js, audio-cues.js, cue-map.js, net-log.js
   - `web/css/style.css` — All styling
 
 ### V3.1 Sender Data
@@ -71,6 +73,9 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - **Audio commands (0x8200)**: cmd 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 5=test tone, 6=play cue, 7=loop cue. Cmd 4 calls the hardware volume register without interrupting playback. Cmd 1/2 accept an optional uint16_t duration (seconds) in the 2 bytes after the filename null terminator; 0 or omitted = play full file. Cmd 6/7 use byte 13 as a cue number resolved via `/cues.json` on the SD card.
 - **Cue map**: `cues.h` loads `/cues.json` from SD at boot (ArduinoJson). Values can be a plain filename string or `{"file": "x.wav", "duration": 30}`. Max 64 cues.
 - **Audio UI**: The V3.1 sender has an "Audio" tab (`audio-panel.js`) that shows audio-capable devices, lists their SD card files via FTP, and provides play/loop/stop/pause controls and a live volume slider (throttled to 50 ms).
+- **Cue Map editor**: `cue-map.js` (Radius Central only) reads and writes `/cues.json` on the Radius SD card via `GET/POST /api/audio/cue_map`. Supports add/remove/reorder rows, file picker from device SD, and per-cue duration.
+- **Radius Central** (`radius.html`): Audio-only SPA. Sidebar shows only `is_audio` devices (preserving real device indices via `.map((d,i)=>({...d,_di:i})).filter(d=>d.is_audio)`). No FPS badge, no Groups, no Mixer Preview. Tabs: Audio, Audio Cues, Cue Map, Net Log. `window.PAGE_CONFIG` in each page's `<head>` configures which tabs `app.js` exposes.
+- **ArtDmx guard**: `state.py` tick loop skips `is_audio` devices — Radius nodes never receive ArtDmx LED packets.
 
 ## Critical sync points
 
@@ -84,7 +89,8 @@ The sender and receiver must agree on:
 
 ## How to build and run
 
-**V3.1 Sender**: `python3 V3_1/sender/run.py` — opens web UI at an auto-selected port (printed on startup, browser opens automatically)
+**V3.1 Sender (Primus mode)**: `python3 V3_1/sender/run.py` — opens Primus UI at an auto-selected port (browser opens automatically)
+**V3.1 Sender (Radius mode)**: `python3 V3_1/sender/run.py --mode radius` — opens Radius Central UI instead. Both pages are always accessible regardless of mode: `/` or `/primus` for Primus, `/radius` for Radius Central.
 **V3.0 Sender**: `python3 sender/led_controller.py` — opens web UI at http://localhost:8080
 **Radius firmware (V2, ESP32-S3)**: `cd V3_2/Arduino && ./upload.sh` — specify port explicitly to avoid wrong detection: `./upload.sh /dev/cu.usbmodemXXXX`
 **Radius firmware (V1, HUZZAH32)**: `cd V3_2/Arduino && ./upload.sh --board feather-esp32 /dev/cu.usbserialXXXX`
@@ -111,6 +117,7 @@ none, solid, pulse, linear, constrainbow, rainbow, knight_rider, chase, radial (
 **POST (looks/mixer)**: `/api/looks/save`, `/api/mixer/preview`, `/api/device_groups/save`
 **POST (cues)**: `/api/cues` (save), `/api/cues/go`
 **POST (audio — Radius nodes only)**: `/api/audio/cmd`, `/api/audio/files`, `/api/audio/upload`, `/api/audio/rename`, `/api/audio/delete`, `/api/audio/mkdir`
+**GET/POST (cue map — Radius nodes only)**: `GET /api/audio/cue_map?device=N` (download and parse `/cues.json`), `POST /api/audio/cue_map` `{device, cues}` (serialize and upload `/cues.json`)
 **DELETE**: `/api/clips/<id>`, `/api/looks/<id>`, `/api/device_groups/<id>`
 
 ## Hardware
