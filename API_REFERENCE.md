@@ -847,3 +847,200 @@ Radius nodes run an FTP server (SimpleFTPServer) for SD card file management. Th
 **Total: 13 bytes.**
 
 **SD bus mutex**: while audio is playing (`sdBusy` flag), `handleFTP()` is skipped each loop — the FTP TCP connection stalls but does not drop. File transfers resume automatically when playback ends.
+
+---
+
+## 15. Audio Library Sync
+
+Radius Central includes a project audio library — a sender-side staging folder for WAV files — and a two-way sync system for keeping library files aligned with Radius device SD cards. Source runs store the library in `V3_6/sender/audio/`; packaged runs use the platform app data directory.
+
+### Project Audio Library Endpoints
+
+#### GET /api/project_audio
+
+Returns the local project library merged with the last-known device file inventory (populated by the most recent pull or push job).
+
+```json
+{
+  "files": [
+    {
+      "name": "kick.wav",
+      "size": 1234567,
+      "checksum": "sha256:abcdef...",
+      "sources": ["local", "192.168.8.151", "192.168.8.152"],
+      "local": true
+    }
+  ],
+  "device_inventory": {
+    "192.168.8.151": {
+      "name": "Radius-1",
+      "files": ["kick.wav", "ambient.wav"],
+      "scanned_at": 1718500000.0
+    }
+  },
+  "inventory_age_seconds": 42.0
+}
+```
+
+`sources` lists `"local"` plus any device IPs that have a file with this name. `inventory_age_seconds` is seconds since the last FTP scan; `null` if no scan has run yet.
+
+#### POST /api/project_audio?filename=\<name\>
+
+Upload a WAV file to the local project library. Body is binary WAV data. The server validates the RIFF/WAVE header before saving.
+
+**Response:** `{"name": "kick.wav", "size": 1234567}`
+
+**Errors:** 400 if filename missing, body empty, or not a valid WAV. 409 if the filename already exists with a different checksum.
+
+#### DELETE /api/project_audio/\<filename\>
+
+Remove a file from the local project library. Does not delete files from device SD cards.
+
+**Response:** `{"ok": true}` — 404 if not found.
+
+---
+
+### Audio Sync — Push (sender → devices)
+
+`POST /api/audio_sync` starts a background push job. For each connected `is_audio` device the job compares cue-required filenames against the device FTP listing and uploads any missing files from the local library.
+
+Before opening any FTP connections the job sends ArtAudioCmd cmd=0 (stop) to all `is_audio` devices and waits 300 ms to allow the VS1053 to release the SD bus.
+
+**Request body:** `{}` (empty or omitted)
+
+**Response:** `{"job_id": "a1b2c3d4"}`
+
+Poll status at `GET /api/audio_sync/status`.
+
+---
+
+### Audio Sync — Pull (devices → sender)
+
+`POST /api/audio_sync/pull` starts a background pull job that downloads files from all connected `is_audio` devices to the local project library.
+
+**Request body:** `{}` (empty or omitted)
+
+**Response:** `{"job_id": "a1b2c3d4"}`
+
+#### Pull Job Lifecycle
+
+1. Send ArtAudioCmd cmd=0 (stop) to all `is_audio` devices.
+2. Wait 300 ms for SD bus to clear.
+3. FTP-list all connected `is_audio` devices. Build a map: `filename → [device_ip, …]`.
+4. For each filename found across any device:
+   - Download all copies (one FTP download per source device), tracking byte-level progress.
+   - Compute SHA-256 checksum of each downloaded copy.
+   - If a local library copy exists, include its checksum in the comparison.
+   - Group all sources by checksum digest.
+5. For each filename, apply the grouping result:
+   - **Single group, no local copy** → save automatically; item status `done`.
+   - **Single group, local matches** → no write; item status `confirmed`.
+   - **Multiple groups** → save each unique version to a temp location; emit a conflict entry.
+6. Job reaches `status: "done"`. Conflict entries remain until resolved via `POST /api/audio_sync/resolve`.
+
+#### Pull Job Status
+
+`GET /api/audio_sync/status` returns the most recent job (push or pull) or `{"status": "idle"}`.
+
+```json
+{
+  "job_id": "a1b2c3d4",
+  "type": "pull",
+  "status": "running",
+  "items": [
+    {
+      "filename": "kick.wav",
+      "device_ip": "192.168.8.151",
+      "device_name": "Radius-1",
+      "bytes_total": 1234567,
+      "bytes_received": 614400,
+      "status": "downloading"
+    },
+    {
+      "filename": "ambient.wav",
+      "device_ip": "192.168.8.151",
+      "device_name": "Radius-1",
+      "bytes_total": 5000000,
+      "bytes_received": 5000000,
+      "status": "done"
+    }
+  ],
+  "conflicts": [
+    {
+      "filename": "intro.wav",
+      "groups": [
+        {
+          "checksum": "sha256:abc123...",
+          "size": 2048000,
+          "sources": [
+            {"type": "local"},
+            {"type": "device", "device_ip": "192.168.8.151", "device_name": "Radius-1"},
+            {"type": "device", "device_ip": "192.168.8.152", "device_name": "Radius-2"},
+            {"type": "device", "device_ip": "192.168.8.153", "device_name": "Radius-3"}
+          ],
+          "suggested_name": "intro.wav"
+        },
+        {
+          "checksum": "sha256:def456...",
+          "size": 1900000,
+          "sources": [
+            {"type": "device", "device_ip": "192.168.8.154", "device_name": "Radius-4"}
+          ],
+          "suggested_name": "intro_radius-4.wav"
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
+```
+
+**Item `status` values:** `pending`, `downloading`, `checksumming`, `done`, `confirmed`, `skipped`, `error`.
+
+**Job `status` values:** `planning`, `stopping`, `running`, `done`, `error`.
+
+#### Conflict Groups
+
+Each conflict entry has one `filename` and two or more `groups`. Each group represents a unique file version identified by its SHA-256 checksum and lists every source (local or device) that holds that version.
+
+**Suggested name logic:**
+- The group with the most sources gets the original filename. Ties broken by preferring the group that includes the local copy.
+- Each remaining group is named `<basename>_<first-source-device-name>.<ext>`, lower-cased with spaces replaced by hyphens.
+
+The user reviews conflicts, optionally edits the suggested names, and submits resolutions. Groups can also be discarded (temp files deleted, nothing saved).
+
+#### POST /api/audio_sync/resolve
+
+Apply conflict resolution decisions for one filename. Can be called once per conflict, or all conflicts can be resolved in one call.
+
+**Request body:**
+```json
+{
+  "filename": "intro.wav",
+  "resolutions": [
+    {"checksum": "sha256:abc123...", "action": "save",    "save_as": "intro.wav"},
+    {"checksum": "sha256:def456...", "action": "save",    "save_as": "intro_radius-4.wav"},
+    {"checksum": "sha256:zzz999...", "action": "discard"}
+  ]
+}
+```
+
+**`action` values:**
+- `"save"` — move temp file into the local library under `save_as`.
+- `"discard"` — delete temp file; do not save to library.
+
+**Response:** `{"ok": true, "saved": ["intro.wav", "intro_radius-4.wav"], "discarded": []}`
+
+**Errors:** 400 if `filename` is not in active conflicts, or a checksum is not found. 409 if `save_as` already exists in the library with a different checksum (prevents silent overwrite — choose a different name).
+
+After all groups for a conflict are resolved, that conflict entry is removed from the job result.
+
+---
+
+### Audio Sync — Lightweight Rescan
+
+`POST /api/audio_sync/rescan` FTP-lists all connected `is_audio` devices without downloading any files. Updates the cached device inventory returned by `GET /api/project_audio`. Useful for refreshing the combined file list after manually copying files to a device SD card.
+
+**Response:** `{"ok": true, "devices_scanned": 4}`
+
+Sends the stop command and 300 ms wait before FTP listing, same as pull and push.

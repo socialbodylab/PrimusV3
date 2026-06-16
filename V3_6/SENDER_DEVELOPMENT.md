@@ -252,6 +252,137 @@ Before committing, remove generated runtime state:
 rm -f V3_6/sender/.primus_state.json
 ```
 
+## Audio Library Sync
+
+The audio library sync system manages WAV files between the sender's local project library and Radius device SD cards. It supports three operations: **pull** (devices → sender), **push** (sender → devices), and **rescan** (inventory refresh only). All three run as background jobs tracked via `GET /api/audio_sync/status`.
+
+### Project Audio Library
+
+The library is a flat folder of WAV files managed by `audio_cues.py`. Checksums are SHA-256 and cached in `audio/.checksums.json` so files are not re-hashed on every request.
+
+| Function | Description |
+|---|---|
+| `list_project_audio()` | Returns `[{name, size, checksum, path}]` for all files |
+| `save_project_audio(filename, data)` | Writes a WAV to the library; raises if filename exists with a different checksum |
+| `save_project_audio_temp(checksum, data)` | Saves a downloaded copy to a temp path keyed by checksum digest; used during pull conflict staging |
+| `get_project_audio_path(filename)` | Returns absolute path or `None` |
+| `get_project_audio_temp_path(checksum)` | Returns temp path or `None` |
+| `delete_project_audio(filename)` | Removes from library; returns bool |
+| `discard_project_audio_temp(checksum)` | Deletes a staged temp file |
+| `load_audio_cues()` / `save_audio_cues(data)` | Cue sheet persistence (separate from library) |
+
+### Stop Before Sync
+
+All three job types send ArtAudioCmd cmd=0 (stop) to every `is_audio` device before opening any FTP connection, then sleep 300 ms. This clears the `sdBusy` flag on the VS1053 so FTP transfers proceed without stalling. Devices that are not playing audio are unaffected. The stop command is UDP/fire-and-forget; the 300 ms wait is sufficient for the VS1053 to drain its buffer and release the SD bus under normal conditions.
+
+The UI must show a confirmation dialog before starting any sync job: "This will stop audio on all Radius devices."
+
+### Push Job (sender → devices)
+
+Implemented in `_run_sync_job()` in `server.py`. For each `is_audio` device:
+
+1. FTP-list `/` on the device.
+2. Collect filenames referenced by cues assigned to that device IP.
+3. Upload each required file that is missing from the device, reading from the local library.
+4. Track progress via the `progress_callback` parameter on `ftp_upload()`.
+
+### Pull Job (devices → sender)
+
+Implemented in `_run_pull_job()` in `server.py`.
+
+1. Send stop + wait 300 ms.
+2. FTP-list `/` on each connected `is_audio` device. Build `filename → [device_ip, …]`.
+3. For each filename found on any device:
+   - Download all copies (one per source device), updating `bytes_received` on each item via `progress_callback` on `ftp_download()`.
+   - Compute SHA-256 checksum of each downloaded copy.
+   - If a local library copy exists, include its checksum in the comparison.
+   - Group all sources by checksum digest.
+4. Apply the grouping result per filename:
+   - **Single group, no local copy** → `save_project_audio()`; item status `done`.
+   - **Single group, local matches** → no write needed; item status `confirmed`.
+   - **Multiple groups** → `save_project_audio_temp()` for each unique checksum; add a conflict entry to the job.
+5. Job reaches `status: "done"`. Conflict entries remain until resolved.
+
+### Conflict Model
+
+A conflict entry has one `filename` and two or more `groups`. Each group represents a unique file version:
+
+```python
+{
+    "filename": "intro.wav",
+    "groups": [
+        {
+            "checksum": "sha256:abc123...",
+            "size": 2048000,
+            "sources": [
+                {"type": "local"},
+                {"type": "device", "device_ip": "192.168.8.151", "device_name": "Radius-1"},
+                {"type": "device", "device_ip": "192.168.8.153", "device_name": "Radius-3"},
+            ],
+            "temp_path": None,                          # None when this group IS the local copy
+            "suggested_name": "intro.wav",
+        },
+        {
+            "checksum": "sha256:def456...",
+            "size": 1900000,
+            "sources": [
+                {"type": "device", "device_ip": "192.168.8.154", "device_name": "Radius-4"}
+            ],
+            "temp_path": "/path/to/audio/.tmp/def456.wav",
+            "suggested_name": "intro_radius-4.wav",
+        },
+    ],
+}
+```
+
+**Suggested name logic:** The group with the most sources gets the original filename (ties broken by preferring the group that includes the local copy). Each remaining group is named `<basename>_<first-source-device-name>.<ext>`, lower-cased with spaces replaced by hyphens.
+
+### Resolve Flow
+
+`POST /api/audio_sync/resolve` handles one conflict at a time. For each resolution:
+- `"save"` → move the temp file into the library under `save_as`. Returns 409 if `save_as` already exists with a different checksum — the UI must prompt for a different name.
+- `"discard"` → call `discard_project_audio_temp(checksum)`.
+
+When all groups for a conflict are resolved, that entry is removed from the job. The active job is kept in the module-level `_sync_job` dict until a new job starts.
+
+### Combined File List
+
+`GET /api/project_audio` merges two sources:
+
+1. **Local library** (`audio_cues.list_project_audio()`) — always current.
+2. **Cached device inventory** — the module-level `_device_inventory` dict in `server.py`, populated by pull, push, and rescan jobs. Keyed by device IP; each entry holds a file list and a `scanned_at` timestamp.
+
+The response includes `inventory_age_seconds` so the UI can display "last scanned N minutes ago" and offer a rescan button. Rescan (`POST /api/audio_sync/rescan`) FTP-lists all devices without downloading, then updates `_device_inventory` in place.
+
+### Progress Tracking
+
+Both push and pull job items carry byte-level progress:
+
+```python
+{
+    "filename": "kick.wav",
+    "device_ip": "192.168.8.151",
+    "device_name": "Radius-1",
+    "bytes_total": 1234567,
+    "bytes_received": 614400,   # pull jobs
+    "bytes_sent": 0,            # push jobs
+    "status": "downloading",
+}
+```
+
+`ftp_download()` in `artnet.py` accepts an optional `progress_callback(received, total)` that the job thread calls on each received chunk. The UI polls `GET /api/audio_sync/status` on a 500 ms interval and renders a per-file progress bar from `bytes_received / bytes_total`.
+
+### Module Responsibilities
+
+| Module | Responsibility |
+|---|---|
+| `audio_cues.py` | Library CRUD, checksum cache, temp file staging, cue sheet persistence |
+| `artnet.py` | `ftp_download(ip, path, progress_callback)`, `ftp_upload(ip, path, data, progress_callback)`, `send_audio_cmd(ip, cmd)` |
+| `server.py` | `_run_sync_job()` (push), `_run_pull_job()` (pull), `_run_rescan_job()`, `_device_inventory`, resolve handler |
+| `web/audio-cues.js` | Pull button with confirm dialog, per-file progress bars, conflict resolution panel |
+
+---
+
 ## Test Coverage
 
 Current test coverage is focused on Art-Net capability parsing and discovery compatibility:
