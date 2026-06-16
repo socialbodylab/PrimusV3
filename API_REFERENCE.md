@@ -288,11 +288,18 @@ Each Look has two output slots matching the current V3.6 receiver profile contra
 
 The V3.6 sender (`V3_6/sender/run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
 
+### Radius Central Mode
+
+Run `python3 V3_6/sender/run.py --mode radius` to launch Radius Central, an audio-only SPA at `/radius`. The same HTTP server runs; the `--mode` flag changes the startup label and the URL opened in the browser.
+
+Devices are identified as audio nodes when the sender adds or refreshes them: if `short_name` or `long_name` contains `"Radius"` or `"Audio"` (case-sensitive), the device is flagged `is_audio: true` in the sender state. Audio devices are excluded from the ArtDmx send loop. `GET /api/state` and `GET /api/audio_cues` both expose `is_audio` so the UI can filter the sidebar. `POST /api/hello_device` sends a test tone (cmd 5) instead of a red LED flash for `is_audio` devices.
+
 ### GET Endpoints
 
 | Route | Description |
 |---|---|
-| `GET /` | HTML control interface (Alpine.js SPA) |
+| `GET /` | Primus Central SPA (Alpine.js) |
+| `GET /radius` | Radius Central audio-only SPA |
 | `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
 | `GET /api/performance` | Rolling sender timing diagnostics, counters, and per-second rates for FPS/debug validation |
@@ -307,6 +314,10 @@ The V3.6 sender (`V3_6/sender/run.py`) serves a web UI and exposes a JSON API. A
 | `GET /api/integrations/osc` | OSC listener settings, bound endpoint, recent message history, examples, and per-cue trigger hints |
 | `GET /api/firmware/status` | Source-checkout firmware upload availability plus current/last job state |
 | `GET /api/firmware/jobs/:id` | Poll a firmware upload job, including redacted output and structured results |
+| `GET /api/audio_cues` | Load the saved audio cue list (Radius Central) |
+| `GET /api/audio_cues/export` | Download audio cues as a JSON file attachment |
+| `GET /api/netlog` | Network log entries. Query param: `?since=<id>` to poll for new entries only |
+| `GET /api/audio/cue_map?device=N` | Fetch `/cues.json` from a Radius SD card via FTP. Returns `{cues: {...}}` |
 
 ### Sender Performance Diagnostics
 
@@ -579,6 +590,25 @@ responses include `{id, action, profile, status, command, metadata, output,
 result, error}`. `status` is `queued`, `running`, `succeeded`, or `failed`.
 Starting a new job while another is queued/running returns `409`.
 
+### POST Endpoints — Radius Central (Audio and SD File Management)
+
+These endpoints are used by Radius Central. All `/api/audio/` file-management endpoints accept a `device` index that must reference an `is_audio` device. All paths are validated by `_safe_ftp_path`: must be absolute (`/`-prefixed), no `..` segments, no null bytes.
+
+| Route | Body | Description |
+|---|---|---|
+| `POST /api/audio/cmd` | `{device: N, cmd: "play"\|"stop"\|"loop"\|"pause"\|"volume"\|"test_tone", filename: "track.wav", volume: 100}` | Send an audio command to one device (see §13 for command values). `filename` and `volume` are optional. |
+| `POST /api/audio/upload?device=N&path=/file.wav` | Binary WAV body | Upload a WAV file to the Radius SD card via FTP. Path must be absolute. |
+| `POST /api/audio/files` | `{device: N, path: "/"}` | List a directory on the Radius SD card. Returns `{entries: [{name, size, is_dir}]}`. |
+| `POST /api/audio/rename` | `{device: N, src: "/old.wav", dst: "/new.wav"}` | Rename a file or directory on the SD card. |
+| `POST /api/audio/delete` | `{device: N, path: "/file.wav", is_dir: false}` | Delete a file or directory from the SD card. |
+| `POST /api/audio/mkdir` | `{device: N, path: "/folder"}` | Create a directory on the SD card. |
+| `POST /api/audio/cue_map` | `{device: N, cues: {"1": "intro.wav", "2": {"file": "loop.wav", "duration": 30}}}` | Write `/cues.json` to the Radius SD card via FTP. See §13 for cue map format. |
+| `POST /api/audio_cues` | Audio cue list object | Save the audio cue list (persisted in sender, not on SD). |
+| `POST /api/audio_cues/fire` | `{number: N}` | Fire a saved audio cue by number. Sends the audio command to all connected `is_audio` devices. Returns `{results: {ip: {status, reason}}}`. |
+| `POST /api/netlog/clear` | `{}` | Clear the in-memory network log. |
+
+For `/api/audio_cues/fire`, the `results` map is keyed by device IP. `status` is `"sent"`, `"skipped"` (disconnected), or `"error"`. `"error"` entries include a `reason` string.
+
 ### DELETE Endpoints
 
 | Route | Description |
@@ -751,7 +781,7 @@ Pixel counts and byte sizes propagate automatically from these tables — no oth
 
 ---
 
-## 8. Audio Control — ArtAudioCmd (custom opcode 0x8300)
+## 13. Audio Control — ArtAudioCmd (custom opcode 0x8300)
 
 Radius nodes (V3.2 firmware) play WAV files from an SD card. The sender controls playback via a custom Art-Net opcode. These packets are only sent to devices flagged `is_audio`; standard LED nodes ignore unknown opcodes.
 
@@ -799,7 +829,7 @@ Max 64 entries. Values are either a plain filename string or an object with `fil
 
 ---
 
-## 9. FTP Server Control — ArtFtpCmd (custom opcode 0x8301)
+## 14. FTP Server Control — ArtFtpCmd (custom opcode 0x8301)
 
 Radius nodes run an FTP server (SimpleFTPServer) for SD card file management. The server starts automatically at boot. The sender can toggle it on or off via this opcode; the D1 button on the device also toggles it.
 
