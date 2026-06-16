@@ -6,14 +6,18 @@ import json
 import os
 import re
 import mimetypes
+import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import unquote
 
+import audio_cues as _audio_cues_mod
 import clips
 from firmware import FirmwareRequestError, firmware_jobs
 import mixer
+import netlog
 import sharing
-from artnet import discover_artnet_nodes
+from artnet import discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download
 from network_settings import (
     NetworkSettingsError,
     apply_static_ip,
@@ -37,9 +41,21 @@ def _safe_id(value):
     return bool(value) and bool(_SAFE_ID_RE.match(value))
 
 
+def _safe_ftp_path(path):
+    """Return True if path is a safe absolute FTP path (no traversal)."""
+    if not isinstance(path, str) or not path.startswith("/") or "\x00" in path:
+        return False
+    for part in path.split("/"):
+        if part == "..":
+            return False
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     controller_state = None
     cue_list = None
+    audio_cues_data = {"cues": []}
+    audio_cues_lock = threading.Lock()
 
     def _osc_service(self):
         return getattr(self.server, "osc_service", None)
@@ -163,13 +179,57 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json_response(service.status())
             return
+        if path == "/api/audio_cues":
+            with self.audio_cues_lock:
+                self._json_response(dict(self.audio_cues_data))
+            return
+        if path == "/api/audio_cues/export":
+            with self.audio_cues_lock:
+                body = json.dumps(self.audio_cues_data, indent=2).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="audio_cues.json"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/api/netlog":
+            params = self._query_params()
+            try:
+                since = int(params.get("since", 0))
+            except (ValueError, TypeError):
+                since = 0
+            entries = netlog.get_entries(since_id=since)
+            self._json_response({"entries": entries})
+            return
+        if path == "/api/audio/cue_map":
+            params = self._query_params()
+            try:
+                di = int(params.get("device", -1))
+            except (ValueError, TypeError):
+                di = -1
+            devices = self.controller_state.devices
+            if not (0 <= di < len(devices)) or not devices[di].get("is_audio"):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+                return
+            ip = devices[di]["ip"]
+            try:
+                raw = ftp_download(ip, "/cues.json")
+                self._json_response(json.loads(raw.decode()))
+            except Exception as e:
+                self._respond(500, "application/json",
+                              json.dumps({"error": str(e)}).encode())
+            return
         if path.startswith("/api/"):
             self._json_error(404, "not found")
             return
 
         # Static files
-        if path == "/" or path == "":
+        if path in ("/", "", "/primus"):
             path = "/index.html"
+        elif path == "/radius":
+            path = "/radius.html"
         self._serve_static(path)
 
     # ------------------------------------------------------------------
@@ -177,11 +237,17 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_POST(self):
+        path = self.path.split("?")[0]
+
+        # Binary uploads: handle before _read_json() consumes the body
+        if self.path.split("?")[0] == "/api/audio/upload":
+            self._handle_audio_upload()
+            return
+
         data = self._read_json()
         if data is None:
             self._respond(400, "application/json", b'{"error":"invalid JSON"}')
             return
-        path = self.path
 
         if path == "/api/ui/heartbeat":
             if getattr(self.server, "ui_lifecycle_enabled", False):
@@ -604,6 +670,123 @@ class Handler(BaseHTTPRequestHandler):
             except NetworkSettingsError as exc:
                 self._json_network_error(exc)
 
+        # -- Audio commands (Radius nodes) --
+        elif path == "/api/audio/cmd":
+            di = data.get("device", -1)
+            cmd = str(data.get("cmd", "stop"))
+            filename = str(data.get("filename", ""))
+            try:
+                volume = max(0, min(100, int(data.get("volume", 100))))
+            except (TypeError, ValueError):
+                volume = 100
+            ok = self.controller_state.send_audio_command(di, cmd, filename, volume)
+            if ok:
+                self._ok()
+            else:
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+
+        elif path == "/api/audio/files":
+            di = data.get("device", -1)
+            ftp_path = str(data.get("path", "/"))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(ftp_path):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    entries = self.controller_state.ftp_list_dir(di, ftp_path)
+                    self._json_response({"entries": entries or []})
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/rename":
+            di = data.get("device", -1)
+            src = str(data.get("src", ""))
+            dst = str(data.get("dst", ""))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(src) or not _safe_ftp_path(dst):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    self.controller_state.ftp_rename(di, src, dst)
+                    self._ok()
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/delete":
+            di = data.get("device", -1)
+            ftp_path = str(data.get("path", ""))
+            is_dir = bool(data.get("is_dir", False))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(ftp_path):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    self.controller_state.ftp_delete(di, ftp_path, is_dir=is_dir)
+                    self._ok()
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/mkdir":
+            di = data.get("device", -1)
+            ftp_path = str(data.get("path", ""))
+            if not (0 <= di < len(self.controller_state.devices)):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            elif not _safe_ftp_path(ftp_path):
+                self._respond(400, "application/json", b'{"error":"invalid path"}')
+            else:
+                try:
+                    self.controller_state.ftp_mkdir(di, ftp_path)
+                    self._ok()
+                except Exception as e:
+                    self._respond(500, "application/json",
+                                  json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio/cue_map":
+            di = data.get("device", -1)
+            cues = data.get("cues")
+            devices = self.controller_state.devices
+            if not (0 <= di < len(devices)) or not devices[di].get("is_audio"):
+                self._respond(400, "application/json", b'{"error":"invalid device index"}')
+                return
+            if not isinstance(cues, dict):
+                self._respond(400, "application/json", b'{"error":"cues must be an object"}')
+                return
+            ip = devices[di]["ip"]
+            try:
+                raw = json.dumps(cues, indent=2).encode()
+                ftp_upload(ip, "/cues.json", raw)
+                self._ok()
+            except Exception as e:
+                self._respond(500, "application/json",
+                              json.dumps({"error": str(e)}).encode())
+
+        elif path == "/api/audio_cues":
+            with self.audio_cues_lock:
+                Handler.audio_cues_data = data
+                _audio_cues_mod.save_audio_cues(data)
+            self._json_response(data)
+
+        elif path == "/api/audio_cues/fire":
+            number = data.get("number")
+            with self.audio_cues_lock:
+                cues = self.audio_cues_data.get("cues", [])
+            cue = next((c for c in cues if c.get("number") == number), None)
+            if cue is None:
+                self._respond(404, "application/json", b'{"error":"cue not found"}')
+            else:
+                results = self.controller_state.fire_audio_cue(cue)
+                self._json_response({"results": results})
+
+        elif path == "/api/netlog/clear":
+            netlog.clear()
+            self._ok()
+
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
 
@@ -637,6 +820,36 @@ class Handler(BaseHTTPRequestHandler):
             self._ok()
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
+
+    def _handle_audio_upload(self):
+        """POST /api/audio/upload?device=N&path=/file.wav  (binary WAV body)"""
+        params = self._query_params()
+        try:
+            di = int(params.get("device", -1))
+        except (TypeError, ValueError):
+            di = -1
+        ftp_path = unquote(params.get("path", ""))
+        if not (0 <= di < len(self.controller_state.devices)):
+            self._respond(400, "application/json", b'{"error":"invalid device index"}')
+            return
+        if not _safe_ftp_path(ftp_path):
+            self._respond(400, "application/json", b'{"error":"invalid path"}')
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._respond(400, "application/json", b'{"error":"empty upload"}')
+            return
+        file_data = self.rfile.read(length)
+        if len(file_data) < 12 or file_data[:4] != b'RIFF' or file_data[8:12] != b'WAVE':
+            self._respond(400, "application/json",
+                          b'{"error":"not a WAV file - device requires PCM WAV format"}')
+            return
+        try:
+            self.controller_state.ftp_upload(di, ftp_path, file_data)
+            self._ok()
+        except Exception as e:
+            self._respond(500, "application/json",
+                          json.dumps({"error": str(e)}).encode())
 
     # ------------------------------------------------------------------
     #  Helpers

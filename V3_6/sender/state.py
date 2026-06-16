@@ -21,6 +21,21 @@ from artnet import (
     send_art_address,
     send_ip_config,
     ipv4_octets,
+    send_audio_cmd,
+    AUDIO_CMD_STOP,
+    AUDIO_CMD_PLAY,
+    AUDIO_CMD_LOOP,
+    AUDIO_CMD_PAUSE,
+    AUDIO_CMD_VOLUME,
+    AUDIO_CMD_TEST_TONE,
+    AUDIO_CMD_PLAY_CUE,
+    AUDIO_CMD_LOOP_CUE,
+    list_audio_files,
+    ftp_list_dir as artnet_ftp_list_dir,
+    ftp_upload as artnet_ftp_upload,
+    ftp_rename as artnet_ftp_rename,
+    ftp_delete as artnet_ftp_delete,
+    ftp_mkdir as artnet_ftp_mkdir,
 )
 from paths import state_file
 
@@ -811,6 +826,7 @@ class ControllerState:
                     "subnet": dev.get("subnet"),
                     "ip_config_pending": dev.get("ip_config_pending"),
                     "connected": dev["connected"],
+                    "is_audio": dev.get("is_audio", False),
                     "transport_error": dev.get("transport_error"),
                     "receiver_fps": rx["fps"] if rx else None,
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
@@ -1023,11 +1039,19 @@ class ControllerState:
             )
             capabilities = _capabilities_from_node(node_info)
 
+            short_name = node_info.get("short_name", "")
+            long_name  = node_info.get("long_name", "")
+            is_audio = (
+                "Audio" in short_name or "Audio" in long_name or
+                "Radius" in short_name or "Radius" in long_name
+            )
+
             dev = {
-                "name": node_info.get("short_name", "Node"),
+                "name": short_name or "Node",
                 "ip": node_info["ip"],
                 "base_universe": base_u,
                 "connected": False,
+                "is_audio": is_audio,
                 "sender": ArtNetSender(node_info["ip"], source_ip=self.artnet_source_ip),
                 "transport_error": None,
                 "capabilities": capabilities,
@@ -1112,8 +1136,13 @@ class ControllerState:
 
         capabilities = _capabilities_from_node(node_info)
         short_name = node_info.get("short_name")
+        long_name  = node_info.get("long_name", "")
         if short_name:
             dev["name"] = short_name
+            dev["is_audio"] = (
+                "Audio" in short_name or "Audio" in long_name or
+                "Radius" in short_name or "Radius" in long_name
+            )
         dev["capabilities"] = capabilities
         dev["hardware_profile"] = node_info.get(
             "hardware_profile", capabilities.get("hardware_profile", "unknown"))
@@ -1313,18 +1342,28 @@ class ControllerState:
     def hello_device(self, di):
         """Send a quick red flash to all outputs on a device to help locate it."""
         with self.lock:
-            status = self._device_capability_status_unlocked(di, "hello")
-            if not status["ok"]:
+            if not (0 <= di < len(self.devices)):
                 return False
             dev = self.devices[di]
             if not dev.get("connected"):
                 return False
-            if not self._ensure_sender_connected_unlocked(dev):
-                return False
-            outputs_info = []
-            for o in dev["outputs"]:
-                outputs_info.append((o["universe"], o["count"]))
-            sender = dev["sender"]
+            is_audio = dev.get("is_audio", False)
+            if is_audio:
+                ip = dev["ip"]
+            else:
+                status = self._device_capability_status_unlocked(di, "hello")
+                if not status["ok"]:
+                    return False
+                if not self._ensure_sender_connected_unlocked(dev):
+                    return False
+                outputs_info = []
+                for o in dev["outputs"]:
+                    outputs_info.append((o["universe"], o["count"]))
+                sender = dev["sender"]
+
+        if is_audio:
+            send_audio_cmd(ip, AUDIO_CMD_TEST_TONE)
+            return True
 
         # Flash red then black (outside lock to avoid blocking animation)
         ok = True
@@ -1343,6 +1382,114 @@ class ControllerState:
                 self._mark_transport_error_unlocked(
                     self.devices[di], sender.last_error or OSError("UDP send failed"))
         return False
+
+    # ------------------------------------------------------------------
+    #  Audio / FTP — Radius (V3.2) nodes
+    # ------------------------------------------------------------------
+
+    _AUDIO_CMDS = {
+        "stop":      AUDIO_CMD_STOP,
+        "play":      AUDIO_CMD_PLAY,
+        "loop":      AUDIO_CMD_LOOP,
+        "pause":     AUDIO_CMD_PAUSE,
+        "volume":    AUDIO_CMD_VOLUME,
+        "test_tone": AUDIO_CMD_TEST_TONE,
+        "play_cue":  AUDIO_CMD_PLAY_CUE,
+        "loop_cue":  AUDIO_CMD_LOOP_CUE,
+    }
+
+    def _get_device_ip(self, di):
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return None
+            return self.devices[di]["ip"]
+
+    def send_audio_command(self, di, cmd, filename="", volume=100):
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return False
+            ip = self.devices[di]["ip"]
+        code = self._AUDIO_CMDS.get(cmd, AUDIO_CMD_STOP)
+        if code == AUDIO_CMD_VOLUME:
+            with self.lock:
+                if 0 <= di < len(self.devices):
+                    self.devices[di]["audio_volume"] = volume
+        send_audio_cmd(ip, code, filename=filename, volume=volume)
+        return True
+
+    def get_audio_files(self, di):
+        with self.lock:
+            if di < 0 or di >= len(self.devices):
+                return []
+            ip = self.devices[di]["ip"]
+        return list_audio_files(ip)
+
+    def ftp_list_dir(self, di, path="/"):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return None
+        return artnet_ftp_list_dir(ip, path)
+
+    def ftp_upload(self, di, path, data):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        artnet_ftp_upload(ip, path, data)
+        return True
+
+    def ftp_rename(self, di, src, dst):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        artnet_ftp_rename(ip, src, dst)
+        return True
+
+    def ftp_delete(self, di, path, is_dir=False):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        artnet_ftp_delete(ip, path, is_dir=is_dir)
+        return True
+
+    def ftp_mkdir(self, di, path):
+        ip = self._get_device_ip(di)
+        if ip is None:
+            return False
+        artnet_ftp_mkdir(ip, path)
+        return True
+
+    def fire_audio_cue(self, cue):
+        """Fire a sender-side audio cue to all connected Radius devices."""
+        CMD_MAP = {
+            "play": AUDIO_CMD_PLAY,
+            "loop": AUDIO_CMD_LOOP,
+            "stop": AUDIO_CMD_STOP,
+        }
+        cmd_str = str(cue.get("cmd", "play"))
+        cmd_code = CMD_MAP.get(cmd_str, AUDIO_CMD_PLAY)
+        filename = str(cue.get("filename", ""))
+        volume = cue.get("volume")
+        results = {}
+        with self.lock:
+            snapshot = [
+                (d["ip"], d.get("connected", False), d.get("is_audio", False))
+                for d in self.devices
+            ]
+        for ip, connected, is_audio in snapshot:
+            if not is_audio:
+                continue
+            if not connected:
+                results[ip] = {"status": "skipped", "reason": "not connected"}
+                continue
+            try:
+                kw = {}
+                if volume is not None:
+                    kw["volume"] = int(volume)
+                send_audio_cmd(ip, cmd_code, filename=filename, **kw)
+                results[ip] = {"status": "sent", "reason": None}
+            except Exception as exc:
+                results[ip] = {"status": "error", "reason": str(exc)}
+        return results
 
     # ------------------------------------------------------------------
     #  Override pixels (for mixer / controller playback)
@@ -1589,6 +1736,8 @@ class ControllerState:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
                     continue
+                if dev.get("is_audio"):
+                    continue  # Radius nodes: no ArtDmx LED output
                 if device_frames_active:
                     frames = None
                     if self._override_frames_by_device is not None:

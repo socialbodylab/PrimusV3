@@ -654,6 +654,8 @@ def main():
                         help=f"HTTP port (default {DEFAULT_HTTP_PORT}; 0 = auto-select)")
     parser.add_argument("--no-browser", action="store_true",
                         help="Print the URL without opening the browser")
+    parser.add_argument("--mode", choices=["primus", "radius"], default="primus",
+                        help="UI mode: primus (default) or radius")
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -682,7 +684,8 @@ def main():
         ui_lifecycle_enabled=ui_lifecycle_enabled,
         osc_service=osc_service)
     port = server.server_address[1]
-    url = f"http://127.0.0.1:{port}"
+    base_url = f"http://127.0.0.1:{port}"
+    url = base_url + ("/radius" if args.mode == "radius" else "")
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
     anim.start()
@@ -696,7 +699,8 @@ def main():
             target=_ui_lifecycle_monitor, args=(server,), daemon=True)
         ui_thread.start()
 
-    print("PrimusV3.6 LED Controller")
+    mode_label = "Radius Central" if args.mode == "radius" else "PrimusV3.6 LED Controller"
+    print(mode_label)
     print(f"  URL: {url}")
     print(f"  Devices: {len(state.devices)}")
     osc_status = osc_service.status()
