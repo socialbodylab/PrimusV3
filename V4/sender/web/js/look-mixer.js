@@ -123,7 +123,7 @@ document.addEventListener("alpine:init", () => {
 
         normalizeBrightness(value) {
             const brightness = Number(value);
-            if (!Number.isFinite(brightness)) return 1.0;
+            if (!Number.isFinite(brightness)) return 0.4;
             return Math.max(0, Math.min(1, brightness));
         },
 
@@ -770,7 +770,7 @@ document.addEventListener("alpine:init", () => {
                 playback: "loop",
                 total_duration: 10.0,
                 speed: 1.0,
-                brightness: 1.0,
+                brightness: 0.4,
             };
             this.playTime = 0;
             this.transportTime = 0;

@@ -30,7 +30,7 @@ DEFAULT_CLIP = {
     "start_color": [255, 0, 255],
     "end_color": [0, 255, 255],
     "speed": 1.0,
-    "brightness": 1.0,
+    "brightness": 0.4,
     "playback": "loop",
     "angle": 0,
     "highlight_width": 5,
@@ -186,7 +186,7 @@ def compute_clip_preview(clip, t, dt=0.033):
         highlight_width=clip.get("highlight_width", 5),
         chase_origin=clip.get("chase_origin", "start"),
     )
-    pixels = scale_pixels(pixels, clip.get("brightness", 1.0))
+    pixels = scale_pixels(pixels, clip.get("brightness", 0.4))
 
     return {
         "pixels": [list(p) for p in pixels],
@@ -228,7 +228,7 @@ def save_from_designer(name, outputs):
             start_color=out.get("start_color", [255, 0, 255]),
             end_color=out.get("end_color", [0, 255, 255]),
             speed=out.get("speed", 1.0),
-            brightness=out.get("brightness", 1.0),
+            brightness=out.get("brightness", 0.4),
             playback=out.get("playback", "loop"),
             angle=out.get("angle", 0),
             highlight_width=out.get("highlight_width", 5),

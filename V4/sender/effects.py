@@ -36,7 +36,7 @@ def random_color_between(c1, c2):
     return lerp_color(c1, c2, random.random())
 
 
-def normalize_brightness(value, default=1.0):
+def normalize_brightness(value, default=0.4):
     try:
         brightness = float(value)
     except (TypeError, ValueError):

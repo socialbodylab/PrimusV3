@@ -461,6 +461,28 @@ class Handler(BaseHTTPRequestHandler):
                 code = 400 if result.get("error") == "invalid device index" else 409
                 self._json_error(code, result.get("error", "DHCP revert failed"))
 
+        elif path == "/api/set_device_output":
+            self._sync_artnet_source()
+            di = data.get("device", -1)
+            oi = data.get("output", -1)
+            output_type = str(data.get("output_type", ""))
+            if not output_type:
+                self._json_error(400, "output_type required")
+                return
+            try:
+                di = int(di)
+                oi = int(oi)
+            except (TypeError, ValueError):
+                self._json_error(400, "invalid device or output index")
+                return
+            result = self._device_state().set_device_output_type(di, oi, output_type)
+            if result.get("ok"):
+                self._ok()
+            else:
+                error = result.get("error", "output update failed")
+                code = 400 if "invalid" in error.lower() or "unknown" in error.lower() else 409
+                self._json_error(code, error)
+
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
             try:

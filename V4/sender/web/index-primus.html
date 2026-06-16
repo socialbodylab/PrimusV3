@@ -109,9 +109,15 @@
                                @blur="$store.conn.finishRename(di)"
                                x-init="$nextTick(() => { $el.focus(); $el.select() })">
                     </template>
-                    <span class="device-fps"
-                          x-show="dev.connected"
-                          x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
+                    <div class="device-stats" x-show="dev.connected">
+                        <span class="device-fps"
+                              x-text="$store.conn.receiverFpsLabel(dev)"></span>
+                        <span class="device-battery"
+                              x-show="$store.conn.showBattery(dev)"
+                              :class="$store.conn.batteryClass(dev)"
+                              :title="$store.conn.batteryTitle(dev)"
+                              x-text="$store.conn.batteryLabel(dev)"></span>
+                    </div>
                 </div>
                 <div class="device-meta">
                     <button class="device-ip-button"
@@ -125,6 +131,9 @@
                           :title="$store.conn.networkModeTitle(dev)"
                           x-text="$store.conn.networkModeLabel(dev)"></span>
                     <span class="device-profile" x-text="$store.conn.hardwareLabel(dev)"></span>
+                    <span class="device-fw-version"
+                          x-show="$store.conn.firmwareLabel(dev) !== '—'"
+                          x-text="'FW ' + $store.conn.firmwareLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                 </div>
                 <div class="btn-group device-actions device-actions-primary">
@@ -160,9 +169,21 @@
                     <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
                     <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Primus will rescan.</div>
                 </div>
-                <div class="device-outputs">
-                    <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
-                        <span class="output-badge" x-text="$store.app.outputLabel(o.name, oi) + ': ' + $store.app.outputTypeLabel(o.type)"></span>
+                <div class="device-outputs" :title="$store.conn.outputConfigHint(dev)">
+                    <template x-for="(o, oi) in dev.outputs" :key="oi">
+                        <label class="device-output-row">
+                            <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
+                            <select class="form-input form-input-sm device-output-select"
+                                    :disabled="!$store.conn.canConfigureOutputs(dev)"
+                                    :value="o.type"
+                                    @change="$store.conn.setDeviceOutputType(di, oi, $event.target.value)">
+                                <template x-for="type in $store.conn.deviceOutputTypesFor(dev, oi)" :key="type">
+                                    <option :value="type"
+                                            :selected="type === o.type"
+                                            x-text="$store.app.outputTypeLabel(type)"></option>
+                                </template>
+                            </select>
+                        </label>
                     </template>
                 </div>
                 <div class="device-footer-actions">
@@ -1004,9 +1025,7 @@
                                 <div class="cue-assignment-preview" :style="lookThumbStyle(assignmentLook(assignment))"></div>
                                 <div class="form-group">
                                     <label class="form-label">Look</label>
-                                    <select class="form-select"
-                                            :value="assignment.look_id"
-                                            @change="setAssignmentLookId(assignment, $event.target.value)">
+                                    <select class="form-select" x-model="assignment.look_id">
                                         <template x-for="look in cueModalLooks" :key="look.id">
                                             <option :value="look.id" x-text="look.name"></option>
                                         </template>
@@ -1016,8 +1035,8 @@
                                 <div class="form-group">
                                     <label class="form-label">Target</label>
                                     <select class="form-select"
-                                            :value="assignment.target_mode"
-                                            @change="setAssignmentTargetMode(assignment, $event.target.value)">
+                                            x-model="assignment.target_mode"
+                                            @change="setAssignmentTargetMode(assignment, assignment.target_mode)">
                                         <option value="look">Look target</option>
                                         <option value="all">All devices</option>
                                         <option value="group">Device group</option>
@@ -1028,9 +1047,7 @@
                             </div>
                             <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'group'">
                                 <label class="form-label">Group</label>
-                                <select class="form-select"
-                                        :value="assignment.device_group_id"
-                                        @change="setAssignmentGroupId(assignment, $event.target.value)">
+                                <select class="form-select" x-model="assignment.device_group_id">
                                     <template x-for="group in cueModalGroups" :key="group.id">
                                         <option :value="group.id" x-text="group.name"></option>
                                     </template>

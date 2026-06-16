@@ -39,7 +39,29 @@ BOARD_PROFILE_LABELS = {
 
 FPS_LISTEN_PORT = 6455
 FPS_MAGIC = b"PFP"
+BATTERY_MAGIC = b"PBT"
 TRACK_MAGIC = b"PTR"
+
+BATTERY_POWER_MODE_BATTERY = 0
+BATTERY_POWER_MODE_CHARGING = 1
+BATTERY_POWER_MODE_PLUGGED = 2
+BATTERY_POWER_MODE_SWITCH_OFF = 3
+BATTERY_POWER_MODE_FAULT = 4
+BATTERY_POWER_MODE_UNAVAILABLE = 5
+
+BATTERY_POWER_MODE_LABELS = {
+    BATTERY_POWER_MODE_BATTERY: "battery",
+    BATTERY_POWER_MODE_CHARGING: "charging",
+    BATTERY_POWER_MODE_PLUGGED: "plugged",
+    BATTERY_POWER_MODE_SWITCH_OFF: "switch_off",
+    BATTERY_POWER_MODE_FAULT: "fault",
+    BATTERY_POWER_MODE_UNAVAILABLE: "unavailable",
+}
+
+BATTERY_WARNING_MESSAGES = {
+    "switch_off": "Power switch off — turn on to charge",
+    "fault": "Check power switch and unplug strip to charge",
+}
 
 AUDIO_CMD_STOP = 0
 AUDIO_CMD_PLAY = 1
@@ -80,6 +102,7 @@ class ArtNetSender:
         self.connected = False
         self.sequence = 1
         self.last_error = None
+        self._io_lock = threading.Lock()
 
     def set_source_ip(self, source_ip):
         source_ip = source_ip or None
@@ -89,18 +112,32 @@ class ArtNetSender:
         if self.connected:
             self.disconnect()
 
-    def connect(self):
+    def _open_socket_unlocked(self):
+        if self.sock:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+            self.sock = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if self.source_ip:
             self.sock.bind((self.source_ip, 0))
-        self.connected = True
-        self.last_error = None
+
+    def connect(self):
+        with self._io_lock:
+            self._open_socket_unlocked()
+            self.connected = True
+            self.last_error = None
 
     def disconnect(self):
-        self.connected = False
-        if self.sock:
-            self.sock.close()
-            self.sock = None
+        with self._io_lock:
+            self.connected = False
+            if self.sock:
+                try:
+                    self.sock.close()
+                except OSError:
+                    pass
+                self.sock = None
 
     def _build_packet(self, universe, rgb_data):
         if len(rgb_data) % 2 != 0:
@@ -118,37 +155,102 @@ class ArtNetSender:
         return bytes(pkt)
 
     def send_output(self, universe, rgb_data):
-        if not self.connected or not self.sock:
-            return False
-        pkt = self._build_packet(universe, rgb_data)
-        try:
-            self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
-        except OSError as exc:
-            self.last_error = str(exc) or "UDP send failed"
-            self.disconnect()
-            return False
-        self.last_error = None
-        return True
+        with self._io_lock:
+            if not self.connected:
+                return False
+            if not self.sock:
+                try:
+                    self._open_socket_unlocked()
+                except OSError as exc:
+                    self.last_error = str(exc) or "UDP socket open failed"
+                    return False
+            pkt = self._build_packet(universe, rgb_data)
+            for attempt in (0, 1):
+                try:
+                    self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+                    self.last_error = None
+                    return True
+                except OSError as exc:
+                    self.last_error = str(exc) or "UDP send failed"
+                    if attempt == 0:
+                        try:
+                            self._open_socket_unlocked()
+                            continue
+                        except OSError:
+                            pass
+                    return False
 
     def advance_sequence(self):
         self.sequence = (self.sequence % 255) + 1
 
     def blackout(self, outputs_info):
-        if not self.connected:
-            return False
-        ok = True
-        for universe, pixel_count in outputs_info:
-            ok = self.send_output(universe, bytes(pixel_count * 3)) and ok
-        self.advance_sequence()
-        return ok
+        with self._io_lock:
+            if not self.connected:
+                return False
+            if not self.sock:
+                try:
+                    self._open_socket_unlocked()
+                except OSError as exc:
+                    self.last_error = str(exc) or "UDP socket open failed"
+                    return False
+            for universe, pixel_count in outputs_info:
+                pkt = self._build_packet(universe, bytes(pixel_count * 3))
+                for attempt in (0, 1):
+                    try:
+                        self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+                        break
+                    except OSError as exc:
+                        self.last_error = str(exc) or "UDP send failed"
+                        if attempt == 0:
+                            try:
+                                self._open_socket_unlocked()
+                                continue
+                            except OSError:
+                                pass
+                        return False
+            self.sequence = (self.sequence % 255) + 1
+            self.last_error = None
+            return True
 
 
 # ======================================================================
-#  FPS TELEMETRY LISTENER
+#  PRIMUS TELEMETRY (UDP 6455 — PFP + PBT)
 # ======================================================================
 
-class FpsListener:
-    """Listens on UDP 6455 for FPS telemetry from receivers."""
+
+def parse_pbt_packet(raw):
+    """Parse a 9-byte PBT battery telemetry packet. Returns dict or None."""
+    if len(raw) < 9 or raw[:3] != BATTERY_MAGIC:
+        return None
+    power_mode = raw[3]
+    battery_mv = (raw[4] << 8) | raw[5]
+    battery_pct = raw[6]
+    fw_minor = raw[7]
+    fw_major = raw[8]
+    mode_label = BATTERY_POWER_MODE_LABELS.get(power_mode, "unavailable")
+    live_firmware_version = f"{fw_major}.{fw_minor}"
+    warning = BATTERY_WARNING_MESSAGES.get(mode_label)
+    return {
+        "battery_power_mode": mode_label,
+        "battery_mv": battery_mv if battery_mv > 0 else None,
+        "battery_pct": battery_pct if battery_pct <= 100 else None,
+        "live_firmware_version": live_firmware_version,
+        "battery_warning": warning,
+    }
+
+
+def parse_pfp_packet(raw):
+    """Parse a 7-byte PFP FPS telemetry packet. Returns dict or None."""
+    if len(raw) < 7 or raw[:3] != FPS_MAGIC:
+        return None
+    return {
+        "fps": (raw[3] << 8) | raw[4],
+        "pkt_rate": (raw[5] << 8) | raw[6],
+    }
+
+
+class PrimusTelemetryListener:
+    """Listens on UDP 6455 for PFP and PBT telemetry from Primus receivers."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -165,35 +267,65 @@ class FpsListener:
             except OSError:
                 time.sleep(0.2)
         if not bound:
+            self._sock.close()
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                bound = True
+            except OSError:
+                pass
+        if not bound:
             self._sock.bind(("0.0.0.0", 0))
-            print(f"WARNING: FPS telemetry port {FPS_LISTEN_PORT} in use — receiver FPS will not display.")
+            fallback_port = self._sock.getsockname()[1]
+            print(
+                f"ERROR: telemetry port {FPS_LISTEN_PORT} in use "
+                f"(listening on {fallback_port} instead) — receiver telemetry will not display. "
+                f"Stop other PrimusCentral/RadiusCentral instances."
+            )
         self._sock.settimeout(1.0)
+        self._bound_port = self._sock.getsockname()[1]
 
     def run(self):
         while self.running:
             try:
-                raw, addr = self._sock.recvfrom(64)
+                raw, addr = self._sock.recvfrom(256)
             except socket.timeout:
                 continue
-            if len(raw) < 7 or raw[:3] != FPS_MAGIC:
+            ip = addr[0]
+            if len(raw) >= 9 and raw[:3] == BATTERY_MAGIC:
+                parsed = parse_pbt_packet(raw)
+                if parsed:
+                    with self.lock:
+                        entry = self.data.setdefault(ip, {})
+                        entry.update(parsed)
+                        entry["ts"] = time.monotonic()
                 continue
-            fps = (raw[3] << 8) | raw[4]
-            pkt = (raw[5] << 8) | raw[6]
-            with self.lock:
-                self.data[addr[0]] = {
-                    "fps": fps, "pkt_rate": pkt, "ts": time.monotonic()
-                }
+            if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
+                parsed = parse_pfp_packet(raw)
+                if parsed:
+                    with self.lock:
+                        entry = self.data.setdefault(ip, {})
+                        entry.update(parsed)
+                        entry["ts"] = time.monotonic()
+                    netlog.log_fps(ip, parsed["fps"], parsed["pkt_rate"])
+
+    TELEMETRY_STALE_SECONDS = 12.0
 
     def get(self, ip):
         with self.lock:
             entry = self.data.get(ip)
-            if entry and (time.monotonic() - entry["ts"]) < 5.0:
+            if entry and (time.monotonic() - entry.get("ts", 0)) < self.TELEMETRY_STALE_SECONDS:
                 return dict(entry)
         return None
 
     def stop(self):
         self.running = False
         self._sock.close()
+
+
+class FpsListener(PrimusTelemetryListener):
+    """Backward-compatible alias for Primus telemetry listener."""
 
 
 class RadiusTelemetryListener:
@@ -519,6 +651,7 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
         "hello": False,
         "ip_config": False,
         "output_config": False,
+        "battery": False,
         "audio": False,
         "ftp": False,
     }
@@ -546,6 +679,7 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             caps["hello"] = "H" in features
             caps["ip_config"] = "I" in features
             caps["output_config"] = "O" in features
+            caps["battery"] = "B" in features
         if saw_feature_token:
             if caps["hardware_profile"] == "unknown" and "primusv3" in name_blob:
                 caps["hardware_profile"] = "v31"
@@ -677,10 +811,41 @@ def _send_udp_packet(ip, packet, source_ip=None):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         if source_ip:
-            sock.bind((source_ip, 0))
+            try:
+                sock.bind((source_ip, 0))
+            except OSError:
+                # Fall back to the OS default route if the preferred source is unavailable.
+                pass
         sock.sendto(bytes(packet), (ip, ARTNET_PORT))
     finally:
         sock.close()
+
+
+def build_output_config_packet(output_types, type_to_id_map):
+    """Build an ArtOutputConfig packet for the given output type keys."""
+    num = len(output_types)
+    pkt = bytearray(13 + num)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_OUTPUT_CONFIG)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = num
+    for i, t in enumerate(output_types):
+        pkt[13 + i] = type_to_id_map.get(t, 0)
+    return bytes(pkt)
+
+
+def send_output_config(ip, output_types, type_to_id_map, source_ip=None):
+    """Send ArtOutputConfig packet.
+    output_types: list of type key strings.
+    type_to_id_map: dict mapping type key -> firmware enum int.
+    """
+    pkt = build_output_config_packet(output_types, type_to_id_map)
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
+
+
+# ======================================================================
+#  ART-NET OUTPUT CONFIG — ArtOutputConfig (opcode 0x8100)
+# ======================================================================
 
 
 def send_art_address(ip, short_name, source_ip=None):
@@ -696,26 +861,6 @@ def send_art_address(ip, short_name, source_ip=None):
         pkt[i] = 0x7F
     pkt[104] = 0x7F
     pkt[106] = 0x00
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
-
-
-# ======================================================================
-#  ART-NET OUTPUT CONFIG — ArtOutputConfig (opcode 0x8100)
-# ======================================================================
-
-def send_output_config(ip, output_types, type_to_id_map, source_ip=None):
-    """Send ArtOutputConfig packet.
-    output_types: list of type key strings.
-    type_to_id_map: dict mapping type key -> firmware enum int.
-    """
-    num = len(output_types)
-    pkt = bytearray(13 + num)
-    pkt[0:8] = ARTNET_HEADER
-    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_OUTPUT_CONFIG)
-    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
-    pkt[12] = num
-    for i, t in enumerate(output_types):
-        pkt[13 + i] = type_to_id_map.get(t, 0)
     _send_udp_packet(ip, pkt, source_ip=source_ip)
 
 

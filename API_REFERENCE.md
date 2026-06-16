@@ -160,6 +160,21 @@ When enabled, the node sends a small status packet to the sender's IP on port **
 
 **Total: 7 bytes.** This is a custom (non-Art-Net) packet. Listen on UDP port 6455 if you want real-time performance data from the node. This is optional — the node functions identically whether or not anything is listening.
 
+### Battery telemetry (`PBT`, V1 only)
+
+V1 Huzzah32 nodes with firmware ≥3.7 send a 9-byte battery packet to the sender IP on port **6455** every **5 seconds** when battery telemetry is enabled (`F:RIOHB` capability).
+
+| Offset | Length | Field | Description |
+|--------|--------|-------|-------------|
+| 0–2 | 3 | Magic | `"PBT"` (ASCII) |
+| 3 | 1 | Power mode | 0=battery, 1=charging, 2=plugged, 3=switch_off, 4=fault, 5=unavailable |
+| 4–5 | 2 | Battery mV | Pack millivolts (uint16, big-endian) |
+| 6 | 1 | Battery % | 0–100 (255 = N/A) |
+| 7 | 1 | FW minor | ArtPollReply minor byte |
+| 8 | 1 | FW major | ArtPollReply major byte |
+
+PrimusCentral merges `PBT` with `PFP` per device IP. `/api/state` devices expose runtime fields: `battery_mv`, `battery_pct`, `battery_power_mode`, `battery_warning`, and `live_firmware_version` (from `PBT`, when fresh).
+
 ---
 
 ## 4. Device Naming — ArtAddress

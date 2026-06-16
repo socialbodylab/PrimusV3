@@ -3,23 +3,6 @@
  * Manual button board for cue playback.
  */
 
-// #region agent log
-function _cueDbgLog(location, message, data, hypothesisId) {
-    fetch('http://127.0.0.1:7695/ingest/abbd0204-dcc0-4721-9f61-f71dfdc607c5', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f67d00' },
-        body: JSON.stringify({
-            sessionId: 'f67d00',
-            location,
-            message,
-            data,
-            timestamp: Date.now(),
-            hypothesisId,
-        }),
-    }).catch(() => {});
-}
-// #endregion
-
 document.addEventListener("alpine:init", () => {
     Alpine.data("lookController", () => ({
         looks: [],
@@ -492,59 +475,51 @@ document.addEventListener("alpine:init", () => {
             });
         },
 
-        setAssignmentLookId(assignment, lookId) {
-            assignment.look_id = String(lookId || '');
-            // #region agent log
-            _cueDbgLog('look-controller.js:setAssignmentLookId', 'look select changed', {
-                lookId: assignment.look_id,
-                options: (this.cueModalLooks || []).map(look => look.id),
-            }, 'H3');
-            // #endregion
-        },
-
         setAssignmentTargetMode(assignment, targetMode) {
             assignment.target_mode = this.cleanTargetMode(targetMode);
             if (assignment.target_mode !== 'group') assignment.device_group_id = '';
             if (assignment.target_mode !== 'devices') assignment.device_ips = [];
         },
 
-        setAssignmentGroupId(assignment, groupId) {
-            assignment.device_group_id = String(groupId || '');
-            // #region agent log
-            _cueDbgLog('look-controller.js:setAssignmentGroupId', 'group select changed', {
-                groupId: assignment.device_group_id,
-                options: (this.cueModalGroups || []).map(group => group.id),
-            }, 'H1');
-            // #endregion
+        reconcileAssignmentOptions() {
+            if (!this.cueForm?.assignments) return;
+            const sourceCue = this.cueEditIndex >= 0 ? this.cues[this.cueEditIndex] : null;
+            for (const assignment of this.cueForm.assignments) {
+                if (assignment.action !== 'look') continue;
+                let lookId = String(assignment.look_id || '').trim();
+                if (!lookId && sourceCue?.look_id) {
+                    lookId = String(sourceCue.look_id).trim();
+                }
+                if (lookId && this.cueModalLooks.some(look => look.id === lookId)) {
+                    assignment.look_id = lookId;
+                }
+                if (assignment.target_mode === 'group') {
+                    const groupId = String(assignment.device_group_id || sourceCue?.device_group_id || '').trim();
+                    if (groupId && this.cueModalGroups.some(group => group.id === groupId)) {
+                        assignment.device_group_id = groupId;
+                    }
+                }
+            }
         },
 
         openAddCue() {
             this.cueEditIndex = -1;
+            this.snapshotCueModalOptions();
             this.cueForm = this.blankCueForm();
             if (this.looks.length) this.addLookAssignment();
             this.ensureAssignmentKeys();
-            this.snapshotCueModalOptions();
             this.cueModal = true;
         },
 
         openEditCue(cue, idx) {
-            const normalized = this.normalizeCue(cue, idx + 1);
             this.cueEditIndex = idx;
-            this.cueForm = JSON.parse(JSON.stringify(normalized));
-            this.ensureAssignmentKeys();
             this.snapshotCueModalOptions();
-            // #region agent log
-            _cueDbgLog('look-controller.js:openEditCue', 'edit cue hydrated', {
-                cueName: this.cueForm.name,
-                assignments: (this.cueForm.assignments || []).map(assignment => ({
-                    look_id: assignment.look_id,
-                    target_mode: assignment.target_mode,
-                    device_group_id: assignment.device_group_id,
-                })),
-                lookOptions: this.cueModalLooks.map(look => look.id),
-            }, 'H3');
-            // #endregion
+            const source = this.cues[idx] ?? cue;
+            this.cueForm = JSON.parse(JSON.stringify(this.normalizeCue(source, idx + 1)));
+            this.ensureAssignmentKeys();
+            this.reconcileAssignmentOptions();
             this.cueModal = true;
+            this.$nextTick(() => this.reconcileAssignmentOptions());
         },
 
         closeCueModal() {

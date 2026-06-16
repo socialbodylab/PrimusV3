@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.6.0"
+#define FIRMWARE_VERSION "3.7.0"
 
 // =====================================================================
 //  Board Profile
@@ -72,8 +72,11 @@ enum OutputType {
   #define OUTPUT1_PIN             12
   #define OUTPUT0_PHYSICAL_PORT   0
   #define OUTPUT1_PHYSICAL_PORT   1
-  #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SMALL_GRID
-  #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
+  #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SMALL_GRID   // Badge (8×4 grid)
+  #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP   // Collar (72 px strip)
+  #define BOARD_BATTERY_MONITOR   1
+  #define BOARD_BATTERY_PIN       A13
+  #define BOARD_BATTERY_FEATURES  "RIOHB"
 #elif defined(PRIMUS_PROFILE_V2)
   #define BOARD_PROFILE_ID        "v2_feather"
   #define BOARD_PROFILE_CODE      "v2"
@@ -104,6 +107,13 @@ enum OutputType {
   #define OUTPUT1_PHYSICAL_PORT   7
   #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SHORT_STRIP
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
+#endif
+
+#ifndef BOARD_BATTERY_MONITOR
+  #define BOARD_BATTERY_MONITOR   0
+#endif
+#ifndef BOARD_BATTERY_FEATURES
+  #define BOARD_BATTERY_FEATURES  "RIOH"
 #endif
 
 #ifndef BOARD_HAS_STATUS_LED
@@ -267,7 +277,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 6
+#define FIRMWARE_VERSION_L 7
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 
@@ -283,6 +293,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 //  Timing Constants (ms)
 // =====================================================================
 #define FPS_INTERVAL           1000   // Report FPS every 1 s
+#define BATTERY_REPORT_INTERVAL_MS 5000 // Report battery every 5 s
 #define CONNECTION_TIMEOUT     10000  // Reconnect if no packets for 10 s
 #define RECONNECT_INTERVAL     5000   // Retry WiFi every 5 s
 #define FRAME_ASSEMBLY_TIMEOUT 5      // ms to wait for remaining universes

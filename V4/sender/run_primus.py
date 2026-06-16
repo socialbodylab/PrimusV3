@@ -21,7 +21,7 @@ import threading
 import time
 import webbrowser
 
-from artnet import FpsListener
+from artnet import PrimusTelemetryListener, FPS_LISTEN_PORT
 from state import ControllerState, OUTPUT_TYPES, animation_loop, set_current_thread_qos
 from controller import CueList
 from mixer import load_look, compute_look_frame
@@ -100,8 +100,12 @@ def _kill_existing():
     script_patterns = {
         os.path.join(sender_dir, "run.py"),
         os.path.join(sender_dir, "run_primus.py"),
+        os.path.join(sender_dir, "run_radius.py"),
         "V4/sender/run.py",
+        "V4/sender/run_primus.py",
+        "V4/sender/run_radius.py",
         "PrimusCentral",
+        "RadiusCentral",
     }
     try:
         out = subprocess.check_output(
@@ -134,6 +138,26 @@ def _kill_existing():
                 time.sleep(0.1)
             except ProcessLookupError:
                 break
+    if killed:
+        _wait_for_telemetry_port()
+
+
+def _wait_for_telemetry_port(timeout=3.0):
+    """Wait until UDP 6455 is free for PrimusTelemetryListener."""
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("0.0.0.0", FPS_LISTEN_PORT))
+            probe.close()
+            return True
+        except OSError:
+            probe.close()
+            time.sleep(0.1)
+    print(f"WARNING: telemetry port {FPS_LISTEN_PORT} still busy after replacing prior sender.")
+    return False
 
 
 def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabled=False, osc_service=None):
@@ -633,7 +657,7 @@ def main():
     _MACOS_ACTIVITY_TOKEN = _begin_macos_low_latency_activity()
     _kill_existing()
 
-    fps_listener = FpsListener()
+    fps_listener = PrimusTelemetryListener()
     fps_thread = threading.Thread(target=fps_listener.run, daemon=True)
     fps_thread.start()
 

@@ -41,7 +41,7 @@ def _normalize_device_ips(values):
 def _with_look_defaults(look):
     if not isinstance(look, dict):
         return look
-    look["brightness"] = normalize_brightness(look.get("brightness", 1.0))
+    look["brightness"] = normalize_brightness(look.get("brightness", 0.4))
     for track in look.get("tracks", []) or []:
         if not isinstance(track, dict):
             continue
@@ -75,7 +75,7 @@ def new_look(name, outputs, description=""):
         "tracks": [{"port": o["port"], "segments": []} for o in outputs],
         "playback": "loop",
         "total_duration": 10.0,
-        "brightness": 1.0,
+        "brightness": 0.4,
         "created": datetime.now(timezone.utc).isoformat(),
         "modified": datetime.now(timezone.utc).isoformat(),
     }
@@ -181,7 +181,7 @@ def _compute_segment_pixels(segment, local_t, pixel_count, grid, dt=0.033,
     brightness = (
         segment.get("brightness_override")
         if segment.get("brightness_override") is not None
-        else clip.get("brightness", 1.0)
+        else clip.get("brightness", 0.4)
     )
     clip_duration = clip.get("duration", 5.0)
     scaled_t = local_t * speed
@@ -242,7 +242,7 @@ def compute_look_frame(look, t, fps=30, clip_cache=None, state_cache=None):
     total_duration = look.get("total_duration", 10.0)
     playback = look.get("playback", "loop")
     global_speed = look.get("speed", 1.0)
-    look_brightness = normalize_brightness(look.get("brightness", 1.0))
+    look_brightness = normalize_brightness(look.get("brightness", 0.4))
     scaled_t = t * global_speed
     local_t = _wrap_time(scaled_t, total_duration, playback)
     # Clamp to prevent segment boundary exclusion at boomerang peak

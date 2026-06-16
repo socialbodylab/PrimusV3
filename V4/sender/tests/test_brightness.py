@@ -22,12 +22,12 @@ class BrightnessTests(unittest.TestCase):
         self.assertEqual(scale_pixels([(300, 20, 10)], 2), [(255, 20, 10)])
 
     def test_normalize_brightness_defaults_and_clamps(self):
-        self.assertEqual(normalize_brightness(None), 1.0)
+        self.assertEqual(normalize_brightness(None), 0.4)
         self.assertEqual(normalize_brightness("bad", default=0.25), 0.25)
         self.assertEqual(normalize_brightness(2.0), 1.0)
         self.assertEqual(normalize_brightness(-0.5), 0.0)
 
-    def test_clip_preview_defaults_to_full_brightness(self):
+    def test_clip_preview_defaults_brightness(self):
         clip = {
             "output_type": "short_strip",
             "effect": "solid",
@@ -37,7 +37,7 @@ class BrightnessTests(unittest.TestCase):
 
         preview = compute_clip_preview(clip, 0.0)
 
-        self.assertEqual(preview["pixels"][0], [100, 50, 24])
+        self.assertEqual(preview["pixels"][0], [40, 20, 9])
 
     def test_clip_preview_applies_clip_brightness(self):
         clip = {
@@ -89,6 +89,7 @@ class BrightnessTests(unittest.TestCase):
 
     def test_mixer_segment_brightness_override_replaces_clip_brightness(self):
         look = self.make_look(brightness_override=0.25)
+        look["brightness"] = 1.0
         clip_cache = {
             "clip": {
                 "effect": "solid",

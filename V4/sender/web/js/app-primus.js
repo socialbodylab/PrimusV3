@@ -262,40 +262,12 @@ document.addEventListener("alpine:init", () => {
             if (!this.runtime?.ui_lifecycle) return;
 
             const heartbeat = () => {
-                // #region agent log
-                fetch('http://127.0.0.1:7695/ingest/abbd0204-dcc0-4721-9f61-f71dfdc607c5', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f67d00' },
-                    body: JSON.stringify({
-                        sessionId: 'f67d00',
-                        location: 'app.js:heartbeat',
-                        message: 'ui heartbeat sent',
-                        data: { hidden: document.hidden },
-                        timestamp: Date.now(),
-                        hypothesisId: 'H5',
-                    }),
-                }).catch(() => {});
-                // #endregion
                 api("POST", "/api/ui/heartbeat", {}).catch(() => {});
             };
             heartbeat();
             this._lifecycleHeartbeat = setInterval(heartbeat, 2000);
 
             document.addEventListener('visibilitychange', () => {
-                // #region agent log
-                fetch('http://127.0.0.1:7695/ingest/abbd0204-dcc0-4721-9f61-f71dfdc607c5', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f67d00' },
-                    body: JSON.stringify({
-                        sessionId: 'f67d00',
-                        location: 'app.js:visibilitychange',
-                        message: 'visibility changed',
-                        data: { hidden: document.hidden },
-                        timestamp: Date.now(),
-                        hypothesisId: 'H5',
-                    }),
-                }).catch(() => {});
-                // #endregion
                 if (!document.hidden) heartbeat();
             });
 
@@ -555,6 +527,29 @@ document.addEventListener("alpine:init", () => {
             return !!dev?.capabilities?.ip_config;
         },
 
+        canConfigureOutputs(dev) {
+            return !!dev?.capabilities?.output_config;
+        },
+
+        deviceOutputTypes() {
+            return Alpine.store("app").outputTypes;
+        },
+
+        deviceOutputTypesFor(dev, oi) {
+            const types = [...this.deviceOutputTypes()];
+            const current = dev?.outputs?.[oi]?.type;
+            if (current && !types.includes(current)) {
+                types.push(current);
+            }
+            return types;
+        },
+
+        outputConfigHint(dev) {
+            return this.canConfigureOutputs(dev)
+                ? 'Configure physical output types on this receiver'
+                : 'Remote output configuration is not advertised for this node';
+        },
+
         hardwareLabel(entity) {
             const label = entity?.hardware_label || entity?.hardware_profile || 'Unknown hardware';
             return String(label).replace('V3.1', 'V3');
@@ -567,7 +562,60 @@ document.addEventListener("alpine:init", () => {
                 { key: 'hello', label: 'Hello', supported: !!caps.hello },
                 { key: 'ip_config', label: 'IP', supported: !!caps.ip_config },
                 { key: 'output_config', label: 'Outputs', supported: !!caps.output_config },
+                { key: 'battery', label: 'Battery', supported: !!caps.battery },
             ];
+        },
+
+        showBattery(dev) {
+            return !!dev?.capabilities?.battery && !!dev?.connected;
+        },
+
+        receiverFpsLabel(dev) {
+            if (dev?.receiver_fps != null) {
+                return `${dev.receiver_fps} fps`;
+            }
+            if (dev?.connected) {
+                return '-- fps';
+            }
+            return '';
+        },
+
+        firmwareLabel(dev) {
+            const version = dev?.live_firmware_version || dev?.firmware_version;
+            if (!version) return '—';
+            return version.startsWith('v') ? version : `v${version}`;
+        },
+
+        batteryLabel(dev) {
+            const mode = dev?.battery_power_mode;
+            if (mode === 'switch_off') return 'Off';
+            if (mode === 'fault') return '—';
+            if (mode === 'unavailable' || mode == null) return '…';
+            const pct = dev?.battery_pct;
+            if (pct == null) return '…';
+            return `${pct}%`;
+        },
+
+        batteryClass(dev) {
+            const mode = dev?.battery_power_mode;
+            if (mode === 'switch_off' || mode === 'fault') {
+                return 'device-battery device-battery-alert';
+            }
+            if (mode == null) return 'device-battery device-battery-pending';
+            const pct = dev?.battery_pct;
+            if (pct == null) return 'device-battery device-battery-pending';
+            if (pct <= 15) return 'device-battery device-battery-critical';
+            if (pct <= 30) return 'device-battery device-battery-warn';
+            return 'device-battery device-battery-ok';
+        },
+
+        batteryTitle(dev) {
+            if (dev?.battery_warning) return dev.battery_warning;
+            const pct = dev?.battery_pct;
+            const mv = dev?.battery_mv;
+            if (pct == null || mv == null) return 'Waiting for battery telemetry…';
+            const volts = (mv / 1000).toFixed(2);
+            return `${pct}% · ${volts} V`;
         },
 
         capabilityStatusLabel(entity) {
@@ -707,6 +755,24 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").requestLookPreviewFromHello(di);
             } catch (e) {
                 Alpine.store("app").showApiError('Hello failed', e);
+            }
+        },
+
+        async setDeviceOutputType(di, oi, outputType) {
+            const dev = this.devices[di];
+            const priorType = dev?.outputs?.[oi]?.type;
+            if (!priorType || priorType === outputType) return;
+            try {
+                await api("POST", "/api/set_device_output", {
+                    device: di,
+                    output: oi,
+                    output_type: outputType,
+                });
+                Alpine.store("app").showNotice('Output configuration updated', 'success', 2200);
+            } catch (e) {
+                Alpine.store("app").showApiError('Output update failed', e);
+            } finally {
+                await Alpine.store("app").fetchState();
             }
         },
 

@@ -574,6 +574,50 @@ body {
     font-family: monospace;
 }
 
+.device-stats {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+}
+
+.device-battery {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: monospace;
+    line-height: 1;
+}
+
+.device-battery-ok {
+    color: var(--success);
+}
+
+.device-battery-warn {
+    color: var(--warning);
+}
+
+.device-battery-critical {
+    color: var(--danger);
+}
+
+.device-battery-alert {
+    color: var(--warning);
+}
+
+.device-battery-pending {
+    color: var(--text-muted);
+}
+
+.device-fw-version {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px dashed var(--border);
+}
+
 .device-profile {
     font-size: 12px;
     font-weight: 600;
@@ -587,7 +631,7 @@ body {
 }
 
 .device-transport-error {
-    color: var(--danger);
+    color: var(--warning);
     font-size: 11px;
     font-weight: 600;
 }
@@ -656,9 +700,36 @@ body {
 
 .device-outputs {
     display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.device-output-row {
+    display: flex;
+    align-items: center;
     gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 4px;
+    min-width: 0;
+}
+
+.device-output-label {
+    flex: 0 0 22px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    font-family: monospace;
+}
+
+.device-output-select {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 4px;
+    font-size: 11px;
+}
+
+.device-output-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .device-ip-config {
@@ -711,21 +782,6 @@ body {
 .sidebar-note-value {
     font-size: 12px;
     color: var(--text-secondary);
-}
-
-.output-badge {
-    font-size: 11px;
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-}
-
-.device-outputs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
 }
 
 .device-group-card {

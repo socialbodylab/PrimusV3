@@ -2,6 +2,7 @@
 state.py — Output type tables, controller state, animation tick, persistence.
 """
 
+import copy
 import json
 import os
 import sys
@@ -60,6 +61,7 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "hello": False,
     "ip_config": False,
     "output_config": False,
+    "battery": False,
 }
 CONTROL_CAPABILITY_LABELS = {
     "rename": "remote rename",
@@ -68,6 +70,7 @@ CONTROL_CAPABILITY_LABELS = {
     "output_config": "remote output configuration",
 }
 _DEVICE_FILTER_UNCHANGED = object()
+TRANSPORT_FAIL_STREAK_LIMIT = 90  # ~3 s at 30 FPS before surfacing a send warning
 
 # ======================================================================
 #  DEFAULTS
@@ -76,7 +79,7 @@ _DEVICE_FILTER_UNCHANGED = object()
 DEFAULT_FPS = 30
 DEFAULT_EFFECT = "pulse"
 DEFAULT_SPEED = 1.0
-DEFAULT_BRIGHTNESS = 1.0
+DEFAULT_BRIGHTNESS = 0.4
 DEFAULT_PLAYBACK = "loop"
 LOW_LATENCY_SLEEP_SLICE = 0.004
 LOW_LATENCY_SPIN_SECONDS = 0.001
@@ -256,6 +259,7 @@ def _normalize_device_capabilities(capabilities=None):
     out["hello"] = bool(out["hello"])
     out["ip_config"] = bool(out["ip_config"])
     out["output_config"] = bool(out["output_config"])
+    out["battery"] = bool(out.get("battery"))
     return out
 
 
@@ -805,6 +809,11 @@ class ControllerState:
                     "hardware_profile": dev.get("hardware_profile", "unknown"),
                     "hardware_label": dev.get("hardware_label", "Unknown hardware"),
                     "firmware_version": dev.get("firmware_version"),
+                    "live_firmware_version": None,
+                    "battery_mv": None,
+                    "battery_pct": None,
+                    "battery_power_mode": None,
+                    "battery_warning": None,
                     "ip_mode": dev.get("ip_mode", "unknown"),
                     "static_ip": dev.get("static_ip"),
                     "gateway": dev.get("gateway"),
@@ -812,11 +821,22 @@ class ControllerState:
                     "ip_config_pending": dev.get("ip_config_pending"),
                     "connected": dev["connected"],
                     "transport_error": dev.get("transport_error"),
-                    "receiver_fps": rx["fps"] if rx else None,
-                    "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
+                    "receiver_fps": rx.get("fps") if rx else None,
+                    "receiver_pkt_rate": rx.get("pkt_rate") if rx else None,
                     "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
                     "outputs": [],
                 }
+                if rx:
+                    if "live_firmware_version" in rx:
+                        d["live_firmware_version"] = rx.get("live_firmware_version")
+                    if "battery_mv" in rx:
+                        d["battery_mv"] = rx.get("battery_mv")
+                    if "battery_pct" in rx:
+                        d["battery_pct"] = rx.get("battery_pct")
+                    if "battery_power_mode" in rx:
+                        d["battery_power_mode"] = rx.get("battery_power_mode")
+                    if "battery_warning" in rx:
+                        d["battery_warning"] = rx.get("battery_warning")
                 for o in dev["outputs"]:
                     d["outputs"].append({
                         "name": o["name"],
@@ -872,9 +892,6 @@ class ControllerState:
                     if new_type in OUTPUT_TYPES:
                         _apply_type_to_look_output(lo, new_type)
                         _save_output_types([o["type"] for o in self.active_look["outputs"]])
-                        for dev in self.devices:
-                            if dev["sender"].connected:
-                                config_targets.append(dev)
                 if "effect" in data:
                     lo["effect"] = str(data["effect"])
                     lo["led_state"] = []
@@ -915,15 +932,29 @@ class ControllerState:
             return f"{message} (errno {error_number})"
         return message
 
-    def _mark_transport_error_unlocked(self, dev, error):
+    def _mark_transport_error_unlocked(self, dev, error, disconnect=False):
         message = self._transport_error_text(error)
         dev["transport_error"] = message
-        dev["connected"] = False
-        dev["sender"].disconnect()
-        print(f"Transport error for {dev['name']} ({dev['ip']}): {message}")
+        if disconnect:
+            dev["connected"] = False
+            dev["sender"].disconnect()
+            dev["send_fail_streak"] = 0
+            print(f"Transport error for {dev['name']} ({dev['ip']}): {message}")
+
+    def _record_device_send_result_unlocked(self, dev, ok):
+        if ok:
+            dev["send_fail_streak"] = 0
+            dev["transport_error"] = None
+            return
+        streak = int(dev.get("send_fail_streak") or 0) + 1
+        dev["send_fail_streak"] = streak
+        if streak >= TRANSPORT_FAIL_STREAK_LIMIT:
+            last_error = dev["sender"].last_error or "UDP send failed"
+            dev["transport_error"] = last_error
 
     def _clear_transport_error_unlocked(self, dev):
         dev["transport_error"] = None
+        dev["send_fail_streak"] = 0
 
     def _ensure_sender_connected_unlocked(self, dev):
         dev["sender"].ip = dev["ip"]
@@ -933,37 +964,87 @@ class ControllerState:
             try:
                 dev["sender"].connect()
             except OSError as error:
-                self._mark_transport_error_unlocked(dev, error)
+                self._mark_transport_error_unlocked(dev, error, disconnect=True)
                 return False
         dev["connected"] = True
         self._clear_transport_error_unlocked(dev)
         return True
 
+    def _apply_type_to_device_output_unlocked(self, dev_output, new_type):
+        typedef = OUTPUT_TYPES.get(new_type)
+        if typedef is None:
+            raise ValueError(f"Unknown output type: {new_type!r}")
+        dev_output["type"] = new_type
+        dev_output["count"] = typedef["pixels"]
+        dev_output["layout"] = typedef["layout"]
+        dev_output["grid"] = (
+            typedef.get("grid_size") if typedef["layout"] == "grid" else None
+        )
+        is_grid = typedef["layout"] == "grid"
+        if is_grid:
+            if dev_output.get("grid_order") not in GRID_ORDERS:
+                dev_output["grid_order"] = "serpentine"
+            if dev_output.get("grid_rotation") not in GRID_ROTATIONS:
+                dev_output["grid_rotation"] = 0
+        else:
+            dev_output["grid_order"] = "progressive"
+            dev_output["grid_rotation"] = 0
+
     def _send_output_config(self, dev):
         caps = _normalize_device_capabilities(dev.get("capabilities"))
         if not caps.get("output_config"):
-            return False
+            return False, "output configuration is not advertised for this node"
 
-        types = [lo["type"] for lo in self.active_look["outputs"]]
+        types = [o["type"] for o in dev.get("outputs", [])]
+        if not types:
+            return False, "device has no outputs to configure"
         type_to_id = {name: i for i, name in enumerate(LOOK_OUTPUT_TYPES)}
         try:
-            send_output_config(dev["ip"], types, type_to_id, source_ip=self.artnet_source_ip)
+            send_output_config(
+                dev["ip"], types, type_to_id, source_ip=self.artnet_source_ip)
         except OSError as error:
-            self._mark_transport_error_unlocked(dev, error)
-            return False
-        # Sync local device output records with the Look output types
-        for oi, lo in enumerate(self.active_look["outputs"]):
-            if oi < len(dev["outputs"]):
-                typedef = OUTPUT_TYPES.get(lo["type"])
-                if typedef:
-                    dev["outputs"][oi]["type"] = lo["type"]
-                    dev["outputs"][oi]["count"] = typedef["pixels"]
-                    dev["outputs"][oi]["grid"] = (
-                        typedef.get("grid_size")
-                        if typedef["layout"] == "grid" else None
-                    )
-        self._clear_transport_error_unlocked(dev)
-        return True
+            return False, self._transport_error_text(error)
+        for o in dev.get("outputs", []):
+            typedef = OUTPUT_TYPES.get(o.get("type"))
+            if typedef:
+                o["count"] = typedef["pixels"]
+                o["layout"] = typedef["layout"]
+                o["grid"] = (
+                    typedef.get("grid_size") if typedef["layout"] == "grid" else None
+                )
+        return True, None
+
+    def set_device_output_type(self, di, oi, output_type):
+        with self.lock:
+            status = self._device_capability_status_unlocked(di, "output_config")
+            if not status["ok"]:
+                return status
+            dev = self.devices[di]
+            if not (0 <= oi < len(dev.get("outputs", []))):
+                return {"ok": False, "error": "invalid output index"}
+            if output_type not in OUTPUT_TYPES:
+                return {"ok": False, "error": f"unknown output type: {output_type!r}"}
+            prior = copy.deepcopy(dev["outputs"][oi])
+            try:
+                self._apply_type_to_device_output_unlocked(dev["outputs"][oi], output_type)
+            except ValueError as error:
+                return {"ok": False, "error": str(error)}
+            if dev["sender"].connected:
+                if not self._ensure_sender_connected_unlocked(dev):
+                    dev["outputs"][oi] = prior
+                    return {
+                        "ok": False,
+                        "error": dev.get("transport_error") or "sender connection failed",
+                    }
+                config_ok, config_error = self._send_output_config(dev)
+                if not config_ok:
+                    dev["outputs"][oi] = prior
+                    return {
+                        "ok": False,
+                        "error": config_error or "output configuration failed",
+                    }
+            _save_devices(self.devices)
+            return {"ok": True}
 
     # ------------------------------------------------------------------
     #  Device management
@@ -977,12 +1058,16 @@ class ControllerState:
                     "ok": False,
                     "error": dev.get("transport_error") or "sender connection failed",
                 }
-            if self._send_output_config(dev):
-                return {"ok": True}
-            return {
-                "ok": False,
-                "error": dev.get("transport_error") or "output configuration failed",
-            }
+            config_ok, config_error = self._send_output_config(dev)
+            if not config_ok:
+                return {
+                    "ok": False,
+                    "error": config_error or "output configuration failed",
+                }
+            info = [(o["universe"], o["count"]) for o in dev["outputs"]]
+            dev["sender"].blackout(info)
+            self._clear_transport_error_unlocked(dev)
+            return {"ok": True}
 
     def disconnect(self, di):
         with self.lock:
@@ -1030,6 +1115,7 @@ class ControllerState:
                 "connected": False,
                 "sender": ArtNetSender(node_info["ip"], source_ip=self.artnet_source_ip),
                 "transport_error": None,
+                "send_fail_streak": 0,
                 "capabilities": capabilities,
                 "hardware_profile": node_info.get(
                     "hardware_profile", capabilities.get("hardware_profile", "unknown")),
@@ -1264,9 +1350,11 @@ class ControllerState:
                 ok = self._ensure_sender_connected_unlocked(dev)
                 if ok:
                     caps = _normalize_device_capabilities(dev.get("capabilities"))
-                    config_ok = self._send_output_config(dev)
+                    config_ok, config_error = self._send_output_config(dev)
                     if caps.get("output_config"):
                         ok = config_ok
+                        if not ok and config_error:
+                            dev["transport_error"] = config_error
                 results.append({
                     "device_index": idx,
                     "ok": ok,
@@ -1340,8 +1428,8 @@ class ControllerState:
             return True
         with self.lock:
             if 0 <= di < len(self.devices) and self.devices[di]["sender"] is sender:
-                self._mark_transport_error_unlocked(
-                    self.devices[di], sender.last_error or OSError("UDP send failed"))
+                self._record_device_send_result_unlocked(
+                    self.devices[di], False)
         return False
 
     # ------------------------------------------------------------------
@@ -1579,6 +1667,7 @@ class ControllerState:
             # Send to connected devices
             dev_filter = self._mixer_preview_device_filter
             ctrl_ips = self._controller_device_ips if self.playback_source == self.SOURCE_CONTROLLER else None
+            devices_sent = set()
             for di, dev in enumerate(self.devices):
                 if not dev.get("connected"):
                     continue
@@ -1617,6 +1706,7 @@ class ControllerState:
                         for r, g, b in send_pixels:
                             buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
                         send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
+                        devices_sent.add(di)
                     continue
                 for oi, o in enumerate(dev["outputs"]):
                     if oi >= len(self.active_look["outputs"]):
@@ -1638,14 +1728,38 @@ class ControllerState:
                     for r, g, b in send_pixels:
                         buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
                     send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
+                    devices_sent.add(di)
+
+            # Keepalive blackout so receivers learn sender IP and report telemetry
+            for di, dev in enumerate(self.devices):
+                if di in devices_sent:
+                    continue
+                if not dev.get("connected") or not dev["sender"].connected:
+                    continue
+                if dev_filter is not None and di not in dev_filter:
+                    continue
+                if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
+                    continue
+                for o in dev["outputs"]:
+                    count = o.get("count") or 0
+                    if count <= 0:
+                        continue
+                    send_queue.append(
+                        (di, dev["sender"], o["universe"], bytes(count * 3)))
+                    devices_sent.add(di)
         lock_released = time.perf_counter()
 
         failed_indices = set()
         successful_indices = set()
+        device_send_ok = {}
         send_start = time.perf_counter()
         for di, sender, universe, data in send_queue:
             one_send_start = time.perf_counter()
-            if sender.send_output(universe, data):
+            ok = sender.send_output(universe, data)
+            if di not in device_send_ok:
+                device_send_ok[di] = True
+            device_send_ok[di] = device_send_ok[di] and ok
+            if ok:
                 successful_indices.add(di)
             else:
                 failed_indices.add(di)
@@ -1663,16 +1777,13 @@ class ControllerState:
             if sid not in seen:
                 seen.add(sid)
                 sender.advance_sequence()
-        if failed_indices or successful_indices:
+        if device_send_ok:
             with self.lock:
-                for di in failed_indices:
+                for di, all_ok in device_send_ok.items():
                     if 0 <= di < len(self.devices):
                         dev = self.devices[di]
-                        self._mark_transport_error_unlocked(
-                            dev, dev["sender"].last_error or OSError("UDP send failed"))
-                for di in successful_indices - failed_indices:
-                    if 0 <= di < len(self.devices):
-                        self._clear_transport_error_unlocked(self.devices[di])
+                        if dev.get("connected"):
+                            self._record_device_send_result_unlocked(dev, all_ok)
         self.performance.observe_many((
             ("tick_lock_wait_ms", (lock_acquired - lock_start) * 1000.0),
             ("tick_lock_held_ms", (lock_released - lock_acquired) * 1000.0),

@@ -27,6 +27,9 @@
 
 #include "display.h"
 #include "buttons.h"
+#if BOARD_BATTERY_MONITOR
+#include "battery.h"
+#endif
 
 // =====================================================================
 //  Globals
@@ -547,7 +550,7 @@ void sendArtPollReply(IPAddress dest) {
   }
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|F:RIOH");
+                          "|F:%s", BOARD_BATTERY_FEATURES);
   }
   strncpy((char*)&reply[108], reportBuf, 63);
 
@@ -1148,9 +1151,9 @@ void loop() {
     int bytesRead = udp.read(udpBuf, pktSize);
     if (bytesRead > 0) {
       IPAddress remoteAddr = udp.remoteIP();
-      // Capture sender IP for FPS back-channel
-      if (!senderKnown) {
-        senderIP    = remoteAddr;
+      // Track sender IP for UDP 6455 telemetry (ignore broadcast/multicast)
+      if (remoteAddr[0] != 0 && remoteAddr[0] < 224) {
+        senderIP = remoteAddr;
         senderKnown = true;
       }
       processArtNetPacket(udpBuf, bytesRead, remoteAddr);
@@ -1183,6 +1186,10 @@ void loop() {
 
   // ── Output idle detection ────────────────────────────────────────
   checkOutputTimeouts();
+
+#if BOARD_BATTERY_MONITOR
+  batteryTelemetryTick(udpFps, senderIP, senderKnown, wifiConnected);
+#endif
 
   // ── FPS reporting (once per second) ──────────────────────────────
   if (now - lastFpsTime >= FPS_INTERVAL) {

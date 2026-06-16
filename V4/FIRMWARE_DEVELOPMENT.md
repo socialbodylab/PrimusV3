@@ -10,9 +10,24 @@ Canonical firmware for **both** Primus LED receivers and Radius audio receivers 
 | `v2` | ESP32 Feather (2025 Make) | `./upload.sh --board v2` |
 | `v3` | Reverse TFT Feather + NeoPXL8 (2026 PCB) | `./upload.sh --board v3` |
 
-Discovery capability tag: `PV3CAP1|B:v1|IP:D|F:RIOH` (feature flags vary by profile).
+Discovery capability tag: `PV3CAP1|B:v1|IP:D|F:RIOH` (V1 adds `B` in feature flags: `F:RIOHB`).
 
-Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtIPConfig (`0x8200`), FPS telemetry on UDP 6455 (`PFP`).
+Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtIPConfig (`0x8200`), UDP 6455 back-channel (`PFP` FPS, `PBT` battery on V1).
+
+### V1 battery telemetry (`PBT`)
+
+V1 Huzzah32 boards read LiPo voltage on **A13** (GPIO35, onboard VBAT divider). The HUZZAH32 has no VBUS sense pin, so firmware reports **voltage and percent only** (`power_mode` 0 when valid). Modes 3–5 cover switch-off, fault, and unavailable readings. Reports every **5 s** on UDP 6455.
+
+| Offset | Field | Description |
+|--------|-------|-------------|
+| 0–2 | `'P' 'B' 'T'` | Magic |
+| 3 | `power_mode` | 0=battery, 1=charging, 2=plugged, 3=switch_off, 4=fault, 5=unavailable |
+| 4–5 | `battery_mv` | uint16 BE, full pack millivolts |
+| 6 | `battery_pct` | uint8 0–100 (255 = N/A) |
+| 7 | `fw_minor` | ArtPollReply minor byte |
+| 8 | `fw_major` | ArtPollReply major byte |
+
+Sender: `PrimusTelemetryListener` in [`sender/artnet.py`](sender/artnet.py) merges `PFP` + `PBT` per device IP.
 
 ```bash
 ./V4/Arduino/upload.sh --board v3 --compile
