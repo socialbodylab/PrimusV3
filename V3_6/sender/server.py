@@ -8,6 +8,7 @@ import re
 import mimetypes
 import threading
 import time
+import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import unquote
 
@@ -34,6 +35,9 @@ from state import OUTPUT_TYPES, ControllerState
 
 _WEB_DIR = web_dir()
 _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+_sync_lock = threading.Lock()
+_sync_job   = None
 
 
 def _safe_id(value):
@@ -221,6 +225,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(500, "application/json",
                               json.dumps({"error": str(e)}).encode())
             return
+        if path == "/api/audio_sync/status":
+            with _sync_lock:
+                job = dict(_sync_job) if _sync_job else None
+                if job and "items" in job:
+                    job = dict(job)
+                    job["items"] = list(job["items"])
+            self._json_response(job or {"status": "idle"})
+            return
+        if path == "/api/project_audio":
+            self._json_response({"files": _audio_cues_mod.list_project_audio()})
+            return
         if path.startswith("/api/"):
             self._json_error(404, "not found")
             return
@@ -242,6 +257,12 @@ class Handler(BaseHTTPRequestHandler):
         # Binary uploads: handle before _read_json() consumes the body
         if self.path.split("?")[0] == "/api/audio/upload":
             self._handle_audio_upload()
+            return
+        if path == "/api/project_audio":
+            self._handle_project_audio_upload()
+            return
+        if path == "/api/audio_cues/import":
+            self._handle_audio_cues_import()
             return
 
         data = self._read_json()
@@ -783,6 +804,32 @@ class Handler(BaseHTTPRequestHandler):
                 results = self.controller_state.fire_audio_cue(cue)
                 self._json_response({"results": results})
 
+        elif path == "/api/audio_sync":
+            global _sync_job
+            with _sync_lock:
+                if _sync_job and _sync_job.get("status") == "running":
+                    self._json_response({
+                        "error": "sync already running",
+                        "job_id": _sync_job["job_id"],
+                    })
+                    return
+                new_job = {
+                    "job_id": str(uuid.uuid4())[:8],
+                    "status": "planning",
+                    "items": [],
+                }
+                _sync_job = new_job
+
+            with self.audio_cues_lock:
+                cues_snapshot = dict(self.audio_cues_data)
+
+            threading.Thread(
+                target=_run_sync_job,
+                args=(new_job, self.controller_state, cues_snapshot),
+                daemon=True,
+            ).start()
+            self._json_response({"job_id": new_job["job_id"]})
+
         elif path == "/api/netlog/clear":
             netlog.clear()
             self._ok()
@@ -818,6 +865,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.controller_state.delete_device_group(gid)
             self._ok()
+        elif path.startswith("/api/project_audio/"):
+            filename = unquote(path.split("/api/project_audio/")[1])
+            if not filename or "/" in filename or "\x00" in filename:
+                self._respond(400, "application/json", b'{"error":"invalid filename"}')
+                return
+            ok = _audio_cues_mod.delete_project_audio(filename)
+            if ok:
+                self._ok()
+            else:
+                self._respond(404, "application/json", b'{"error":"not found"}')
         else:
             self._respond(404, "application/json", b'{"error":"not found"}')
 
@@ -850,6 +907,50 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._respond(500, "application/json",
                           json.dumps({"error": str(e)}).encode())
+
+    def _handle_project_audio_upload(self):
+        """POST /api/project_audio  (binary WAV body, ?filename=<name>)"""
+        params = self._query_params()
+        filename = unquote(params.get("filename", "")).strip()
+        if not filename:
+            self._respond(400, "application/json", b'{"error":"filename required"}')
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._respond(400, "application/json", b'{"error":"empty upload"}')
+            return
+        file_data = self.rfile.read(length)
+        if len(file_data) < 12 or file_data[:4] != b'RIFF' or file_data[8:12] != b'WAVE':
+            self._respond(400, "application/json",
+                          b'{"error":"not a WAV file - device requires PCM WAV format"}')
+            return
+        try:
+            saved = _audio_cues_mod.save_project_audio(filename, file_data)
+            self._json_response({"name": saved, "size": len(file_data)})
+        except Exception as e:
+            self._respond(500, "application/json",
+                          json.dumps({"error": str(e)}).encode())
+
+    def _handle_audio_cues_import(self):
+        """POST /api/audio_cues/import  (JSON body — replaces current cue sheet)"""
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._respond(400, "application/json", b'{"error":"empty body"}')
+            return
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            self._respond(400, "application/json", b'{"error":"invalid JSON"}')
+            return
+        if not isinstance(data, dict) or "cues" not in data:
+            self._respond(400, "application/json",
+                          b'{"error":"missing cues key"}')
+            return
+        with self.audio_cues_lock:
+            Handler.audio_cues_data = data
+            _audio_cues_mod.save_audio_cues(data)
+        self._json_response(data)
 
     # ------------------------------------------------------------------
     #  Helpers
@@ -918,10 +1019,161 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _run_sync_job(job, state, cues_data):
+    """Background thread: build sync plan then upload missing files."""
+    try:
+        project_files = {f["name"]: f for f in _audio_cues_mod.list_project_audio()}
+
+        with state.lock:
+            devices_snap = [
+                {
+                    "ip":        d["ip"],
+                    "name":      d["name"],
+                    "is_audio":  d.get("is_audio", False),
+                    "connected": d["sender"].connected,
+                }
+                for d in state.devices
+            ]
+
+        radius_devs = [d for d in devices_snap if d["is_audio"]]
+
+        if not radius_devs:
+            with _sync_lock:
+                job["status"] = "done"
+            return
+
+        with _sync_lock:
+            job["status"] = "running"
+
+        for dev in radius_devs:
+            ip        = dev["ip"]
+            dev_name  = dev["name"]
+            connected = dev["connected"]
+
+            if not connected:
+                with _sync_lock:
+                    job["items"].append({
+                        "device_ip":   ip,
+                        "device_name": dev_name,
+                        "filename":    None,
+                        "bytes_total": 0,
+                        "bytes_sent":  0,
+                        "status":      "skipped",
+                        "error":       "device not connected",
+                    })
+                continue
+
+            # Collect filenames this device needs across all cues
+            needed = set()
+            for cue in cues_data.get("cues", []):
+                action = cue.get("actions", {}).get(ip)
+                if action and action.get("cmd") in ("play", "loop"):
+                    fname = action.get("filename", "").strip()
+                    if fname:
+                        needed.add(fname)
+
+            if not needed:
+                with _sync_lock:
+                    job["items"].append({
+                        "device_ip":   ip,
+                        "device_name": dev_name,
+                        "filename":    None,
+                        "bytes_total": 0,
+                        "bytes_sent":  0,
+                        "status":      "skipped",
+                        "error":       "no files required by cues",
+                    })
+                continue
+
+            # FTP list the device
+            try:
+                entries   = ftp_list_dir(ip, "/")
+                on_device = {e["name"] for e in entries if not e["is_dir"]}
+            except Exception as e:
+                for fname in sorted(needed):
+                    with _sync_lock:
+                        job["items"].append({
+                            "device_ip":   ip,
+                            "device_name": dev_name,
+                            "filename":    fname,
+                            "bytes_total": project_files.get(fname, {}).get("size", 0),
+                            "bytes_sent":  0,
+                            "status":      "error",
+                            "error":       f"FTP list failed: {e}",
+                        })
+                continue
+
+            # Build per-file plan items for this device
+            device_items = []
+            for fname in sorted(needed):
+                if fname in on_device:
+                    continue  # already present
+                item = {
+                    "device_ip":   ip,
+                    "device_name": dev_name,
+                    "filename":    fname,
+                    "bytes_total": project_files.get(fname, {}).get("size", 0),
+                    "bytes_sent":  0,
+                    "status":      "pending",
+                    "error":       None,
+                }
+                if fname not in project_files:
+                    item["status"] = "skipped"
+                    item["error"]  = "not in project library"
+                device_items.append(item)
+
+            with _sync_lock:
+                job["items"].extend(device_items)
+
+            # Upload pending items for this device
+            for item in device_items:
+                if item["status"] != "pending":
+                    continue
+                fname = item["filename"]
+                path  = _audio_cues_mod.get_project_audio_path(fname)
+                if not path:
+                    item["status"] = "error"
+                    item["error"]  = "file missing from project library"
+                    continue
+                try:
+                    with open(path, "rb") as f:
+                        data = f.read()
+                except OSError as e:
+                    item["status"] = "error"
+                    item["error"]  = str(e)
+                    continue
+
+                item["status"]      = "uploading"
+                item["bytes_total"] = len(data)
+                item["bytes_sent"]  = 0
+
+                def _progress(sent, total, _item=item):
+                    _item["bytes_sent"] = sent
+
+                try:
+                    ftp_upload(ip, f"/{fname}", data, progress_callback=_progress)
+                    item["bytes_sent"] = len(data)
+                    item["status"]     = "done"
+                except Exception as e:
+                    item["status"] = "error"
+                    item["error"]  = str(e)
+                    netlog.log("OUT", "ftp_sync",
+                               f"sync failed {fname} → {ip}: {e}")
+
+        with _sync_lock:
+            job["status"] = "done"
+
+    except Exception as e:
+        with _sync_lock:
+            job["status"] = "error"
+            job["error"]  = str(e)
+
+
 def create_server(host, port, controller_state, cue_list, ui_lifecycle_enabled=False, osc_service=None):
     """Create and return an HTTPServer bound to host:port."""
     Handler.controller_state = controller_state
     Handler.cue_list = cue_list
+    Handler.audio_cues_data  = _audio_cues_mod.load_audio_cues()
     server = HTTPServer((host, port), Handler)
     server.controller_state = controller_state
     server.cue_list = cue_list
