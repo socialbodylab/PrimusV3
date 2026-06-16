@@ -23,6 +23,11 @@ import paths
 
 
 BOARD_PROFILES = {"v1", "v2", "v3"}
+PRIMUS_PROFILE_LABELS = {
+    "v1": ("V1", "2022 Original RUR performance. Device Types A/B/C/D/E"),
+    "v2": ("V2", "2025 Make Magazine Device"),
+    "v3": ("V3", "2026 Custom PCB Device"),
+}
 ACTIONS = {"setup_tools", "list_ports", "install", "compile", "upload"}
 PORT_MODES = {"auto", "selected", "all"}
 RUNNING_STATES = {"queued", "running"}
@@ -103,6 +108,24 @@ class FirmwareJob:
 
 def default_upload_script_path():
     return os.path.abspath(paths.resource_path("Arduino", "upload.sh"))
+
+
+def firmware_profiles_json():
+    profiles = []
+    for profile_id in sorted(BOARD_PROFILES):
+        label, detail = PRIMUS_PROFILE_LABELS[profile_id]
+        profiles.append({
+            "id": profile_id,
+            "family": "primus",
+            "label": label,
+            "detail": detail,
+            "script": "upload.sh",
+        })
+    return {
+        "product": "primus",
+        "profiles": profiles,
+        "families": {"primus": profiles, "radius": []},
+    }
 
 
 def redact_text(text, secrets):
@@ -212,6 +235,7 @@ class FirmwareJobManager:
             "tool_status": tool_status,
             "can_install_tools": script_exists and bash_available,
             "source_only": False,
+            **firmware_profiles_json(),
         }
 
     def status(self):

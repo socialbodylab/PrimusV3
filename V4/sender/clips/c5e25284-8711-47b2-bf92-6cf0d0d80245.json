@@ -1,0 +1,25 @@
+{
+  "id": "c5e25284-8711-47b2-bf92-6cf0d0d80245",
+  "name": "Ocean Noise Long",
+  "group": "noise",
+  "output_type": "long_strip",
+  "effect": "noise",
+  "start_color": [
+    0,
+    24,
+    60
+  ],
+  "end_color": [
+    0,
+    190,
+    255
+  ],
+  "speed": 0.55,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 10.0,
+  "created": "2026-05-13T20:00:04+00:00",
+  "modified": "2026-05-13T20:00:04+00:00"
+}

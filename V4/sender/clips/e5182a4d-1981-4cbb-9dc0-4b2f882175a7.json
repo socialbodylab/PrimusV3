@@ -1,0 +1,25 @@
+{
+  "id": "e5182a4d-1981-4cbb-9dc0-4b2f882175a7",
+  "name": "Grid Rainbow",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.304729+00:00",
+  "modified": "2026-04-08T13:57:40.304761+00:00"
+}

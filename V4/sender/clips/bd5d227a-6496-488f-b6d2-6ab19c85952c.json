@@ -1,0 +1,25 @@
+{
+  "id": "bd5d227a-6496-488f-b6d2-6ab19c85952c",
+  "name": "Sapphire Chase",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    80,
+    255
+  ],
+  "speed": 1.1,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.2,
+  "created": "2026-05-08T22:02:11.860412+00:00",
+  "modified": "2026-05-08T22:02:11.860432+00:00"
+}

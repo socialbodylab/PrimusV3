@@ -1,0 +1,25 @@
+{
+  "id": "5e9f9558-d95b-425a-98d0-4695ac07ea5a",
+  "name": "Sunset Chase",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "chase",
+  "start_color": [
+    255,
+    80,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    50
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "end",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.475580+00:00",
+  "modified": "2026-04-08T15:30:31.475593+00:00"
+}

@@ -746,3 +746,63 @@ OUTPUT_TYPES = {
 ```
 
 Pixel counts and byte sizes propagate automatically from these tables — no other code changes needed.
+
+---
+
+## Radius Central (V4) vendor opcodes
+
+Radius Central firmware uses the shared `0x8200` ArtIPConfig opcode from V3.6 Primus receivers, plus additional vendor opcodes:
+
+| Opcode | Name | Purpose |
+|--------|------|---------|
+| `0x8300` | ArtAudioCmd | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue + optional filename and duration |
+| `0x8301` | ArtFtpCmd | start / stop FTP server |
+
+**ArtAudioCmd cmd values:** 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 5=test tone, 6=play cue number (byte 13), 7=loop cue number. Filename is null-terminated ASCII after byte 13; optional uint16 LE duration (seconds) follows the null when non-zero.
+
+Discovery capability tag: `PVRAD1|B:v1|IP:D|F:RA` where `R`=rename, `A`=audio, `F`=FTP.
+
+Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][name:utf8...]`.
+
+### V4 HTTP routes — device audio (SD card)
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/audio/cmd` | play / loop / stop / pause / volume |
+| POST | `/api/audio/files` | Directory listing |
+| POST | `/api/audio/upload?device=N&path=/file.wav` | Binary WAV upload |
+| POST | `/api/audio/rename` | Rename file or folder |
+| POST | `/api/audio/delete` | Delete file or folder |
+| POST | `/api/audio/mkdir` | Create folder |
+| GET | `/api/audio/cue_map?device=N` | Read `/cues.json` from device SD |
+| POST | `/api/audio/cue_map` | Write `/cues.json` to device SD |
+| POST | `/api/hello_device` | Test tone (cmd 5); body `{device, volume?}` |
+
+### V4 HTTP routes — sender cue sheet & library
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/audio_cues` | Load cue sheet |
+| POST | `/api/audio_cues` | Save cue sheet |
+| GET | `/api/audio_cues/export` | Download cue sheet JSON |
+| POST | `/api/audio_cues/import` | Replace cue sheet from JSON body |
+| POST | `/api/audio_cues/fire` | Fire cue by number; returns per-IP results |
+| GET | `/api/project_audio` | List project library WAV files |
+| POST | `/api/project_audio?filename=` | Upload WAV to project library |
+| DELETE | `/api/project_audio/<name>` | Remove file from library |
+
+**Persistence:** `audio_cues.json`, `audio/` folder, `audio/.checksums.json` under the V4 sender data directory (`RADIUSV4_DATA_DIR` or app data).
+
+### V4 HTTP routes — push sync & net log
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/audio_sync` | Start push sync job (library → connected nodes) |
+| GET | `/api/audio_sync/status` | Poll sync job progress |
+| GET | `/api/netlog?since=N` | Network event log entries |
+| POST | `/api/netlog/clear` | Clear log buffer |
+
+Push sync stops playback on all connected nodes, then FTP-uploads cue-referenced WAV files missing from each SD card. Pull sync and conflict resolution are **not** implemented in V4.
+
+Implementation: `V4/sender/artnet.py`, `V4/sender/radius_state.py`, `V4/sender/audio_cues.py`, `V4/sender/netlog.py`, firmware `V4/Arduino/radius_receiver/`. Launch with `python3 V4/sender/run.py`.
+

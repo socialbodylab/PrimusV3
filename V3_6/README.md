@@ -8,6 +8,8 @@ V3.6 adds dynamic Clip, Look, and Timeline segment brightness in the sender. Rec
 
 V3.6 also adds portable Clip and Look sharing bundles. Clips export as standalone JSON bundles, Looks export with their referenced Clips when available, and imports remap IDs as needed so shared files do not overwrite local show content.
 
+> **Firmware consolidation:** New receiver firmware source and upload scripts are canonical under [`../V4/Arduino/`](../V4/Arduino/). This tree retains copies for the current PrimusCentral release line. See [`../V4/ARCHITECTURE.md`](../V4/ARCHITECTURE.md) for the unified backend roadmap.
+
 ## Documentation Map
 
 | Document | Use it for |

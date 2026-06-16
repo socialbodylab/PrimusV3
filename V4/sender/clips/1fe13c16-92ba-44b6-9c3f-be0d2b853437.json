@@ -1,0 +1,25 @@
+{
+  "id": "1fe13c16-92ba-44b6-9c3f-be0d2b853437",
+  "name": "Amber Scan",
+  "group": "Amber Scan",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    180,
+    0
+  ],
+  "end_color": [
+    60,
+    30,
+    0
+  ],
+  "speed": 1.3,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 6,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.673913+00:00",
+  "modified": "2026-04-08T18:59:58.673925+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "c22ff6a2-44c0-4ec9-8419-93d9c0dcafdd",
+  "name": "Cyan Fill",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    255,
+    255
+  ],
+  "speed": 0.8,
+  "playback": "once",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.5,
+  "created": "2026-05-08T22:02:11.866782+00:00",
+  "modified": "2026-05-08T22:02:11.866801+00:00"
+}

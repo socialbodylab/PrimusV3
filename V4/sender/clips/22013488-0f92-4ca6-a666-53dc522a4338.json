@@ -1,0 +1,25 @@
+{
+  "id": "22013488-0f92-4ca6-a666-53dc522a4338",
+  "name": "Blood Moon",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    180,
+    0,
+    0
+  ],
+  "end_color": [
+    60,
+    0,
+    30
+  ],
+  "speed": 0.7,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 7.0,
+  "created": "2026-04-08T15:30:31.478745+00:00",
+  "modified": "2026-04-08T15:30:31.478763+00:00"
+}

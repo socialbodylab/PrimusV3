@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radius Central</title>
+<link rel="stylesheet" href="/css/style.css">
+<script defer src="/js/alpine.min.js"></script>
+<script src="/js/app-radius.js"></script>
+<script src="/js/audio-panel.js"></script>
+<script src="/js/audio-cues.js"></script>
+<script src="/js/cue-map.js"></script>
+<script src="/js/net-log.js"></script>
+<script src="/js/firmware.js"></script>
+<script src="/js/settings.js"></script>
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="navbar-brand">Radius Central</div>
+    <div class="navbar-tabs navbar-tabs-primary">
+        <template x-data x-for="m in ['audio', 'cues', 'cue-map']">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="$store.app.modeLabels[m]"></div>
+        </template>
+    </div>
+    <div class="navbar-tabs navbar-tabs-secondary">
+        <template x-data x-for="m in ['log', 'firmware', 'settings']">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="$store.app.modeLabels[m]"></div>
+        </template>
+    </div>
+    <div class="navbar-status" x-data>
+        <div class="playback-chip"
+             :class="$store.app.audioChipClass()"
+             :title="$store.app.audioChipTitle()">
+            <span class="playback-chip-label">Audio</span>
+            <span class="playback-chip-value" x-text="$store.app.audioChipLabel()"></span>
+        </div>
+        <button class="network-chip"
+                :class="$store.app.networkChipClass()"
+                :title="$store.app.networkChipTitle()"
+                @click="$store.app.setMode('settings')">
+            <span class="network-chip-label">Net</span>
+            <span class="network-chip-value" x-text="$store.app.networkChipLabel()"></span>
+        </button>
+        <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
+        <span x-text="$store.app.connectedDeviceSummary"></span>
+    </div>
+</nav>
+
+<div class="notice-banner" x-data x-show="$store.app.notice" x-cloak>
+    <div class="notice-pill"
+         :class="'notice-' + ($store.app.notice?.level || 'info')">
+        <span class="notice-text" x-text="$store.app.notice?.message"></span>
+        <button class="notice-close" @click="$store.app.clearNotice()">&times;</button>
+    </div>
+</div>
+
+<div class="main-content" x-data x-init="$store.app.init()">
+
+    <div class="sidebar" :class="{ 'sidebar-collapsed': $store.conn.sidebarCollapsed }"
+         x-show="!['firmware', 'settings'].includes($store.app.mode)">
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Devices</span>
+            <button class="btn btn-sm" @click="$store.conn.sidebarCollapsed = !$store.conn.sidebarCollapsed"
+                    x-text="$store.conn.sidebarCollapsed ? 'Show' : 'Hide'"></button>
+        </div>
+
+        <div class="sidebar-body" x-show="!$store.conn.sidebarCollapsed" x-cloak>
+            <div class="sidebar-top-actions">
+                <button class="btn btn-sm btn-primary"
+                        @click="$store.conn.discover()"
+                        :disabled="$store.conn.discovering"
+                        x-text="$store.conn.discovering ? 'Scanning...' : 'Discover Devices'"></button>
+                <div class="sidebar-action-row">
+                    <button class="btn btn-sm" @click="$store.conn.connectAll()">Connect All</button>
+                    <button class="btn btn-sm" @click="$store.conn.disconnectAll()">Disconnect All</button>
+                </div>
+            </div>
+
+        <template x-for="(dev, di) in $store.conn.devices" :key="di">
+            <div class="device-card" :class="{ 'device-connected': dev.connected, 'device-static-ip': dev.ip_mode === 'static' && !dev.ip_config_pending }">
+                <div class="device-header">
+                    <template x-if="$store.conn.renamingDevice !== di">
+                        <span class="device-name" x-text="dev.name"
+                              @click="$store.conn.startRename(di)"
+                              :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(dev) }"
+                              :title="$store.conn.renameHint(dev)"></span>
+                    </template>
+                    <template x-if="$store.conn.renamingDevice === di">
+                        <input class="device-rename-input" type="text" maxlength="17"
+                               x-model="$store.conn.renameValue"
+                               @keydown.enter="$store.conn.finishRename(di)"
+                               @keydown.escape="$store.conn.cancelRename()"
+                               @blur="$store.conn.finishRename(di)"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
+                    <span class="audio-badge" x-show="dev.is_radius" title="Radius audio node">&#9834;</span>
+                </div>
+                <div class="device-meta">
+                    <button class="device-ip-button"
+                            :class="{ active: $store.conn.ipConfigDevice === di }"
+                            :disabled="!$store.conn.canConfigureIp(dev)"
+                            :title="$store.conn.ipConfigHint(dev)"
+                            @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)"
+                            x-text="dev.ip"></button>
+                    <span class="device-network-badge"
+                          :class="$store.conn.networkModeClass(dev)"
+                          :title="$store.conn.networkModeTitle(dev)"
+                          x-text="$store.conn.networkModeLabel(dev)"></span>
+                    <span class="device-profile" x-text="$store.conn.hardwareLabel(dev)"></span>
+                    <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
+                </div>
+                <div class="device-now-playing text-sm text-muted" x-show="dev.current_track">
+                    Now: <span x-text="dev.current_track"></span>
+                </div>
+                <div class="btn-group device-actions device-actions-primary">
+                    <button class="btn btn-sm device-action-main"
+                            :class="{ 'btn-primary': !dev.connected }"
+                            @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
+                            x-text="dev.connected ? 'Disconnect' : 'Connect'"></button>
+                    <button class="btn btn-sm device-action-main" x-show="dev.connected"
+                            @click="api('POST', '/api/hello_device', { device: di, volume: $store.audio.getVolume(di) })">Hello</button>
+                </div>
+                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
+                    <div class="form-group compact">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigIp" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigGateway" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
+                    </div>
+                    <div class="btn-group" style="margin-top:4px">
+                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(di)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(di)">Revert to DHCP</button>
+                    </div>
+                    <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
+                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Radius Central will rescan.</div>
+                </div>
+                <div class="device-footer-actions">
+                    <button class="btn btn-sm btn-danger device-remove-btn" @click="$store.conn.removeDevice(di)">Remove</button>
+                </div>
+            </div>
+        </template>
+
+        <div class="mt-2" style="display:flex;gap:4px">
+            <input type="text" class="input" placeholder="IP address"
+                   x-model="$store.conn.manualIp"
+                   @keydown.enter="$store.conn.addManualIp()"
+                   style="flex:1;font-size:12px;padding:4px 6px">
+            <button class="btn btn-sm"
+                    @click="$store.conn.addManualIp()"
+                    :disabled="!$store.conn.manualIp">Add</button>
+        </div>
+
+        <template x-if="$store.conn.discovered.length > 0">
+            <div class="mt-2">
+                <div class="text-sm text-muted mb-2">Discovered:</div>
+                <template x-for="node in $store.conn.discovered" :key="node.ip">
+                    <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
+                        <div class="device-name" x-text="node.short_name || node.ip"></div>
+                        <div class="device-ip" x-text="node.ip"></div>
+                        <div class="device-ip" x-text="$store.conn.hardwareLabel(node)"></div>
+                        <div class="device-capability-row">
+                            <span class="device-capability-status"
+                                  :class="$store.conn.capabilityStatusClass(node)"
+                                  x-text="$store.conn.capabilityStatusLabel(node)"></span>
+                            <div class="device-capability-pills">
+                                <template x-for="item in $store.conn.capabilityItems(node)" :key="item.key">
+                                    <span class="capability-pill"
+                                          :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
+                                          x-text="item.label"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+        </div>
+    </div>
+
+
+    <div class="panel" x-show="$store.app.mode === 'audio'" x-data="audioPanel">
+        <div class="section-title">Radius Nodes</div>
+        <template x-if="audioDevices.length === 0">
+            <div class="empty-state">
+                <div>No Radius nodes in the device list.</div>
+                <div class="text-muted text-sm" style="margin-top:6px">Discover or add a node from the sidebar, then connect to manage audio files.</div>
+            </div>
+        </template>
+        <template x-for="dev in audioDevices" :key="dev.di">
+            <div class="audio-node-card" x-init="initDevice(dev.di)">
+                <div class="audio-node-header">
+                    <span class="audio-node-name">
+                        <span class="audio-badge">&#9834;</span>
+                        <span x-text="dev.name"></span>
+                    </span>
+                    <span class="device-ip" x-text="dev.ip"></span>
+                </div>
+                <div class="audio-transport">
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-danger" @click="stop(dev.di)">&#9632; Stop</button>
+                        <button class="btn btn-sm" @click="pause(dev.di)">&#8214; Pause</button>
+                    </div>
+                    <div class="audio-vol-row">
+                        <span class="text-muted" style="font-size:11px;white-space:nowrap">Vol</span>
+                        <input type="range" class="audio-vol-slider" min="0" max="100"
+                               :value="getVolume(dev.di)"
+                               @input="onVolumeInput(dev.di, $event.target.value)">
+                        <span class="text-muted" style="font-size:11px;width:26px;text-align:right"
+                              x-text="getVolume(dev.di)"></span>
+                    </div>
+                </div>
+                <div class="audio-now-playing" x-show="playing[dev.di]">
+                    <span x-text="playing[dev.di]?.cmd === 'loop' ? '&#8634;' : '&#9654;'"></span>
+                    <span x-text="playing[dev.di]?.file"></span>
+                </div>
+                <div class="audio-fm">
+                    <div class="audio-fm-toolbar">
+                        <div class="audio-fm-breadcrumb">
+                            <span class="audio-fm-crumb" @click="navigateTo(dev.di, '/')">SD</span>
+                            <template x-for="(seg, i) in breadcrumbs(dev.di)" :key="i">
+                                <span class="audio-fm-crumb-seg">
+                                    <span class="text-muted">/</span>
+                                    <span class="audio-fm-crumb"
+                                          @click="navigateTo(dev.di, crumbPath(dev.di, i))"
+                                          x-text="seg"></span>
+                                </span>
+                            </template>
+                            <span class="text-muted" style="font-size:11px;margin-left:4px"
+                                  x-show="loading[dev.di]">...</span>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" @click="startNewFolder(dev.di)">+ Folder</button>
+                            <button class="btn btn-sm" @click="loadDir(dev.di)"
+                                    :disabled="loading[dev.di]">&#8635;</button>
+                        </div>
+                    </div>
+                    <div class="audio-fm-list"
+                         :class="{ 'drag-active': dragOver[dev.di] }"
+                         @dragover.prevent="dragOver = {...dragOver, [dev.di]: true}"
+                         @dragleave.prevent="dragOver = {...dragOver, [dev.di]: false}"
+                         @drop.prevent="onDrop(dev.di, $event)">
+                        <template x-if="newFolderMode[dev.di]">
+                            <div class="audio-fm-row">
+                                <span class="audio-fm-icon">&#128193;</span>
+                                <input class="audio-fm-rename-input"
+                                       :id="'new-folder-input-' + dev.di"
+                                       x-model="newFolderName[dev.di]"
+                                       @keydown.enter="commitNewFolder(dev.di)"
+                                       @keydown.escape="cancelNewFolder(dev.di)"
+                                       placeholder="folder name">
+                                <button class="btn btn-sm btn-primary" @click="commitNewFolder(dev.di)">&#10003;</button>
+                                <button class="btn btn-sm" @click="cancelNewFolder(dev.di)">&#10005;</button>
+                            </div>
+                        </template>
+                        <template x-if="loading[dev.di] && entries[dev.di] === undefined">
+                            <div class="audio-fm-empty text-muted">Loading...</div>
+                        </template>
+                        <template x-if="!loading[dev.di] && entries[dev.di] && entries[dev.di].length === 0 && !newFolderMode[dev.di]">
+                            <div class="audio-fm-empty text-muted">Empty directory</div>
+                        </template>
+                        <template x-for="entry in (entries[dev.di] || [])" :key="entry.name">
+                            <div class="audio-fm-row"
+                                 :class="{ 'fm-row-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }">
+                                <span class="audio-fm-icon"
+                                      :class="{ 'icon-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }"
+                                      x-text="entryIcon(dev.di, entry)"></span>
+                                <template x-if="!isRenaming(dev.di, entry.name)">
+                                    <span class="audio-fm-name"
+                                          :class="{ 'audio-fm-folder': entry.is_dir }"
+                                          @click="entry.is_dir && navigateInto(dev.di, entry.name)"
+                                          x-text="entry.name"></span>
+                                </template>
+                                <template x-if="isRenaming(dev.di, entry.name)">
+                                    <input class="audio-fm-rename-input"
+                                           :value="renaming[dev.di]?.value"
+                                           @input="renaming = {...renaming, [dev.di]: {...renaming[dev.di], value: $event.target.value}}"
+                                           @keydown.enter="commitRename(dev.di, entry.name)"
+                                           @keydown.escape="cancelRename(dev.di)">
+                                </template>
+                                <span class="audio-fm-size text-muted"
+                                      x-text="entry.is_dir ? '' : formatSize(entry.size)"></span>
+                                <template x-if="!entry.is_dir && entry.name.toLowerCase().endsWith('.wav') && !isRenaming(dev.di, entry.name)">
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm"
+                                                :class="{ 'btn-primary': isPlaying(dev.di, entry.name) && !isLooping(dev.di, entry.name) }"
+                                                @click="play(dev.di, entry.name, 'play')" title="Play">&#9654;</button>
+                                        <button class="btn btn-sm"
+                                                :class="{ 'btn-primary': isLooping(dev.di, entry.name) }"
+                                                @click="play(dev.di, entry.name, 'loop')" title="Loop">&#8634;</button>
+                                    </div>
+                                </template>
+                                <template x-if="!isRenaming(dev.di, entry.name)">
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm" title="Rename"
+                                                @click="startRename(dev.di, entry.name)">&#9998;</button>
+                                        <button class="btn btn-sm btn-danger" title="Delete"
+                                                @click="deleteEntry(dev.di, entry)">&#10005;</button>
+                                    </div>
+                                </template>
+                                <template x-if="isRenaming(dev.di, entry.name)">
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-primary"
+                                                @click="commitRename(dev.di, entry.name)">&#10003;</button>
+                                        <button class="btn btn-sm"
+                                                @click="cancelRename(dev.di)">&#10005;</button>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                        <div class="audio-fm-drop-hint" x-show="dragOver[dev.di]">
+                            Drop to upload
+                        </div>
+                    </div>
+                    <div class="audio-fm-dropzone"
+                         :class="{ 'drag-active': dragOver[dev.di] }"
+                         @click="triggerFileInput(dev.di)"
+                         @dragover.prevent="dragOver = {...dragOver, [dev.di]: true}"
+                         @dragleave.prevent="dragOver = {...dragOver, [dev.di]: false}"
+                         @drop.prevent="onDrop(dev.di, $event)">
+                        <input type="file" accept=".wav,.WAV" multiple
+                               style="display:none" :id="'file-input-' + dev.di"
+                               @change="onFileInput(dev.di, $event)">
+                        <span x-text="dragOver[dev.di] ? 'Drop to upload' : 'Drop WAV files or click to upload'"></span>
+                    </div>
+                    <template x-if="uploadStatus[dev.di]">
+                        <div class="audio-fm-upload-row">
+                            <span class="audio-fm-upload-name" x-text="uploadStatus[dev.di].name"></span>
+                            <div class="audio-fm-upload-bar">
+                                <div class="audio-fm-upload-fill"
+                                     :style="'width:' + uploadStatus[dev.di].progress + '%'"></div>
+                            </div>
+                            <span class="audio-fm-upload-pct"
+                                  x-text="uploadStatus[dev.di].progress + '%'"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <div class="panel" x-show="$store.app.mode === 'cues'" x-data="audioCues">
+
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Audio Cues</span>
+            <div class="btn-group">
+                <button class="btn btn-sm" @click="addCue()">+ Cue</button>
+                <button class="btn btn-sm" @click="exportCueSheet()">↓ Export</button>
+                <button class="btn btn-sm" @click="triggerCueImport()">↑ Import</button>
+                <button class="btn btn-sm btn-primary" @click="startSync()">⟳ Sync All</button>
+            </div>
+        </div>
+
+        <div class="cues-header-cols">
+
+            <div class="cues-col-box">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="form-label" style="margin:0">Project Library</span>
+                    <button class="btn btn-sm" @click="triggerProjectImport()">+ WAV</button>
+                </div>
+                <template x-if="projectFiles.length === 0">
+                    <p class="text-muted text-sm">No WAV files imported yet.</p>
+                </template>
+                <template x-for="f in projectFiles" :key="f.name">
+                    <div class="cues-library-row">
+                        <span class="text-sm" x-text="f.name"></span>
+                        <span class="text-muted" style="font-size:11px" x-text="formatSize(f.size)"></span>
+                        <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
+                    </div>
+                </template>
+            </div>
+
+            <div class="cues-col-box">
+                <div class="form-label mb-2">Radius Devices</div>
+                <template x-if="audioDevices.length === 0">
+                    <p class="text-muted text-sm">No Radius nodes connected.</p>
+                </template>
+                <template x-for="dev in audioDevices" :key="dev.ip">
+                    <div class="cues-device-row">
+                        <span class="audio-badge">♪</span>
+                        <span class="text-sm" x-text="dev.name"></span>
+                        <span class="device-ip" x-text="dev.ip"></span>
+                        <span class="cues-dev-status"
+                              :class="dev.connected ? 'cues-dev-online' : 'cues-dev-offline'"
+                              x-text="dev.connected ? '●' : '○'"
+                              :title="dev.connected ? 'connected' : 'disconnected'"></span>
+                    </div>
+                </template>
+            </div>
+
+        </div>
+
+        <template x-if="cues.length === 0">
+            <p class="text-muted text-sm mt-4">No cues yet. Click "+ Cue" to add one.</p>
+        </template>
+
+        <template x-for="(cue, idx) in sortedCues" :key="cue.number">
+            <div class="cue-card">
+
+                <div class="cue-card-header">
+                    <div class="flex items-center gap-2">
+                        <span class="form-label" style="margin:0;white-space:nowrap">Cue</span>
+                        <input type="number" class="form-input" min="1" max="255" style="width:60px"
+                               :value="cue.number"
+                               @change="updateCueField(idx, 'number', parseInt($event.target.value) || 1)">
+                        <input type="text" class="form-input" placeholder="note…" style="flex:1"
+                               :value="cue.note"
+                               @input="updateCueField(idx, 'note', $event.target.value)">
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-primary" @click="fireCue(idx)">▶ Fire</button>
+                        <button class="btn btn-sm btn-danger" @click="removeCue(idx)">✕</button>
+                    </div>
+                </div>
+
+                <template x-if="audioDevices.length === 0">
+                    <p class="text-muted text-sm" style="padding:4px 0">No Radius devices.</p>
+                </template>
+
+                <template x-for="dev in audioDevices" :key="dev.ip">
+                    <div class="cue-action-row"
+                         :class="{ 'cue-action-inactive': !actionIsActive(idx, dev.ip) }">
+
+                        <span class="cue-action-device"
+                              :class="dev.connected ? '' : 'text-muted'"
+                              x-text="dev.name"
+                              :title="dev.connected ? dev.ip : dev.ip + ' (disconnected)'"></span>
+
+                        <template x-if="fireStatusForDevice(cue.number, dev.ip)">
+                            <span class="fire-result-badge"
+                                  :class="fireStatusClass(fireStatusForDevice(cue.number, dev.ip))"
+                                  :title="fireStatusForDevice(cue.number, dev.ip).reason || ''"
+                                  x-text="fireStatusIcon(fireStatusForDevice(cue.number, dev.ip))"></span>
+                        </template>
+                        <template x-if="!fireStatusForDevice(cue.number, dev.ip) && !dev.connected">
+                            <span class="fire-result-badge fire-skipped" title="disconnected">○</span>
+                        </template>
+
+                        <select class="form-select" style="width:80px"
+                                :value="getAction(idx, dev.ip).cmd"
+                                @change="setActionField(idx, dev.ip, 'cmd', $event.target.value)">
+                            <option value="none">—</option>
+                            <option value="play">Play</option>
+                            <option value="loop">Loop</option>
+                            <option value="stop">Stop</option>
+                        </select>
+
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <select class="form-select" style="flex:1;min-width:120px"
+                                    :value="getAction(idx, dev.ip).filename"
+                                    @change="setActionField(idx, dev.ip, 'filename', $event.target.value)">
+                                <option value="">— select file —</option>
+                                <template x-for="f in projectFiles" :key="f.name">
+                                    <option :value="f.name" x-text="f.name"></option>
+                                </template>
+                            </select>
+                        </template>
+
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <div class="flex items-center gap-1">
+                                <span class="text-muted" style="font-size:11px">Vol</span>
+                                <input type="number" class="form-input" min="0" max="100" style="width:52px"
+                                       :value="getAction(idx, dev.ip).volume"
+                                       @input="setActionField(idx, dev.ip, 'volume', parseInt($event.target.value) || 0)">
+                            </div>
+                        </template>
+
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <div class="flex items-center gap-1">
+                                <span class="text-muted" style="font-size:11px">Dur</span>
+                                <input type="number" class="form-input" min="0" max="3600" style="width:60px"
+                                       :value="getAction(idx, dev.ip).duration"
+                                       @input="setActionField(idx, dev.ip, 'duration', parseInt($event.target.value) || 0)"
+                                       placeholder="0=full">
+                                <span class="text-muted" style="font-size:11px">s</span>
+                            </div>
+                        </template>
+
+                    </div>
+                </template>
+
+            </div>
+        </template>
+
+        <!-- Sync modal -->
+        <template x-teleport="body">
+            <div class="modal-overlay" x-show="syncModal" @click.self="closeSyncModal()" style="z-index:200">
+                <div class="modal" style="max-width:600px;width:95vw">
+                    <div class="modal-title">
+                        <span x-text="syncJob?.status === 'planning' ? 'Planning sync…' :
+                                      syncJob?.status === 'running'  ? 'Syncing…' :
+                                      syncJob?.status === 'done'     ? 'Sync complete' :
+                                      syncJob?.status === 'error'    ? 'Sync error' : 'Sync'"></span>
+                        <span class="text-muted text-sm" style="margin-left:12px"
+                              x-text="syncSummary()"></span>
+                    </div>
+                    <template x-if="syncJob?.status === 'planning' || (syncJob?.items || []).length === 0">
+                        <p class="text-muted text-sm" style="padding:12px 0">Checking devices…</p>
+                    </template>
+                    <div class="sync-item-list" x-show="(syncJob?.items || []).length > 0">
+                        <template x-for="(item, i) in (syncJob?.items || [])" :key="i">
+                            <div class="sync-item" :class="syncItemClass(item)">
+                                <span class="sync-item-icon" x-text="syncItemIcon(item)"></span>
+                                <div class="sync-item-info">
+                                    <span class="sync-item-device" x-text="item.device_name || item.device_ip"></span>
+                                    <template x-if="item.filename">
+                                        <span class="sync-item-file" x-text="item.filename"></span>
+                                    </template>
+                                    <template x-if="item.error">
+                                        <span class="sync-item-error" x-text="item.error"></span>
+                                    </template>
+                                </div>
+                                <template x-if="item.status === 'uploading' && item.bytes_total > 0">
+                                    <div class="sync-progress-bar">
+                                        <div class="sync-progress-fill"
+                                             :style="'width:' + syncProgress(item) + '%'"></div>
+                                    </div>
+                                </template>
+                                <template x-if="item.status === 'uploading' && item.bytes_total > 0">
+                                    <span class="sync-pct text-muted"
+                                          x-text="syncProgress(item) + '%'"></span>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn" @click="closeSyncModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+    </div><!-- /.Audio Cues panel -->
+
+    <!-- ──── CUE MAP PANEL ──── -->
+    <div class="panel" x-show="$store.app.mode === 'cue-map'" x-data="cueMap()">
+
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Cue Map</span>
+            <div class="btn-group">
+                <button class="btn btn-sm" @click="addRow()" :disabled="deviceIdx === null">+ Row</button>
+                <button class="btn btn-sm btn-primary" @click="save()"
+                        :disabled="deviceIdx === null || saving"
+                        x-text="saving ? 'Saving…' : 'Save to SD'"></button>
+            </div>
+        </div>
+
+        <!-- Device selector -->
+        <div class="form-group mb-4">
+            <label class="form-label">Radius Node</label>
+            <select class="form-select" style="max-width:280px"
+                    @change="selectDevice(parseInt($event.target.value))"
+                    :value="deviceIdx ?? ''">
+                <option value="" disabled>— select a node —</option>
+                <template x-for="dev in audioDevices" :key="dev._di">
+                    <option :value="dev._di" x-text="dev.name + ' (' + dev.ip + ')'"></option>
+                </template>
+            </select>
+            <button class="btn btn-sm" style="margin-left:8px"
+                    @click="load()" :disabled="deviceIdx === null || loading"
+                    x-text="loading ? 'Loading…' : '↺ Reload'"></button>
+        </div>
+
+        <!-- Status messages -->
+        <template x-if="error">
+            <div class="text-sm" style="color:var(--danger);margin-bottom:8px" x-text="error"></div>
+        </template>
+        <template x-if="success">
+            <div class="text-sm" style="color:var(--success,#4caf50);margin-bottom:8px" x-text="success"></div>
+        </template>
+
+        <!-- Empty state -->
+        <template x-if="audioDevices.length === 0">
+            <p class="text-muted text-sm">No Radius nodes connected.</p>
+        </template>
+        <template x-if="deviceIdx !== null && rows.length === 0 && !loading">
+            <p class="text-muted text-sm">No cue entries found. Click "+ Row" to add one.</p>
+        </template>
+
+        <!-- Cue table -->
+        <template x-if="rows.length > 0">
+            <table class="cue-list">
+                <thead>
+                    <tr>
+                        <th style="width:70px">Cue #</th>
+                        <th>File</th>
+                        <th style="width:90px">Duration (s)</th>
+                        <th style="width:80px">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(row, idx) in rows" :key="idx">
+                        <tr class="cue-row">
+                            <td>
+                                <input type="number" class="form-input form-input-sm"
+                                       x-model.number="row.number"
+                                       min="1" max="64" style="width:54px">
+                            </td>
+                            <td>
+                                <template x-if="deviceFiles.length > 0">
+                                    <select class="form-select" x-model="row.file">
+                                        <option value="">— select —</option>
+                                        <template x-for="f in deviceFiles" :key="f">
+                                            <option :value="f" x-text="f"></option>
+                                        </template>
+                                    </select>
+                                </template>
+                                <template x-if="deviceFiles.length === 0">
+                                    <input type="text" class="form-input" x-model="row.file"
+                                           placeholder="filename.wav">
+                                </template>
+                            </td>
+                            <td>
+                                <div class="flex items-center gap-1">
+                                    <input type="number" class="form-input form-input-sm"
+                                           x-model.number="row.duration"
+                                           min="0" max="3600" style="width:60px"
+                                           placeholder="0=full">
+                                </div>
+                            </td>
+                            <td>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm" @click="moveRow(idx, -1)"
+                                            :disabled="idx === 0">^</button>
+                                    <button class="btn btn-sm" @click="moveRow(idx, 1)"
+                                            :disabled="idx === rows.length - 1">v</button>
+                                    <button class="btn btn-sm btn-danger"
+                                            @click="removeRow(idx)">&times;</button>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </template>
+
+        <p class="text-muted text-sm" style="margin-top:12px">
+            Duration 0 = play full file. Max 64 cues. Changes take effect after device reboot.
+        </p>
+
+    </div><!-- /.Cue Map panel -->
+
+    <!-- ──── NET LOG PANEL ──── -->
+    <div class="panel" x-show="$store.app.mode === 'log'" x-data="netLog">
+
+        <div class="flex justify-between items-center mb-3">
+            <span class="section-title" style="margin:0">Network Log</span>
+            <div class="btn-group">
+                <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px">
+                    <input type="checkbox" x-model="autoScroll">
+                    <span>Auto-scroll</span>
+                </label>
+                <button class="btn btn-sm" @click="clear()">Clear</button>
+                <button class="btn btn-sm" @click="download()">↓ Download</button>
+            </div>
+        </div>
+
+        <div class="log-list" x-ref="logList">
+            <template x-if="entries.length === 0">
+                <p class="text-muted text-sm" style="padding:8px">No events logged yet.</p>
+            </template>
+            <template x-for="entry in entries" :key="entry.id">
+                <div class="log-row">
+                    <span class="log-time" x-text="formatTime(entry.ts)"></span>
+                    <span class="log-dir" :class="dirClass(entry.dir)" x-text="entry.dir"></span>
+                    <span class="log-type" :class="typeClass(entry.type)"
+                          x-text="typeLabel(entry.type)"></span>
+                    <span class="log-summary" x-text="entry.summary"></span>
+                </div>
+            </template>
+        </div>
+
+    </div><!-- /.Net Log panel -->
+
+    <!-- ---- PANEL: Firmware ---- -->
+    <div class="panel" x-show="$store.app.mode === 'firmware'" x-data="firmwareUploader">
+        <div class="flex justify-between items-center mb-4 firmware-title-row">
+            <div>
+                <h2 class="section-title" style="margin:0">Firmware</h2>
+                <div class="text-sm text-muted" x-text="availabilityMessage"></div>
+                <div class="firmware-tools-path" x-show="toolsDir" x-text="toolsDir"></div>
+            </div>
+            <button class="btn btn-primary firmware-install-tools"
+                    x-show="showInstallTools"
+                    @click="installTools()">Install Firmware Tools</button>
+            <div class="firmware-status-pill" :class="statusClass()">
+                <span x-text="jobLabel()"></span>
+            </div>
+        </div>
+
+        <div class="output-section firmware-tool-callout" x-show="showInstallTools" x-cloak>
+            <div class="output-header">
+                <span class="output-name">Firmware Tools Required</span>
+                <span class="text-sm text-muted">One-time setup</span>
+            </div>
+            <p class="text-sm text-muted">Download Arduino CLI, install ESP32 board support, and prepare the receiver firmware libraries before compiling or uploading.</p>
+        </div>
+
+        <div class="firmware-grid firmware-workflow-grid">
+            <div class="output-section firmware-section">
+                <div class="output-header">
+                    <span class="output-name">Device Version</span>
+                    <span class="text-sm text-muted" x-text="profileLabel()"></span>
+                </div>
+                <div class="sub-mode-toggle firmware-profile-toggle">
+                    <template x-for="item in profiles" :key="item.id">
+                        <button class="sub-mode-btn"
+                                :class="{ active: profile === item.id }"
+                                :disabled="running"
+                                @click="setProfile(item.id)">
+                            <span x-text="item.label"></span>
+                        </button>
+                    </template>
+                </div>
+                <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+            </div>
+
+            <div class="output-section firmware-section firmware-device-section">
+                <div class="output-header">
+                    <span class="output-name">Device</span>
+                    <button class="btn btn-sm" @click="scanPorts()" :disabled="!available || running">Refresh Devices</button>
+                </div>
+                <div class="firmware-target-summary" x-text="targetSummary()"></div>
+                <div class="firmware-port-list">
+                    <template x-if="candidatePorts.length === 0">
+                        <div class="firmware-empty-state">No firmware devices found. Refresh after connecting a receiver over USB.</div>
+                    </template>
+                    <button type="button" class="firmware-port-row firmware-port-all"
+                            :class="{ 'firmware-port-selected': portMode === 'all' }"
+                            x-show="candidatePorts.length > 0"
+                            :disabled="running || candidatePorts.length === 0"
+                            @click="selectAllDevices()">
+                        <span class="firmware-port-address">All Available Devices</span>
+                        <span class="firmware-port-board" x-text="candidatePorts.length + ' detected'"></span>
+                        <span class="firmware-port-badge">All</span>
+                        <span class="firmware-port-reason">Upload the selected firmware version to every detected ESP32-like port.</span>
+                    </button>
+                    <template x-for="port in candidatePorts" :key="port.address">
+                        <button type="button" class="firmware-port-row"
+                                :class="portRowClass(port)"
+                                :disabled="running"
+                                @click="selectPort(port)">
+                            <span class="firmware-port-address" x-text="port.address"></span>
+                            <span class="firmware-port-board" x-text="port.board"></span>
+                            <span class="firmware-port-badge" x-text="portBadge(port)"></span>
+                            <span class="firmware-port-reason" x-text="port.reason"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="output-section firmware-section">
+                <div class="output-header">
+                    <span class="output-name">Overrides</span>
+                </div>
+                <div class="firmware-override-toggles">
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="nameEnabled" :disabled="running">
+                        <span>Use custom name</span>
+                    </label>
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="wifiEnabled" :disabled="running">
+                        <span>Use custom credentials</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Device Name</label>
+                    <input class="form-input" type="text" maxlength="17"
+                           x-model="deviceName" :disabled="running || !nameEnabled"
+                           placeholder="Radius" autocomplete="off">
+                </div>
+                <div class="firmware-form-grid">
+                    <div class="form-group">
+                        <label class="form-label">SSID</label>
+                        <input class="form-input" type="text" x-model="wifiSsid" :disabled="running || !wifiEnabled" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Firmware IP override mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'keep' }"
+                            :disabled="running"
+                            @click="ipMode = 'keep'">Keep IP Setting</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'static' }"
+                            :disabled="running"
+                            @click="ipMode = 'static'">Set Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'dhcp' }"
+                            :disabled="running"
+                            @click="ipMode = 'dhcp'">Use DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="ipMode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="running" autocomplete="off" placeholder="192.168.1.50">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="running" autocomplete="off" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
+                    </div>
+                </div>
+                <div class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></div>
+            </div>
+
+            <div class="output-section firmware-section firmware-actions-section">
+                <div class="output-header">
+                    <span class="output-name">Compile / Upload</span>
+                    <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
+                </div>
+                <div class="firmware-actions">
+                    <button class="btn" @click="startJob('compile')" :disabled="!canCompile">Compile</button>
+                    <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="output-section firmware-log-section">
+            <div class="output-header">
+                <span class="output-name">Output</span>
+                <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
+            </div>
+            <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
+            <div class="firmware-log" x-show="activeJob" x-cloak>
+                <template x-for="(line, idx) in outputLines" :key="idx">
+                    <div class="firmware-log-line" x-text="line"></div>
+                </template>
+            </div>
+            <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
+        </div>
+    </div>
+
+    <!-- ---- PANEL: Settings ---- -->
+    <div class="panel settings-panel" x-show="$store.app.mode === 'settings'" x-data="settingsPanel">
+        <div class="flex justify-between items-center mb-4 settings-title-row">
+            <div>
+                <h2 class="section-title" style="margin:0">Settings</h2>
+                <div class="text-sm text-muted" x-text="$store.app.networkChipTitle()"></div>
+            </div>
+            <button class="btn btn-sm" @click="refresh()" :disabled="loading" x-text="loading ? 'Refreshing...' : 'Refresh'"></button>
+        </div>
+
+        <template x-if="warnings.length">
+            <div class="output-section settings-warning-section">
+                <template x-for="warning in warnings" :key="warning">
+                    <div class="settings-warning-line" x-text="warning"></div>
+                </template>
+            </div>
+        </template>
+
+        <div class="settings-grid">
+            <div class="output-section settings-section settings-router-section">
+                <div class="output-header">
+                    <span class="output-name">Show Router Setup</span>
+                    <span class="settings-status-pill settings-pill-router" x-text="routerStatusLabel"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="routerSetupSummary()"></div>
+                <div class="settings-detail-grid settings-router-grid">
+                    <div>
+                        <span class="settings-detail-label">Connection</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.service || selectedInterface?.device || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Sender IP</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.source_ip || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.cidr || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.usable_range || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-primary" @click="selectInterface(selectedInterface)" :disabled="!selectedInterface?.id || applying">Use for Art-Net</button>
+                    <button class="btn" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Nodes</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-current-section">
+                <div class="output-header">
+                    <span class="output-name">Sender Route</span>
+                    <span class="settings-status-pill" :class="statusPillClass(selectedInterface)" x-text="selectedInterface?.is_preferred ? 'Preferred' : (selectedInterface?.is_default ? 'Default' : 'Status')"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="interfaceMeta(selectedInterface)"></div>
+                <div class="settings-detail-grid">
+                    <div>
+                        <span class="settings-detail-label">Type</span>
+                        <span class="settings-detail-value" x-text="typeLabel(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None' "></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">SSID</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.ssid || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-sm" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-sm btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Devices</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-interface-section">
+                <div class="output-header">
+                    <span class="output-name">Active Connections</span>
+                    <span class="text-sm text-muted" x-text="visibleInterfaces.length + ' active' + (hiddenInterfaceCount ? ', ' + hiddenInterfaceCount + ' hidden' : '')"></span>
+                </div>
+                <div class="settings-interface-list">
+                    <template x-if="visibleInterfaces.length === 0">
+                        <div class="firmware-empty-state">No active IPv4 connections found.</div>
+                    </template>
+                    <template x-for="iface in visibleInterfaces" :key="iface.id">
+                        <button type="button" class="settings-interface-row"
+                                :class="interfaceRowClass(iface)"
+                                @click="selectInterface(iface)">
+                            <span class="settings-interface-name" x-text="interfaceLabel(iface)"></span>
+                            <span class="settings-interface-meta" x-text="interfaceMeta(iface)"></span>
+                            <span class="settings-interface-badges">
+                                <span class="settings-status-pill" :class="statusPillClass(iface)" x-text="iface.connected ? 'Active' : 'Inactive'"></span>
+                                <span class="settings-status-pill settings-pill-controller" x-show="iface.is_controller">Controller</span>
+                                <span class="settings-status-pill settings-pill-preferred" x-show="iface.is_preferred">Preferred</span>
+                                <span class="settings-status-pill" x-show="iface.is_default">Default</span>
+                            </span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-profile-section">
+                <div class="output-header">
+                    <span class="output-name">Sender IP on Show Router</span>
+                    <span class="text-sm text-muted" x-text="scope === 'ssid' ? (profileSsid || 'SSID') : (selectedInterface?.service || 'Service')"></span>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Sender IP mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'static' }"
+                            :disabled="applying"
+                            @click="mode = 'static'">Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'dhcp' }"
+                            :disabled="applying"
+                            @click="mode = 'dhcp'">DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="mode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Sender Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="applying" autocomplete="off" placeholder="10.0.0.10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="applying" autocomplete="off" placeholder="10.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="applying" autocomplete="off" placeholder="255.255.255.0">
+                    </div>
+                </div>
+                <div class="settings-detail-grid settings-profile-network" x-show="mode === 'static'" x-cloak>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="profileNetworkLabel"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="profileUsableRange"></span>
+                    </div>
+                </div>
+                <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!validationMessage }" x-text="validationMessage || profileModeNote()"></div>
+                <div class="settings-actions-row">
+                    <button class="btn" @click="saveProfile()" :disabled="!canSaveProfile" x-text="saving ? 'Saving...' : 'Save Sender Profile'"></button>
+                    <button class="btn btn-primary" x-show="mode === 'static'" @click="applyStaticIp()" :disabled="!canApplyStatic" x-text="applying ? 'Applying...' : applyStaticLabel"></button>
+                    <button class="btn btn-danger" @click="revertDhcp()" :disabled="!canRevertDhcp" x-text="applying ? 'Applying...' : 'Revert to DHCP'"></button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-receiver-section">
+                <div class="output-header">
+                    <span class="output-name">Node Network</span>
+                    <span class="text-sm text-muted" x-text="receiverRangeCounts.inRange + ' in range, ' + receiverRangeCounts.outOfRange + ' different'"></span>
+                </div>
+                <div class="settings-receiver-list">
+                    <template x-if="$store.conn.devices.length === 0">
+                        <div class="firmware-empty-state">No Radius nodes saved.</div>
+                    </template>
+                    <template x-for="dev in $store.conn.devices" :key="dev.ip">
+                        <div class="settings-receiver-row">
+                            <span class="settings-receiver-name" x-text="dev.name"></span>
+                            <span class="settings-receiver-meta" x-text="receiverSummary(dev)"></span>
+                            <span class="settings-status-pill" :class="receiverRangeClass(dev)" x-text="receiverRangeLabel(dev)"></span>
+                            <span class="device-network-badge"
+                                  :class="$store.conn.networkModeClass(dev)"
+                                  :title="$store.conn.networkModeTitle(dev)"
+                                  x-text="$store.conn.networkModeLabel(dev)"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <details class="output-section settings-section settings-controller-section settings-advanced-wifi">
+                <summary class="settings-advanced-summary">
+                    <span class="output-name">Advanced WiFi Router</span>
+                    <span class="settings-status-pill" :class="{ 'settings-pill-controller': controllerNetworkActive, 'settings-pill-muted': !controllerSsidValue }" x-text="controllerNetworkStatusLabel"></span>
+                </summary>
+                <div class="settings-current-main" x-text="controllerSsidValue || 'No controller SSID set'"></div>
+                <div class="settings-current-meta" x-text="'Current WiFi: ' + currentWifiLabel()"></div>
+                <div class="settings-controller-form">
+                    <div class="form-group">
+                        <label class="form-label">Controller SSID</label>
+                        <input class="form-input" type="text" x-model="controllerSsid" :disabled="applying" autocomplete="off" placeholder="PrimusController">
+                    </div>
+                    <div class="settings-actions-row settings-controller-actions">
+                        <button class="btn btn-primary" @click="saveControllerNetwork()" :disabled="!canSaveControllerNetwork">Save WiFi Router</button>
+                        <button class="btn" @click="useCurrentWifiAsController()" :disabled="!currentWifi?.ssid || applying">Use Current WiFi</button>
+                        <button class="btn btn-danger" @click="clearControllerWifi()" x-show="controllerConnection.ssid" :disabled="applying">Clear</button>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>

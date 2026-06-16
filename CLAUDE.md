@@ -6,7 +6,22 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 
 ## Active version: V3.6
 
-V3.6 is the active compatibility track under `V3_6/`. V3.5, V3.1, and V3.0 remain historical references. Do new sender, firmware, packaging, and documentation work in `V3_6/` unless the user explicitly asks for an older track.
+V3.6 is the active compatibility track under `V3_6/`. V3.5, V3.1, and V3.0 remain historical references. Do new Primus Central sender, firmware, packaging, and documentation work in `V3_6/` unless the user explicitly asks for an older track.
+
+## Radius Central (V4)
+
+Radius Central is the audio controller track under `V4/`. It shares Art-Net discovery and device-management patterns with Primus Central but has its own sender, firmware, packaging, and app data paths.
+
+- Launch: `python3 V4/sender/run.py`
+- Package: `python3 V4/build_sender_app.py --target macos --name RadiusCentral`
+- Web UI: `V4/sender/web/`
+- State: `V4/sender/radius_state.py` (device, audio, FTP only — no clips/looks/cues)
+- Firmware: `V4/Arduino/radius_receiver/` + `radius_upload.sh` (profile `radius_v1`, HUZZAH32 + Music Maker)
+- App data: `RadiusV3/V4/sender/` (`.radius_state.json`)
+- Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|IP:D|F:RA`
+- Track telemetry: UDP 6455 magic `PTR` for current filename
+
+See `V4/README.md` for quick start and packaging details.
 
 V3.6 adds sender-side Clip, Look, and Timeline segment brightness. Receiver LED driver brightness stays fixed at 255; the sender scales RGB pixel values before ArtDmx transport. Do not revive the old V2 brightness-byte protocol or receiver `setBrightness()` for show dimming.
 

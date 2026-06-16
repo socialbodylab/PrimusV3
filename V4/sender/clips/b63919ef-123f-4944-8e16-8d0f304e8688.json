@@ -1,0 +1,25 @@
+{
+  "id": "b63919ef-123f-4944-8e16-8d0f304e8688",
+  "name": "Warm Pulse",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    80,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    50
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.281739+00:00",
+  "modified": "2026-04-08T13:57:40.282431+00:00"
+}
