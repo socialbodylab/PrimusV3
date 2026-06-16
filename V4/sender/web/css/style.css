@@ -3715,3 +3715,69 @@ input[type="color"] {
 .log-type-ftp     { background: #1a2a2a; color: #0cc; }
 .log-type-fps     { background: #1a1a1a; color: var(--text-muted); }
 .log-type-default { background: var(--bg-tertiary); color: var(--text-secondary); }
+
+/* ── DEVICE MANAGER ────────────────────────────────────── */
+
+.device-manager-main {
+    display: block;
+    padding: 16px 20px 24px;
+    min-height: calc(100vh - 48px);
+}
+
+.device-manager-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.device-manager-filter {
+    flex: 1 1 220px;
+    min-width: 180px;
+    max-width: 360px;
+}
+
+.device-manager-group-filter {
+    flex: 0 1 180px;
+    min-width: 140px;
+}
+
+.device-manager-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.device-manager-manual-add {
+    display: flex;
+    gap: 6px;
+    flex: 0 1 240px;
+    min-width: 200px;
+}
+
+.device-manager-manual-add .form-input {
+    flex: 1;
+}
+
+.device-manager-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.device-manager-empty {
+    padding: 24px 8px;
+    text-align: center;
+    font-size: 13px;
+}
+
+.device-group-tag {
+    display: block;
+    margin-top: 2px;
+}
+
+.navbar-tabs a.navbar-tab {
+    text-decoration: none;
+    color: inherit;
+}

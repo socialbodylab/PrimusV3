@@ -89,6 +89,7 @@ def web_dir():
 FRONTEND_INDEX_FILES = {
     "primus": "index-primus.html",
     "radius": "index.html",
+    "devices": "index-devices.html",
 }
 
 

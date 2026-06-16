@@ -27,7 +27,15 @@ from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
 from osc_control import OscControlServer
-from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path
+from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path, sender_product
+from central_launcher import (
+    CentralPortInUseByCentral,
+    frontend_path_for,
+    probe_central_server,
+    register_central_server,
+    try_attach_before_start,
+    unregister_central_server,
+)
 from server import create_server
 
 
@@ -170,6 +178,9 @@ def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabl
             raise
         if exc.errno not in (errno.EADDRINUSE, 48, 98):
             raise
+        runtime = probe_central_server(host, port)
+        if runtime:
+            raise CentralPortInUseByCentral(port, runtime)
         print(f"Port {port} is busy; using an auto-selected port instead.")
         return create_server(host, 0, state, cue_list,
                              ui_lifecycle_enabled=ui_lifecycle_enabled,
@@ -649,13 +660,36 @@ def main():
                         help=f"HTTP port (default {DEFAULT_HTTP_PORT}; 0 = auto-select)")
     parser.add_argument("--no-browser", action="store_true",
                         help="Print the URL without opening the browser")
+    parser.add_argument(
+        "--frontend",
+        choices=["primus", "radius", "devices"],
+        default=None,
+        help="Web UI to open (default: /primus for this launcher)",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Stop any running Central server and start a new one",
+    )
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
     ensure_runtime_data()
     _configure_app_logging()
+
+    frontend_path = frontend_path_for(args.frontend, sender_product())
+    if not args.replace and try_attach_before_start(
+        port=args.port,
+        frontend_path=frontend_path,
+        no_browser=args.no_browser,
+        open_browser=_open_browser,
+        launcher_name="PrimusCentral V4",
+    ):
+        return
+
     _MACOS_ACTIVITY_TOKEN = _begin_macos_low_latency_activity()
-    _kill_existing()
+    if args.replace:
+        _kill_existing()
 
     fps_listener = PrimusTelemetryListener()
     fps_thread = threading.Thread(target=fps_listener.run, daemon=True)
@@ -672,12 +706,26 @@ def main():
 
     ui_lifecycle_enabled = is_bundled() and not args.no_browser
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
-    server = _create_server_with_fallback(
-        "127.0.0.1", args.port, state, cue_list,
-        ui_lifecycle_enabled=ui_lifecycle_enabled,
-        osc_service=osc_service)
+    try:
+        server = _create_server_with_fallback(
+            "127.0.0.1", args.port, state, cue_list,
+            ui_lifecycle_enabled=ui_lifecycle_enabled,
+            osc_service=osc_service)
+    except CentralPortInUseByCentral:
+        if try_attach_before_start(
+            port=args.port,
+            frontend_path=frontend_path,
+            no_browser=args.no_browser,
+            open_browser=_open_browser,
+            launcher_name="PrimusCentral V4",
+        ):
+            osc_service.stop()
+            fps_listener.stop()
+            return
+        raise
     port = server.server_address[1]
-    url = f"http://127.0.0.1:{port}{default_frontend_path()}"
+    url = f"http://127.0.0.1:{port}{frontend_path}"
+    register_central_server(port, sender_product())
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
     anim.start()
@@ -715,6 +763,7 @@ def main():
         print("\nShutting down...")
     finally:
         server.ui_lifecycle_enabled = False
+        unregister_central_server()
         osc_service.stop()
         state.shutdown()
         fps_listener.stop()

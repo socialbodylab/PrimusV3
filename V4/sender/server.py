@@ -23,6 +23,7 @@ from artnet import (
     discover_artnet_nodes,
     ftp_list_dir,
     ftp_upload,
+    is_compatible_node,
     send_audio_cmd,
     AUDIO_CMD_STOP,
 )
@@ -58,6 +59,45 @@ def _safe_ftp_path(path):
     if ".." in path or "\\" in path:
         return False
     return True
+
+
+def _sync_network_devices(device_state, interface=None):
+    """Discover nodes, add compatible new devices, and connect all online targets."""
+    product = sender_product()
+    known_ips = device_state.discovery_targets()
+    nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+    if nodes:
+        device_state.refresh_devices_from_nodes(nodes)
+
+    added = []
+    skipped = []
+    for node in nodes or []:
+        node_ip = node.get("ip")
+        if not is_compatible_node(node, product):
+            skipped.append({"ip": node_ip, "reason": "incompatible"})
+            continue
+        result = device_state.add_device_from_node(node)
+        if result.get("status") == "added":
+            added.append({
+                "ip": node_ip,
+                "name": node.get("short_name") or node_ip,
+                "device_index": result.get("device_index"),
+            })
+
+    online_ips = {node.get("ip") for node in nodes if node.get("ip")}
+    connect_results = device_state.connect_all(
+        only_ips=online_ips if online_ips else None,
+    )
+    connected = [
+        result for result in connect_results
+        if result.get("ok") and not result.get("skipped")
+    ]
+    return {
+        "added": added,
+        "skipped": skipped,
+        "connected": connected,
+        "nodes": nodes or [],
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -112,6 +152,7 @@ class Handler(BaseHTTPRequestHandler):
                 "frontends": {
                     "primus": "/primus",
                     "radius": "/radius",
+                    "devices": "/devices",
                 },
                 "default_frontend": default_frontend_path(),
             })
@@ -352,6 +393,10 @@ class Handler(BaseHTTPRequestHandler):
             nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
             self._device_state().refresh_devices_from_nodes(nodes)
             self._json_response(nodes)
+
+        elif path == "/api/devices/sync":
+            interface = self._sync_artnet_source()
+            self._json_response(_sync_network_devices(self._device_state(), interface=interface))
 
         elif path == "/api/add_discovered":
             self._sync_artnet_source()
@@ -982,6 +1027,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = frontend_index_path("primus")
         elif path in ("/radius", "/radius/"):
             file_path = frontend_index_path("radius")
+        elif path in ("/devices", "/devices/"):
+            file_path = frontend_index_path("devices")
         elif path == "/index-primus.html":
             file_path = frontend_index_path("primus")
         elif path in ("/index.html",):

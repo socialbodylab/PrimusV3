@@ -431,6 +431,18 @@ document.addEventListener("alpine:init", () => {
         //  DESIGNER METHODS
         // ══════════════════════════════════════════════════
 
+        applyLookOutputType(lo, type) {
+            const typedef = Alpine.store("app").state?.output_types?.[type];
+            if (!lo || !typedef) return;
+            lo.type = type;
+            lo.count = typedef.pixels;
+            lo.layout = typedef.layout;
+            lo.grid = typedef.layout === "grid" ? typedef.grid_size : null;
+            if (type === "none") {
+                lo.effect = "none";
+            }
+        },
+
         updateOutput(oi, field, value) {
             const body = { output: oi };
             body[field] = value;
@@ -441,8 +453,18 @@ document.addEventListener("alpine:init", () => {
             this.updateOutput(oi, 'brightness', this.normalizeBrightness(Number(value) / 100));
         },
 
-        updateOutputType(oi, type) {
-            api("POST", "/api/update", { output: oi, output_type: type });
+        async updateOutputType(oi, type) {
+            const lo = Alpine.store("app").state?.look?.outputs?.[oi];
+            if (lo) {
+                this.applyLookOutputType(lo, type);
+            }
+            try {
+                await api("POST", "/api/update", { output: oi, output_type: type });
+                await Alpine.store("app").fetchState();
+            } catch (e) {
+                await Alpine.store("app").fetchState();
+                Alpine.store("app").showApiError("Output type update failed", e);
+            }
         },
 
         updateColor(oi, which, hex) {

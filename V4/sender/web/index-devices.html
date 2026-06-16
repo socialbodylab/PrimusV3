@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device Manager</title>
+<link rel="stylesheet" href="/css/style.css">
+<script defer src="/js/alpine.min.js"></script>
+<script src="/js/app-devices.js"></script>
+<script src="/js/device-conn.js"></script>
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="navbar-brand">Device Manager</div>
+    <div class="navbar-tabs navbar-tabs-secondary">
+        <a class="navbar-tab" href="/primus">Primus</a>
+        <a class="navbar-tab" href="/radius">Radius</a>
+        <div class="navbar-tab active">Devices</div>
+    </div>
+    <div class="navbar-status" x-data>
+        <button class="network-chip"
+                :class="$store.app.networkChipClass()"
+                :title="$store.app.networkChipTitle()"
+                disabled>
+            <span class="network-chip-label">Net</span>
+            <span class="network-chip-value" x-text="$store.app.networkChipLabel()"></span>
+        </button>
+        <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
+        <span x-text="$store.app.connectedDeviceSummary"></span>
+    </div>
+</nav>
+
+<div class="notice-banner" x-data x-show="$store.app.notice" x-cloak>
+    <div class="notice-pill"
+         :class="'notice-' + ($store.app.notice?.level || 'info')">
+        <span class="notice-text" x-text="$store.app.notice?.message"></span>
+        <button class="notice-close" @click="$store.app.clearNotice()">&times;</button>
+    </div>
+</div>
+
+<div class="device-manager-main main-content" x-data x-init="$store.app.init()">
+    <div class="device-manager-toolbar">
+        <input type="search"
+               class="form-input device-manager-filter"
+               placeholder="Filter by name or IP…"
+               x-model="$store.app.filterText">
+        <select class="form-input device-manager-group-filter"
+                x-show="$store.app.product === 'primus'"
+                x-model="$store.app.filterGroupId">
+            <option value="">All groups</option>
+            <template x-for="group in $store.app.deviceGroups" :key="group.id">
+                <option :value="group.id" x-text="group.name"></option>
+            </template>
+        </select>
+        <div class="device-manager-toolbar-actions">
+            <button class="btn btn-sm btn-primary"
+                    @click="$store.conn.syncNetwork()"
+                    :disabled="$store.conn.syncing"
+                    x-text="$store.conn.syncing ? 'Syncing…' : 'Sync Network'"></button>
+            <button class="btn btn-sm" @click="$store.conn.connectAll()">Connect All</button>
+            <button class="btn btn-sm" @click="$store.conn.disconnectAll()">Disconnect All</button>
+        </div>
+        <div class="device-manager-manual-add">
+            <input type="text"
+                   class="form-input form-input-sm"
+                   placeholder="IP address"
+                   x-model="$store.conn.manualIp"
+                   @keydown.enter="$store.conn.addManualIp()">
+            <button class="btn btn-sm"
+                    @click="$store.conn.addManualIp()"
+                    :disabled="!$store.conn.manualIp">Add</button>
+        </div>
+    </div>
+
+    <div class="device-manager-empty text-muted"
+         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterText || $store.app.filterGroupId)"
+         x-cloak>
+        No devices match the current filters.
+    </div>
+
+    <div class="device-manager-empty text-muted"
+         x-show="!$store.conn.devices.length && !$store.conn.syncing"
+         x-cloak>
+        No devices found. Use Sync Network to discover receivers on the LAN.
+    </div>
+
+    <div class="device-manager-grid">
+        <template x-for="entry in $store.app.filteredDevices" :key="entry._index">
+            <div class="device-card"
+                 :class="{
+                     'device-connected': entry.dev.connected,
+                     'device-static-ip': entry.dev.ip_mode === 'static' && !entry.dev.ip_config_pending
+                 }">
+                <div class="device-header">
+                    <template x-if="$store.conn.renamingDevice !== entry._index">
+                        <span class="device-name"
+                              x-text="entry.dev.name"
+                              @click="$store.conn.startRename(entry._index)"
+                              :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) }"
+                              :title="$store.conn.renameHint(entry.dev)"></span>
+                    </template>
+                    <template x-if="$store.conn.renamingDevice === entry._index">
+                        <input class="device-rename-input"
+                               type="text"
+                               maxlength="17"
+                               x-model="$store.conn.renameValue"
+                               @keydown.enter="$store.conn.finishRename(entry._index)"
+                               @keydown.escape="$store.conn.cancelRename()"
+                               @blur="$store.conn.finishRename(entry._index)"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
+                    <div class="device-stats" x-show="entry.dev.connected && $store.app.product === 'primus'">
+                        <span class="device-fps"
+                              x-text="$store.conn.receiverFpsLabel(entry.dev)"></span>
+                        <span class="device-battery"
+                              x-show="$store.conn.showBattery(entry.dev)"
+                              :class="$store.conn.batteryClass(entry.dev)"
+                              :title="$store.conn.batteryTitle(entry.dev)"
+                              x-text="$store.conn.batteryLabel(entry.dev)"></span>
+                    </div>
+                    <span class="audio-badge"
+                          x-show="$store.app.product === 'radius' && entry.dev.is_radius"
+                          title="Radius audio node">&#9834;</span>
+                </div>
+
+                <div class="device-meta">
+                    <button class="device-ip-button"
+                            :class="{ active: $store.conn.ipConfigDevice === entry._index }"
+                            :disabled="!$store.conn.canConfigureIp(entry.dev)"
+                            :title="$store.conn.ipConfigHint(entry.dev)"
+                            @click="$store.conn.ipConfigDevice === entry._index ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(entry._index)"
+                            x-text="entry.dev.ip"></button>
+                    <span class="device-network-badge"
+                          :class="$store.conn.networkModeClass(entry.dev)"
+                          :title="$store.conn.networkModeTitle(entry.dev)"
+                          x-text="$store.conn.networkModeLabel(entry.dev)"></span>
+                    <span class="device-profile" x-text="$store.conn.hardwareLabel(entry.dev)"></span>
+                    <span class="device-fw-version"
+                          x-show="$store.app.product === 'primus' && $store.conn.firmwareLabel(entry.dev) !== '—'"
+                          x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
+                    <span class="device-group-tag text-sm text-muted"
+                          x-show="$store.app.product === 'primus' && $store.app.deviceGroupNames(entry.dev)"
+                          x-text="$store.app.deviceGroupNames(entry.dev)"></span>
+                    <span class="device-transport-error"
+                          x-show="entry.dev.transport_error"
+                          x-text="entry.dev.transport_error"></span>
+                </div>
+
+                <div class="device-now-playing text-sm text-muted"
+                     x-show="$store.app.product === 'radius' && entry.dev.current_track">
+                    Now: <span x-text="entry.dev.current_track"></span>
+                </div>
+
+                <div class="btn-group device-actions device-actions-primary">
+                    <button class="btn btn-sm device-action-main"
+                            :class="{ 'btn-primary': !entry.dev.connected }"
+                            @click="entry.dev.connected ? $store.conn.disconnect(entry._index) : $store.conn.connect(entry._index)"
+                            x-text="entry.dev.connected ? 'Disconnect' : 'Connect'"></button>
+                    <button class="btn btn-sm device-action-main"
+                            x-show="entry.dev.connected && ($store.app.product === 'primus' ? $store.conn.canHelloDevice(entry.dev) : true)"
+                            :disabled="$store.app.product === 'primus' && !$store.conn.canHelloDevice(entry.dev)"
+                            :title="$store.app.product === 'primus' ? $store.conn.helloHint(entry.dev) : 'Send test tone'"
+                            @click="$store.conn.helloDevice(entry._index)">Hello</button>
+                </div>
+
+                <div class="device-ip-config"
+                     x-show="$store.conn.ipConfigDevice === entry._index"
+                     x-cloak>
+                    <div class="form-group compact">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input form-input-sm"
+                               type="text"
+                               x-model="$store.conn.ipConfigIp"
+                               placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input form-input-sm"
+                               type="text"
+                               x-model="$store.conn.ipConfigGateway"
+                               placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input form-input-sm"
+                               type="text"
+                               x-model="$store.conn.ipConfigSubnet"
+                               placeholder="255.255.255.0">
+                    </div>
+                    <div class="btn-group" style="margin-top:4px">
+                        <button class="btn btn-sm btn-primary"
+                                @click="$store.conn.setStaticIp(entry._index)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger"
+                                @click="$store.conn.revertDhcp(entry._index)">Revert to DHCP</button>
+                    </div>
+                    <div class="device-ip-config-note"
+                         x-text="$store.conn.networkModeTitle(entry.dev)"></div>
+                </div>
+
+                <div class="device-outputs"
+                     x-show="$store.app.product === 'primus'"
+                     :title="$store.conn.outputConfigHint(entry.dev)">
+                    <template x-for="(o, oi) in entry.dev.outputs" :key="oi">
+                        <label class="device-output-row">
+                            <span class="device-output-label"
+                                  x-text="$store.app.outputLabel(o.name, oi)"></span>
+                            <select class="form-input form-input-sm device-output-select"
+                                    :disabled="!$store.conn.canConfigureOutputs(entry.dev)"
+                                    x-effect="$el.value = o.type || 'none'"
+                                    @change="$store.conn.setDeviceOutputType(entry._index, oi, $event.target.value)">
+                                <template x-for="type in $store.conn.deviceOutputTypesFor(entry.dev, oi)" :key="type">
+                                    <option :value="type"
+                                            x-text="$store.app.outputTypeLabel(type)"></option>
+                                </template>
+                            </select>
+                        </label>
+                    </template>
+                </div>
+
+                <div class="device-footer-actions">
+                    <button class="btn btn-sm btn-danger device-remove-btn"
+                            @click="$store.conn.removeDevice(entry._index)">Remove</button>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
+</body>
+</html>

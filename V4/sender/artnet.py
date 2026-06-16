@@ -632,6 +632,33 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
     return caps
 
 
+def is_compatible_node(node_info, product):
+    """Return True when a discovered node should be auto-added for the active product."""
+    product = str(product or "").strip().lower()
+    node_report = str((node_info or {}).get("node_report") or "")
+    short_name = str((node_info or {}).get("short_name") or "")
+    long_name = str((node_info or {}).get("long_name") or "")
+    name_blob = f"{short_name} {long_name}".lower()
+
+    if product == "radius":
+        if NODE_CAPS_PREFIX_RADIUS in node_report:
+            return True
+        caps = parse_node_capabilities(node_report, short_name, long_name)
+        if caps.get("device_class") == "radius":
+            return True
+        if caps.get("profile") == "pvrad1":
+            return True
+        return "radius" in name_blob
+
+    if NODE_CAPS_PREFIX_RADIUS in node_report:
+        return False
+    if NODE_CAPS_PREFIX in node_report:
+        return True
+    if "radius" in name_blob and NODE_CAPS_PREFIX not in node_report:
+        return False
+    return True
+
+
 def parse_node_capabilities(node_report, short_name="", long_name=""):
     if NODE_CAPS_PREFIX_RADIUS in (node_report or ""):
         return _parse_radius_capabilities(node_report, short_name, long_name)

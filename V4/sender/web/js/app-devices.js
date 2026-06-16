@@ -1,5 +1,5 @@
 /**
- * app.js — Alpine.js stores and shared utilities for Radius Central
+ * app-devices.js — Device Manager view bootstrap
  */
 
 function api(method, path, body) {
@@ -26,100 +26,103 @@ function api(method, path, body) {
 }
 
 document.addEventListener("alpine:init", () => {
-
     Alpine.store("app", {
-        mode: "audio",
-        modes: ["audio", "cues", "cue-map", "log", "firmware", "settings"],
-        modeLabels: {
-            audio: "Audio",
-            cues: "Audio Cues",
-            "cue-map": "Cue Map",
-            log: "Net Log",
-            firmware: "Firmware",
-            settings: "Settings",
-        },
+        product: "primus",
         state: null,
         network: null,
+        runtime: null,
         polling: null,
         networkPolling: null,
         notice: null,
         _noticeTimer: null,
-        runtime: null,
-        _lifecycleHeartbeat: null,
-        product: "radius",
+        filterText: "",
+        filterGroupId: "",
+
+        get deviceGroups() {
+            return this.state?.device_groups || [];
+        },
 
         get connectedDeviceSummary() {
             const devices = this.state?.devices || [];
             const connected = devices.filter(d => d.connected).length;
-            return connected + "/" + devices.length + " nodes";
+            return connected + "/" + devices.length + " devices";
         },
 
-        get audioStatus() {
+        get outputTypes() {
+            return this.state?.look_output_types || [];
+        },
+
+        get filteredDevices() {
             const devices = this.state?.devices || [];
-            const connected = devices.filter(d => d.connected).length;
-            const playing = devices.filter(d => d.connected && d.current_track).length;
-            return {
-                connected,
-                total: devices.length,
-                playing,
+            const query = this.filterText.trim().toLowerCase();
+            const group = this.deviceGroups.find(item => item.id === this.filterGroupId);
+            const groupIps = group ? new Set(group.device_ips || []) : null;
+
+            return devices.reduce((entries, dev, index) => {
+                if (groupIps && !groupIps.has(dev.ip)) {
+                    return entries;
+                }
+                if (query) {
+                    const haystack = [
+                        dev.name,
+                        dev.ip,
+                        dev.static_ip,
+                    ].filter(Boolean).join(" ").toLowerCase();
+                    if (!haystack.includes(query)) {
+                        return entries;
+                    }
+                }
+                entries.push({ dev, _index: index });
+                return entries;
+            }, []);
+        },
+
+        outputLabel(value, idx = null) {
+            const raw = value == null ? "" : String(value);
+            const match = raw.match(/^A(\d+)$/i);
+            if (match) return "Output " + match[1];
+            if (raw) return raw;
+            return Number.isInteger(idx) ? "Output " + idx : "Output";
+        },
+
+        outputTypeLabel(type) {
+            const labels = {
+                none: "None",
+                short_strip: "Short Strip",
+                long_strip: "Long Strip",
+                grid: "Grid",
+                small_grid: "Small Grid",
+                extra_long_strip: "Extra Long Strip",
             };
+            if (labels[type]) return labels[type];
+            if (!type) return "None";
+            return String(type).split("_")
+                .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                .join(" ");
         },
 
-        init() {
-            this.fetchState();
-            this.fetchNetworkStatus();
-            this.polling = setInterval(() => this.fetchState(), 500);
-            this.networkPolling = setInterval(() => this.fetchNetworkStatus(), 15000);
-            document.addEventListener("visibilitychange", () => {
-                clearInterval(this.polling);
-                const interval = document.hidden ? 2000 : 500;
-                this.polling = setInterval(() => this.fetchState(), interval);
-            });
-            this.startRuntimeLifecycle();
-        },
-
-        async startRuntimeLifecycle() {
+        async init() {
             try {
                 this.runtime = await api("GET", "/api/runtime");
-                this.product = this.runtime?.product || "radius";
+                this.product = this.runtime?.product || "primus";
             } catch (e) {
-                return;
+                /* ignore */
             }
-            if (!this.runtime?.ui_lifecycle) return;
-
-            const heartbeat = () => {
-                api("POST", "/api/ui/heartbeat", {}).catch(() => {});
-            };
-            heartbeat();
-            this._lifecycleHeartbeat = setInterval(heartbeat, 2000);
-
-            document.addEventListener("visibilitychange", () => {
-                if (!document.hidden) heartbeat();
-            });
-
-            window.addEventListener("pagehide", () => {
-                if (this._lifecycleHeartbeat) {
-                    clearInterval(this._lifecycleHeartbeat);
-                    this._lifecycleHeartbeat = null;
-                }
-                const payload = JSON.stringify({ reason: "pagehide" });
-                if (navigator.sendBeacon) {
-                    navigator.sendBeacon("/api/ui/closed", new Blob([payload], { type: "application/json" }));
-                } else {
-                    fetch("/api/ui/closed", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: payload,
-                        keepalive: true,
-                    }).catch(() => {});
-                }
-            }, { once: true });
+            await this.fetchNetworkStatus();
+            this.networkPolling = setInterval(() => this.fetchNetworkStatus(), 15000);
+            await Alpine.store("conn").syncNetwork();
+            this.polling = setInterval(() => this.fetchState(), 1000);
         },
 
         async fetchState() {
             try {
                 this.state = await api("GET", "/api/state");
-            } catch (e) { /* ignore */ }
+                if (this.state?.product) {
+                    this.product = this.state.product;
+                }
+            } catch (e) {
+                /* ignore */
+            }
         },
 
         async fetchNetworkStatus() {
@@ -153,7 +156,7 @@ document.addEventListener("alpine:init", () => {
 
         networkChipTitle() {
             const iface = this.networkPrimaryInterface();
-            if (!this.network) return "Open network settings";
+            if (!this.network) return "Network status";
             if (!this.network.supported) return this.network.warnings?.[0] || "Host network switching is unavailable.";
             if (!iface) return "No active sender connection found.";
             const parts = [iface.service || iface.device || "Network"];
@@ -173,38 +176,9 @@ document.addEventListener("alpine:init", () => {
             };
         },
 
-        audioChipLabel() {
-            const status = this.audioStatus;
-            if (!status.total) return "No nodes";
-            if (status.playing) {
-                return status.playing + " playing";
-            }
-            return status.connected + "/" + status.total + " connected";
-        },
-
-        audioChipTitle() {
-            const status = this.audioStatus;
-            if (!status.total) return "Add Radius nodes from the device sidebar.";
-            if (status.playing) {
-                return status.playing + " node" + (status.playing === 1 ? "" : "s") + " playing audio.";
-            }
-            return status.connected + " of " + status.total + " nodes connected.";
-        },
-
-        audioChipClass() {
-            const status = this.audioStatus;
-            return {
-                "playback-chip-idle": !status.playing,
-                "playback-chip-controller": status.playing > 0,
-            };
-        },
-
         showNotice(message, level = "info", timeout = 3200) {
-            if (this._noticeTimer) {
-                clearTimeout(this._noticeTimer);
-                this._noticeTimer = null;
-            }
             this.notice = { message, level };
+            if (this._noticeTimer) clearTimeout(this._noticeTimer);
             if (timeout > 0) {
                 this._noticeTimer = setTimeout(() => {
                     this.notice = null;
@@ -214,11 +188,11 @@ document.addEventListener("alpine:init", () => {
         },
 
         clearNotice() {
+            this.notice = null;
             if (this._noticeTimer) {
                 clearTimeout(this._noticeTimer);
                 this._noticeTimer = null;
             }
-            this.notice = null;
         },
 
         showApiError(action, error) {
@@ -226,11 +200,9 @@ document.addEventListener("alpine:init", () => {
             this.showNotice(action + detail, "error", 5000);
         },
 
-        setMode(m) {
-            this.mode = m;
-            document.dispatchEvent(new CustomEvent("primus:mode-changed", {
-                detail: { mode: m },
-            }));
+        deviceGroupNames(dev) {
+            const groups = this.deviceGroups.filter(group => (group.device_ips || []).includes(dev.ip));
+            return groups.map(group => group.name).join(", ");
         },
     });
 });

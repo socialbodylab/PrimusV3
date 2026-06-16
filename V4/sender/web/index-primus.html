@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/css/style.css">
 <script defer src="/js/alpine.min.js"></script>
 <script src="/js/app-primus.js"></script>
+<script src="/js/device-conn.js"></script>
 <script src="/js/look-mixer.js"></script>
 <script src="/js/look-controller.js"></script>
 <script src="/js/firmware.js"></script>
@@ -175,11 +176,10 @@
                             <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
                             <select class="form-input form-input-sm device-output-select"
                                     :disabled="!$store.conn.canConfigureOutputs(dev)"
-                                    :value="o.type"
+                                    x-effect="$el.value = o.type || 'none'"
                                     @change="$store.conn.setDeviceOutputType(di, oi, $event.target.value)">
                                 <template x-for="type in $store.conn.deviceOutputTypesFor(dev, oi)" :key="type">
                                     <option :value="type"
-                                            :selected="type === o.type"
                                             x-text="$store.app.outputTypeLabel(type)"></option>
                                 </template>
                             </select>
@@ -349,7 +349,7 @@
                             <div class="form-group">
                                 <label class="form-label">Output Type</label>
                                 <select class="form-select"
-                                        :value="out.type"
+                                        x-effect="$el.value = out.type || 'none'"
                                         @change="updateOutputType(oi, $event.target.value)">
                                     <template x-for="t in outputTypes">
                                             <option :value="t" x-text="typeLabel(t)"></option>
@@ -361,7 +361,7 @@
                             <div class="form-group" x-show="out.type !== 'none'">
                                 <label class="form-label">Effect</label>
                                 <select class="form-select"
-                                        :value="out.effect"
+                                        x-effect="$el.value = out.effect || 'none'"
                                         @change="updateOutput(oi, 'effect', $event.target.value)">
                                     <template x-for="e in effects">
                                             <option :value="e" x-text="effectLabel(e)"></option>
@@ -410,7 +410,7 @@
                             <div class="form-group" x-show="out.type !== 'none' && out.effect !== 'none' && out.effect !== 'solid'">
                                 <label class="form-label">Playback</label>
                                 <select class="form-select"
-                                        :value="out.playback"
+                                        x-effect="$el.value = out.playback || 'loop'"
                                         @change="updateOutput(oi, 'playback', $event.target.value)">
                                     <option value="loop">Loop</option>
                                     <option value="boomerang">Boomerang</option>
@@ -444,7 +444,7 @@
                             <div class="form-group" x-show="out.type !== 'none' && needsChaseOrigin(out.effect)">
                                 <label class="form-label">Chase Origin</label>
                                 <select class="form-select"
-                                        :value="out.chase_origin || 'start'"
+                                        x-effect="$el.value = out.chase_origin || 'start'"
                                         @change="updateOutput(oi, 'chase_origin', $event.target.value)">
                                     <option value="start">Start</option>
                                     <option value="center">Center</option>
@@ -471,7 +471,8 @@
                     <input class="form-input" placeholder="Search clips..."
                            x-model="libSearch" @input.debounce.300ms="doLibSearch()">
                     <select class="form-select" style="width:auto"
-                            :value="libSortBy" @change="setLibSort($event.target.value)">
+                            x-effect="$el.value = libSortBy || 'modified'"
+                            @change="setLibSort($event.target.value)">
                         <option value="modified">Recent</option>
                         <option value="name">Name</option>
                         <option value="output_type">Type</option>
@@ -571,7 +572,8 @@
                 </div>
                 <div class="transport-field">
                     <label class="form-label">Playback</label>
-                    <select class="form-select" :value="look.playback"
+                    <select class="form-select"
+                            x-effect="look && ($el.value = look.playback || 'loop')"
                             @change="updateLookPlayback($event.target.value)">
                         <option value="loop">Loop</option>
                         <option value="boomerang">Boomerang</option>
@@ -620,7 +622,6 @@
                                     @change="setTrackOutputType(ti, $event.target.value)">
                                 <template x-for="t in outputTypes">
                                     <option :value="t"
-                                            :selected="t === (look.outputs[ti] || {}).type"
                                             x-text="typeLabel(t)"></option>
                                 </template>
                             </select>
@@ -1025,7 +1026,9 @@
                                 <div class="cue-assignment-preview" :style="lookThumbStyle(assignmentLook(assignment))"></div>
                                 <div class="form-group">
                                     <label class="form-label">Look</label>
-                                    <select class="form-select" x-model="assignment.look_id">
+                                    <select class="form-select"
+                                            x-model="assignment.look_id"
+                                            x-effect="assignment.action === 'look' && ($el.value = assignment.look_id || '')">
                                         <template x-for="look in cueModalLooks" :key="look.id">
                                             <option :value="look.id" x-text="look.name"></option>
                                         </template>
@@ -1036,6 +1039,7 @@
                                     <label class="form-label">Target</label>
                                     <select class="form-select"
                                             x-model="assignment.target_mode"
+                                            x-effect="$el.value = assignment.target_mode || 'look'"
                                             @change="setAssignmentTargetMode(assignment, assignment.target_mode)">
                                         <option value="look">Look target</option>
                                         <option value="all">All devices</option>
@@ -1047,7 +1051,9 @@
                             </div>
                             <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'group'">
                                 <label class="form-label">Group</label>
-                                <select class="form-select" x-model="assignment.device_group_id">
+                                <select class="form-select"
+                                        x-model="assignment.device_group_id"
+                                        x-effect="assignment.target_mode === 'group' && ($el.value = assignment.device_group_id || '')">
                                     <template x-for="group in cueModalGroups" :key="group.id">
                                         <option :value="group.id" x-text="group.name"></option>
                                     </template>

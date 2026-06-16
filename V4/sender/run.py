@@ -6,6 +6,10 @@ Usage:
     python3 run.py
     python3 run.py --product primus
     python3 run.py --product radius --port 8098 --no-browser
+    python3 run.py --product primus --frontend devices
+
+If Central is already running, launchers attach by opening the requested view
+instead of starting a second server. Use --replace to stop the existing server.
 """
 
 import os
