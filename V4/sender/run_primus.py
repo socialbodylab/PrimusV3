@@ -653,6 +653,12 @@ def _mixer_controller_loop(state, cue_list):
         time.sleep(1.0 / max(1, state.fps))
 
 
+def _launcher_display_name():
+    if os.environ.get("PRIMUSV3_DEFAULT_FRONTEND") == "devices":
+        return "Device Manager"
+    return "PrimusCentral V4"
+
+
 def main():
     global _MACOS_ACTIVITY_TOKEN
     parser = argparse.ArgumentParser(description="PrimusCentral V4")
@@ -683,7 +689,7 @@ def main():
         frontend_path=frontend_path,
         no_browser=args.no_browser,
         open_browser=_open_browser,
-        launcher_name="PrimusCentral V4",
+        launcher_name=_launcher_display_name(),
     ):
         return
 
@@ -717,7 +723,7 @@ def main():
             frontend_path=frontend_path,
             no_browser=args.no_browser,
             open_browser=_open_browser,
-            launcher_name="PrimusCentral V4",
+            launcher_name=_launcher_display_name(),
         ):
             osc_service.stop()
             fps_listener.stop()
@@ -739,7 +745,7 @@ def main():
             target=_ui_lifecycle_monitor, args=(server,), daemon=True)
         ui_thread.start()
 
-    print("PrimusCentral V4")
+    print(_launcher_display_name())
     print(f"  URL: {url}")
     print(f"  Devices: {len(state.devices)}")
     osc_status = osc_service.status()

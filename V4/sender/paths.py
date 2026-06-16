@@ -103,6 +103,13 @@ def frontend_index_path(frontend):
 
 def default_frontend_path():
     """Default browser URL path for the active packaged/source product."""
+    override = str(os.environ.get("PRIMUSV3_DEFAULT_FRONTEND", "") or "").strip().lower()
+    if override == "devices":
+        return "/devices"
+    if override == "primus":
+        return "/primus"
+    if override == "radius":
+        return "/radius"
     return "/primus" if is_primus_product() else "/radius"
 
 

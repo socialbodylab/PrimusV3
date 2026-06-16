@@ -25,6 +25,11 @@ PRODUCT_DEFAULTS = {
         "name": "PrimusCentral",
         "bundle_id": "com.socialbodylab.PrimusCentral",
     },
+    "devices": {
+        "name": "DeviceManager",
+        "bundle_id": "com.socialbodylab.DeviceManager",
+        "entry": "run_devices.py",
+    },
 }
 APP_ICON_SOURCE = Path("assets") / "appIcon.png"
 MACOS_ICON_SOURCE = APP_ICON_SOURCE
@@ -64,7 +69,7 @@ def _data_files(v4_dir, sender_dir, product="radius"):
         (v4_dir / "Arduino", "Arduino"),
         (sender_dir / "web", "sender/web"),
     ]
-    if product == "primus":
+    if product in ("primus", "devices"):
         files.extend([
             (sender_dir / "clips", "sender/clips"),
             (sender_dir / "looks", "sender/looks"),
@@ -157,7 +162,8 @@ def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
         if source.exists():
             cmd.extend(["--add-data", _add_data_arg(source, dest)])
 
-    cmd.append(str(sender_dir / "run.py"))
+    entry_name = PRODUCT_DEFAULTS.get(args.product, {}).get("entry", "run.py")
+    cmd.append(str(sender_dir / entry_name))
     return cmd
 
 
@@ -447,9 +453,9 @@ def main(argv=None):
     )
     parser.add_argument(
         "--product",
-        choices=("radius", "primus"),
+        choices=("radius", "primus", "devices"),
         default=os.environ.get("PRIMUSV3_SENDER_PRODUCT", "radius"),
-        help="Sender product to build: radius (RadiusCentral) or primus (PrimusCentral).",
+        help="Sender product to build: radius (RadiusCentral), primus (PrimusCentral), or devices (DeviceManager).",
     )
     parser.add_argument(
         "--name",

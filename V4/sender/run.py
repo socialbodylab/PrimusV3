@@ -36,6 +36,9 @@ def _bootstrap_product_from_bundle():
         os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
     elif "radius" in executable:
         os.environ["PRIMUSV3_SENDER_PRODUCT"] = "radius"
+    elif "device" in executable:
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        os.environ["PRIMUSV3_DEFAULT_FRONTEND"] = "devices"
 
 
 _bootstrap_product_from_argv()
