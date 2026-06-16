@@ -1,12 +1,20 @@
-# Running PrimusV3
+# Developer Commands
+
+> **Audience:** Developers and technical operators. Quick-reference shell commands for starting the sender, killing instances, finding serial ports, and uploading firmware. For show operator network setup and app walkthrough, see [HumanGuide.md](HumanGuide.md).
 
 ## Start the sender
 
+**Primus Central** (LED + audio nodes):
 ```bash
-cd ~/Documents/RUR/PrimusV3/V3_1/sender && python3 run.py
+python3 V3_6/sender/run.py
 ```
 
-The sender prints its URL on startup and opens it in your browser automatically. No arguments needed — it picks an available port.
+**Radius Central** (audio-only nodes):
+```bash
+python3 V3_6/sender/run.py --mode radius
+```
+
+The sender prints its URL on startup and opens it in your browser automatically.
 
 ## Kill all running instances
 
@@ -42,7 +50,7 @@ lsof -i -P -n | grep Python | grep LISTEN
 
 ```bash
 pkill -f "python3.*run.py"
-cd ~/Documents/RUR/PrimusV3/V3_1/sender && python3 run.py
+python3 V3_6/sender/run.py
 ```
 
 ## Find the serial port
@@ -63,18 +71,32 @@ ls /dev/cu.usb*
 
 Plug the board in, run it again, and the new entry is your board. ESP32-S3 (Feather TFT) shows up as `cu.usbmodemXXXX`; HUZZAH32 shows up as `cu.usbserialXXXX`.
 
+## Build and upload LED receiver firmware
+
+```bash
+cd V3_6/Arduino && ./upload.sh --auto
+```
+
+See `V3_6/FIRMWARE_DEVELOPMENT.md` for full profile options (`-v1`, `-v2`, `-v3`).
+
 ## Build and upload Radius firmware
 
 **V2 (ESP32-S3 Reverse TFT Feather):**
 
 ```bash
-cd ~/Documents/RUR/PrimusV3/V3_2/Arduino && ./upload.sh /dev/cu.usbmodemXXXX
+cd V3_6/Arduino && ./upload.sh --auto
 ```
 
 **V1 (HUZZAH32):**
 
 ```bash
-cd ~/Documents/RUR/PrimusV3/V3_2/Arduino && ./upload.sh --board feather-esp32 /dev/cu.usbserialXXXX
+cd V3_6/Arduino && ./upload.sh --auto
 ```
 
-Specify the port explicitly to avoid the wrong device being detected.
+Specify the port explicitly to avoid the wrong device being detected:
+
+```bash
+cd V3_6/Arduino && ./upload.sh /dev/cu.usbmodemXXXX
+```
+
+See `V3_6/Arduino/radiusV2/HARDWARE_WIRING.md` for Radius V2 wiring.

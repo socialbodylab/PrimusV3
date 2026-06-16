@@ -1,5 +1,7 @@
 # User Guide : Primus Central + Firmware
 
+> **Audience:** Show operators. Covers router and network setup, static IP configuration, and the Primus Central app UI. For developer shell commands (starting the sender, firmware upload, etc.), see [DEVELOPER_COMMANDS.md](DEVELOPER_COMMANDS.md).
+
 ## Router Setup
 SSID: OPERADEV  
 pw: torrentoflight

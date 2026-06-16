@@ -57,15 +57,17 @@ The 0.7 workshop release defaults the browser UI to a workshop profile that hide
 
 ## Audio Receiver Firmware (V3.2 / Radius)
 
-Radius nodes are audio-only ESP32 devices controlled by the V3.6 sender via Art-Net. They run the `V3_2/Arduino/radiusV2/` firmware and are distinct from the LED receiver track.
+Radius nodes are audio-only ESP32 devices controlled by the V3.6 sender via Art-Net. The active firmware is in `V3_6/Arduino/radiusV2/`; `V3_2/Arduino/radiusV2/` is the historical reference.
 
-- `V3_2/Arduino/radiusV2/` — Radius firmware.
+- `V3_6/Arduino/radiusV2/` — Active Radius firmware (colocated with V3.6 sender).
   - `config.h` — Adds Music Maker pin config, `ARTNET_OPCODE_AUDIO_CMD 0x8300`, `ARTNET_OPCODE_FTP_CMD 0x8301`.
   - `radiusV2.ino` — Main sketch: WiFi, audio, FTP orchestration.
   - `audio.h` — WAV playback via VS1053 (Music Maker FeatherWing, SPI).
   - `ftp.h` — FTP server. Starts automatically at boot; Art-Net 0x8301 and D1 button can toggle it.
   - `display.h` — Audio and FTP screens.
-- `V3_2/Arduino/upload.sh` — arduino-cli build/upload script.
+  - `cues.h` — Loads `/cues.json` from SD at boot (ArduinoJson). Max 64 cues.
+- `V3_2/Arduino/radiusV2/` — Historical reference (same code, kept for git history).
+- Upload: `cd V3_6/Arduino && ./upload.sh` (uses same upload.sh as LED firmware).
 
 **Radius V1** = HUZZAH32 (no display). **Radius V2** = ESP32-S3 Reverse TFT Feather (240x135 TFT). Both use the Music Maker FeatherWing (VS1053) and the same `radiusV2` firmware via `TARGET_BOARD` compile-time switch.
 
@@ -96,7 +98,8 @@ The sender and receiver must agree on:
 ## How to run and test
 
 ```bash
-python3 V3_6/sender/run.py
+python3 V3_6/sender/run.py                        # Primus Central (LED + audio)
+python3 V3_6/sender/run.py --mode radius           # Radius Central (audio-only)
 python3 V3_6/sender/run.py --port 0
 python3 V3_6/sender/run.py --no-browser --port 0
 python3 -m py_compile V3_6/sender/*.py
