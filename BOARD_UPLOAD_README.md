@@ -1,12 +1,19 @@
 # Board Upload README
 
-This guide is for someone who has already cloned the PrimusV3 repository and needs to upload V3.5 firmware to receiver boards for the first time.
-
-All project commands below assume your terminal is at the repository root:
+This guide is for uploading PrimusV3 firmware to receiver boards. The active firmware track is **V3.6**, located in `V3_6/Arduino/`. All commands assume your terminal is at the repository root:
 
 ```bash
 cd /path/to/PrimusV3
 ```
+
+There are two firmware types:
+
+| Firmware | Hardware | Profiles | Purpose |
+|---|---|---|---|
+| **LED receiver** | Huzzah32, ESP32 Feather V2, ESP32-S3 Reverse TFT | `-v1` `-v2` `-v3` | NeoPixel / NeoPXL8 LED output |
+| **Radius (audio)** | Huzzah32 (headless), ESP32-S3 Reverse TFT | `-rv1` `-rv2` | WAV playback via Music Maker FeatherWing |
+
+---
 
 ## Automated Setup (Recommended)
 
@@ -16,60 +23,37 @@ Install Python 3 manually first, then run:
 python3 setup_primus.py
 ```
 
-The setup script checks what is already installed and only fills in missing pieces where it can. It creates/checks `.venv`, confirms the sender has no external Python package requirements, installs or reuses Arduino CLI, configures the ESP32 Arduino core, and installs/checks the Arduino libraries needed by the selected board profiles.
-
-To inspect a machine without installing anything:
+The setup script checks what is already installed and only fills in missing pieces: creates/checks `.venv`, installs or reuses Arduino CLI, configures the ESP32 Arduino core, and installs/checks the Arduino libraries needed by the selected profiles.
 
 ```bash
-python3 setup_primus.py --check
-```
-
-To set up only one board family, pass the profile list:
-
-```bash
-python3 setup_primus.py --profiles v2
-```
-
-After setup, these commands should work:
-
-```bash
-.venv/bin/python V3_5/sender/run.py
-./V3_5/Arduino/upload.sh --ports
-./V3_5/Arduino/upload.sh -v2 --auto
+python3 setup_primus.py --check          # inspect without installing
+python3 setup_primus.py --profiles v2    # install for one profile only
 ```
 
 Useful setup flags:
 
 | Flag | Use |
-| --- | --- |
-| `--check` | Report setup status without installing anything. |
-| `--profiles v1,v2,v3` | Choose which board profiles to install/check Arduino libraries for. Defaults to all profiles. |
-| `--skip-arduino` | Only create/check the Python environment. |
-| `--skip-venv` | Skip local `.venv` setup. |
-| `--arduino-cli /path/to/arduino-cli` | Use a specific Arduino CLI executable. |
-| `--force` | Refresh setup artifacts where possible. |
+|---|---|
+| `--check` | Report setup status without installing anything |
+| `--profiles v1,v2,v3,rv1,rv2` | Limit which profiles are prepared (defaults to all) |
+| `--skip-arduino` | Only create/check the Python environment |
+| `--skip-venv` | Skip local `.venv` setup |
+| `--arduino-cli /path/to/arduino-cli` | Use a specific Arduino CLI executable |
+| `--force` | Refresh setup artifacts where possible |
 
-If automatic Arduino CLI setup is not available on your platform, use the manual setup steps below.
+---
 
 ## Manual Setup (Fallback)
 
 ### 1. Install Required Tools
 
-The upload script is a Bash script that uses Arduino CLI and Python 3.
-
-Choose the setup commands for your operating system.
-
 #### macOS
-
-Using Homebrew:
 
 ```bash
 brew install arduino-cli python
 ```
 
 #### Linux
-
-On Debian/Ubuntu-style systems:
 
 ```bash
 sudo apt update
@@ -78,15 +62,10 @@ sudo apt install -y curl ca-certificates python3
 mkdir -p "$HOME/.local/bin"
 curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="$HOME/.local/bin" sh
 export PATH="$HOME/.local/bin:$PATH"
-```
-
-To keep Arduino CLI on your PATH for future terminals:
-
-```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
 ```
 
-Most Linux systems also require serial-port permissions before uploading:
+Most Linux systems also require serial port permissions:
 
 ```bash
 sudo usermod -aG dialout "$USER"
@@ -96,223 +75,293 @@ Log out and back in after changing the `dialout` group.
 
 #### Windows
 
-The upload script is easiest to run from WSL. Install WSL, open an Ubuntu terminal, then follow the Linux commands above:
+The upload script is easiest to run from WSL:
 
 ```powershell
 wsl --install
 ```
 
-Git Bash can also work if `arduino-cli` and `python3` are on the Git Bash PATH:
+Then follow the Linux commands above. Git Bash also works if `arduino-cli` and `python3` are on the PATH.
 
-```powershell
-winget install Git.Git
-winget install Python.Python.3
-winget install ArduinoSA.CLI
-```
-
-After installing, open a new terminal and verify the tools:
+Verify the tools are available:
 
 ```bash
 arduino-cli version
 python3 --version
 ```
 
-### 2. Configure Arduino CLI For ESP32
-
-The receiver boards use the Espressif ESP32 Arduino core. Add the ESP32 package index and install the core once:
+### 2. Configure Arduino CLI for ESP32
 
 ```bash
 arduino-cli config init || true
-arduino-cli config dump | grep -q "espressif.github.io/arduino-esp32" || \
-  arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core update-index
 arduino-cli core install esp32:esp32
 ```
 
-If `config init` reports that a config file already exists, that is fine.
-
 ### 3. Install Board Libraries
 
-The upload script can install/check the Arduino libraries required by each selected board profile.
-
-Run the install command for the board type you plan to upload:
+Run the install command for the profile(s) you plan to use:
 
 ```bash
-./V3_5/Arduino/upload.sh -v1 --install
-./V3_5/Arduino/upload.sh -v2 --install
-./V3_5/Arduino/upload.sh -v3 --install
+# LED receiver profiles
+cd V3_6/Arduino && ./upload.sh -v1 --install
+cd V3_6/Arduino && ./upload.sh -v2 --install
+cd V3_6/Arduino && ./upload.sh -v3 --install
+
+# Radius audio profiles
+cd V3_6/Arduino && ./upload.sh -rv2 --install
+cd V3_6/Arduino && ./upload.sh -rv1 --install
 ```
 
-Board profile choices:
+---
 
-| Flag | Board profile |
-| --- | --- |
-| `-v1` | V1 Adafruit Huzzah32 ESP32 Feather |
-| `-v2` | V2 Adafruit ESP32 Feather V2 |
-| `-v3` | V3.1 ESP32-S3 Reverse TFT Feather with NeoPXL8 FeatherWing |
+## Board Profiles
 
-### 4. Optional WiFi Credential Overrides
+### LED Receiver Profiles
 
-By default, the firmware uses the WiFi SSID and password in `V3_5/Arduino/primusV3_receiver/config.h`. To upload firmware for a different router without editing source files, pass credentials to the upload script:
+These flash `V3_6/Arduino/primusV3_receiver/`.
+
+| Flag | Board | FQBN | Upload speed |
+|---|---|---|---|
+| `-v1` | Adafruit Huzzah32 / ESP32 Feather | `featheresp32` | 115200 |
+| `-v2` | Adafruit Feather ESP32 V2 | `adafruit_feather_esp32_v2` | 115200 |
+| `-v3` | Adafruit Feather ESP32-S3 Reverse TFT | `adafruit_feather_esp32s3_reversetft` | 921600 |
+
+Required Arduino libraries by profile:
+
+| Profile | Libraries |
+|---|---|
+| `-v1` | Adafruit NeoPixel |
+| `-v2` | Adafruit NeoPixel |
+| `-v3` | Adafruit NeoPXL8, Adafruit ST7735 and ST7789 Library, Adafruit GFX Library |
+
+**Default WiFi**: `OPERADEV` / `torrentoflight` (see [WiFi Credentials](#wifi-credentials) below to override).
+
+### Radius Audio Profiles
+
+These flash `V3_6/Arduino/radiusV2/`.
+
+| Flag | Board | FQBN | Upload speed |
+|---|---|---|---|
+| `-rv2` | Adafruit Feather ESP32-S3 Reverse TFT | `adafruit_feather_esp32s3_reversetft` | 921600 |
+| `-rv1` | Adafruit Huzzah32 (headless, no display) | `featheresp32` | 460800 |
+
+Required Arduino libraries (all profiles):
+
+| Library | Purpose |
+|---|---|
+| Adafruit VS1053 | WAV playback via Music Maker FeatherWing |
+| ArduinoJson | Parsing `/cues.json` from SD card |
+| SimpleFTPServer | FTP server for SD card file management |
+
+**Default WiFi**: `RUR` / `rurrurrur` — already baked in. No credential flags needed for the RUR router.
+
+---
+
+## WiFi Credentials
+
+### LED receiver
+
+The LED receiver firmware defaults to `OPERADEV`. To compile for the RUR router without editing source files:
 
 ```bash
-./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
+cd V3_6/Arduino && ./upload.sh -v3 -ssid "RUR" -pw "rurrurrur" --auto
 ```
 
-Credential flags work with compile-only, single-board, multi-board, and explicit-port uploads:
+Credential flags work with all upload modes:
 
 ```bash
-./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --compile
-./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --all
-./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" /dev/cu.usbserial-XXXX
+./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" --compile
+./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" --auto
+./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" --all
+./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" /dev/cu.usbserial-XXXX
 ```
 
-These values are compiled into the firmware for that build only. They do not modify `config.h`. Quote SSIDs or passwords that contain spaces or shell-special characters. Be aware that commands typed directly into a terminal may be stored in shell history.
+These values are compiled into the binary for that build only. They do not modify `config.h`.
 
-### 5. Optional Compile / Verify
+### Radius firmware
 
-Use `--compile` when you want to check that the firmware builds without uploading. This is like Arduino IDE Verify.
-
-Pick the profile that matches your board:
+The Radius firmware defaults to `RUR` / `rurrurrur`. No credential flags are required:
 
 ```bash
-./V3_5/Arduino/upload.sh -v1 --compile
-./V3_5/Arduino/upload.sh -v2 --compile
-./V3_5/Arduino/upload.sh -v3 --compile
+cd V3_6/Arduino && ./upload.sh -rv2 --auto
 ```
 
-This step is optional. Upload commands compile automatically before flashing, just like Arduino IDE Upload.
-
-### 6. Find Connected Boards
-
-Plug receiver boards in over USB, then list likely ESP32 serial ports:
+To override for a different network:
 
 ```bash
-./V3_5/Arduino/upload.sh --ports
+./upload.sh -rv2 -ssid "OtherNetwork" -pw "other-password" --auto
 ```
 
-Typical port names look like:
+---
 
-| OS | Example port |
-| --- | --- |
+## Find Connected Boards
+
+Plug boards in over USB, then list detected ESP32-like serial ports:
+
+```bash
+cd V3_6/Arduino && ./upload.sh --ports
+```
+
+Typical port names:
+
+| OS | Example |
+|---|---|
 | macOS | `/dev/cu.usbserial-XXXX`, `/dev/cu.usbmodemXXXX` |
 | Linux | `/dev/ttyUSB0`, `/dev/ttyACM0` |
 | Windows | `COM3`, `COM4` |
 
-If no board appears, check that you are using a USB data cable. For V1/V2 boards, you may also need the Silicon Labs CP210x USB-to-UART driver from the board vendor.
+If no board appears, check that you are using a USB data cable (not charge-only). V1/V2 Huzzah32 boards may need the Silicon Labs CP210x USB-to-UART driver.
 
-### 7. Upload Firmware
+---
 
-#### One Connected Board
+## Upload Commands
 
-Use `--auto` when exactly one ESP32-like receiver is plugged in. This compiles first, then uploads:
-
-```bash
-./V3_5/Arduino/upload.sh -v2 --auto
-```
-
-Replace `-v2` with the matching board profile.
-
-#### Multiple Boards Of The Same Type
-
-Use `--all` when every detected ESP32-like serial port should receive the same profile. This compiles once, then uploads sequentially:
+### One connected board
 
 ```bash
-./V3_5/Arduino/upload.sh -v2 --all
+cd V3_6/Arduino && ./upload.sh -v3 --auto      # LED receiver V3.1
+cd V3_6/Arduino && ./upload.sh -rv2 --auto     # Radius V2 (display)
+cd V3_6/Arduino && ./upload.sh -rv1 --auto     # Radius V1 (headless)
 ```
 
-Run `--ports` first. You do not need to run `--compile` separately before `--all`.
+`--auto` compiles first, then uploads to the single detected ESP32 port.
 
-#### Chosen Ports Only
-
-Use explicit ports when auto-detection is ambiguous or mixed board types are connected. This compiles once, then uploads sequentially to the ports you provide:
+### Multiple boards of the same type
 
 ```bash
-./V3_5/Arduino/upload.sh -v1 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
-./V3_5/Arduino/upload.sh -v2 /dev/ttyUSB0 /dev/ttyUSB1
-./V3_5/Arduino/upload.sh -v3 COM3
+cd V3_6/Arduino && ./upload.sh -v3 --all
+cd V3_6/Arduino && ./upload.sh -rv2 --all
 ```
 
-## Arduino IDE Upload Fallback
+`--all` compiles once, then uploads sequentially to every detected ESP32-like port. Run `--ports` first to confirm which ports will be targeted.
 
-The upload script is the recommended firmware upload path because it selects the correct board profile, checks libraries, chooses the upload speed, handles serial-port selection, and can compile temporary WiFi credential overrides without editing source files. If necessary, the V3.5 receiver firmware can still be uploaded through the Arduino IDE because it is a normal Arduino sketch.
+### Explicit ports
 
-Open this sketch in Arduino IDE:
-
-```text
-V3_5/Arduino/primusV3_receiver/primusV3_receiver.ino
+```bash
+cd V3_6/Arduino && ./upload.sh -rv2 /dev/cu.usbmodemXXXX
+cd V3_6/Arduino && ./upload.sh -v1 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
 ```
 
-In Arduino IDE, install the ESP32 board package. Add the Espressif package index in Preferences if it is not already configured:
+### Compile only (no upload)
 
-```text
+```bash
+cd V3_6/Arduino && ./upload.sh -v1 --compile
+cd V3_6/Arduino && ./upload.sh -v2 --compile
+cd V3_6/Arduino && ./upload.sh -v3 --compile
+cd V3_6/Arduino && ./upload.sh -rv2 --compile
+cd V3_6/Arduino && ./upload.sh -rv1 --compile
+```
+
+---
+
+## Arduino IDE Fallback
+
+The upload script is the recommended path. If you need to use Arduino IDE:
+
+### LED receiver
+
+Open: `V3_6/Arduino/primusV3_receiver/primusV3_receiver.ino`
+
+Add the Espressif package index in Preferences:
+
+```
 https://espressif.github.io/arduino-esp32/package_esp32_index.json
 ```
 
-Install the required libraries from Library Manager:
+Install libraries from Library Manager:
 
-| Board profile | Required libraries |
-| --- | --- |
-| `v1` | `Adafruit NeoPixel` |
-| `v2` | `Adafruit NeoPixel` |
-| `v3` | `Adafruit NeoPXL8`, `Adafruit ST7735 and ST7789 Library`, `Adafruit GFX Library` |
+| Profile | Libraries |
+|---|---|
+| `v1`, `v2` | Adafruit NeoPixel |
+| `v3` | Adafruit NeoPXL8, Adafruit ST7735 and ST7789 Library, Adafruit GFX Library |
 
-Select the matching board and upload speed:
+Select board and upload speed:
 
 | Profile | Arduino IDE board | Upload speed |
-| --- | --- | --- |
-| `v1` | Adafruit ESP32 Feather / Huzzah32-compatible ESP32 Feather | `115200` |
-| `v2` | Adafruit Feather ESP32 V2 | `115200` |
-| `v3` | Adafruit Feather ESP32-S3 Reverse TFT | `921600` |
+|---|---|---|
+| `v1` | Adafruit ESP32 Feather / Huzzah32 | 115200 |
+| `v2` | Adafruit Feather ESP32 V2 | 115200 |
+| `v3` | Adafruit Feather ESP32-S3 Reverse TFT | 921600 |
 
-### Board Profile Selection In Arduino IDE
-
-The upload script passes one of these compile-time profile flags:
-
-```text
--DPRIMUS_PROFILE_V1
--DPRIMUS_PROFILE_V2
--DPRIMUS_PROFILE_V3_1
-```
-
-When no profile flag is supplied, `config.h` defaults to the V3.1 Reverse TFT profile. This means Arduino IDE uploads work directly for V3.1 as long as the correct board, port, upload speed, and libraries are selected.
-
-For V1 or V2 uploads from Arduino IDE, temporarily define the matching profile near the top of `V3_5/Arduino/primusV3_receiver/config.h`, before the default-profile block:
+The firmware defaults to the V3.1 profile. For V1 or V2, temporarily define the matching profile near the top of `config.h`:
 
 ```cpp
-#define PRIMUS_PROFILE_V1
+#define PRIMUS_PROFILE_V1   // or PRIMUS_PROFILE_V2
 ```
 
-or:
+Remove the temporary definition before building for another profile.
 
-```cpp
-#define PRIMUS_PROFILE_V2
+### Radius firmware
+
+Open: `V3_6/Arduino/radiusV2/radiusV2.ino`
+
+Install libraries from Library Manager:
+
+- Adafruit VS1053
+- ArduinoJson
+- SimpleFTPServer
+
+Select board and upload speed:
+
+| Profile | Arduino IDE board | Upload speed | Extra build flag |
+|---|---|---|---|
+| `rv2` | Adafruit Feather ESP32-S3 Reverse TFT | 921600 | *(none — default)* |
+| `rv1` | Adafruit ESP32 Feather / Huzzah32 | 460800 | `TARGET_BOARD=2` |
+
+For `rv1`, add this in Arduino IDE Preferences → "Additional build flags":
+
+```
+-DTARGET_BOARD=2
 ```
 
-Only one profile macro should be active at a time. Remove or change the temporary definition before building for another board profile.
+SimpleFTPServer also requires two build flags that the upload script sets automatically. For Arduino IDE, add all three together:
 
-The script's `-ssid` and `-pw` flags are not provided by Arduino IDE. When using the IDE fallback path, WiFi defaults come from `V3_5/Arduino/primusV3_receiver/config.h`, unless you configure custom IDE build flags yourself.
+```
+-DTARGET_BOARD=2 -DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5
+```
+
+For `rv2`, only the FTP flags are needed:
+
+```
+-DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5
+```
+
+---
 
 ## Quick Reference
 
 ```bash
-# List boards
-./V3_5/Arduino/upload.sh --ports
+# List connected boards
+cd V3_6/Arduino && ./upload.sh --ports
 
-# Compile only, like Arduino IDE Verify
-./V3_5/Arduino/upload.sh -v2 --compile
+# ── LED receiver ────────────────────────────────────────────────
+# Compile only
+./upload.sh -v3 --compile
 
-# Compile with custom WiFi defaults
-./V3_5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --compile
+# Flash one board (V3.1 for RUR router)
+./upload.sh -v3 -ssid "RUR" -pw "rurrurrur" --auto
 
-# Upload one detected board; compiles first automatically
-./V3_5/Arduino/upload.sh -v2 --auto
+# Flash all boards of the same type
+./upload.sh -v3 -ssid "RUR" -pw "rurrurrur" --all
 
-# Upload all detected boards of the same type; compiles first automatically
-./V3_5/Arduino/upload.sh -v2 --all
+# ── Radius audio ────────────────────────────────────────────────
+# Flash one Radius V2 (display) — RUR credentials already in firmware
+./upload.sh -rv2 --auto
 
-# Upload chosen ports only; compiles first automatically
-./V3_5/Arduino/upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
+# Flash one Radius V1 (headless)
+./upload.sh -rv1 --auto
+
+# Compile only
+./upload.sh -rv2 --compile
+./upload.sh -rv1 --compile
 ```
 
-More firmware details are in [V3_5/FIRMWARE_DEVELOPMENT.md](V3_5/FIRMWARE_DEVELOPMENT.md).
+---
+
+## Further Reading
+
+- [V3_6/FIRMWARE_DEVELOPMENT.md](V3_6/FIRMWARE_DEVELOPMENT.md) — firmware profiles, pins, protocol, and validation
+- [DEVELOPER_COMMANDS.md](DEVELOPER_COMMANDS.md) — sender startup, test suite, WAV file tools
+- [API_REFERENCE.md](API_REFERENCE.md) — Art-Net opcodes, HTTP API, audio sync protocol
