@@ -1,0 +1,25 @@
+{
+  "id": "f7031d3d-0bf1-4083-88a5-21787400f9a1",
+  "name": "Binary Fill",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    255,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "once",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "center",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.476590+00:00",
+  "modified": "2026-04-08T15:30:31.476602+00:00"
+}

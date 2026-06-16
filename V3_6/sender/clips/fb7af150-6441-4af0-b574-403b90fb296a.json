@@ -1,0 +1,25 @@
+{
+  "id": "fb7af150-6441-4af0-b574-403b90fb296a",
+  "name": "Ice Blue Gradient",
+  "group": "Ice Blue Gradient",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    180,
+    220,
+    255
+  ],
+  "end_color": [
+    0,
+    40,
+    100
+  ],
+  "speed": 0.8,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.676833+00:00",
+  "modified": "2026-04-08T18:59:58.676845+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "5bf7e68e-eb09-4989-9615-f06caa75efcc",
+  "name": "Comet Sparkle Ribbon",
+  "group": "noise",
+  "output_type": "extra_long_strip",
+  "effect": "sparkle_noise",
+  "start_color": [
+    6,
+    0,
+    16
+  ],
+  "end_color": [
+    255,
+    150,
+    220
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 8.0,
+  "created": "2026-05-13T20:00:15+00:00",
+  "modified": "2026-05-13T20:00:15+00:00"
+}

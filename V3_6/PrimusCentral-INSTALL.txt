@@ -1,0 +1,21 @@
+PrimusCentral macOS Install Notes
+
+Signed and notarized releases (0.65 and later)
+
+1. Open the release DMG, for example PrimusCentral-0.7-macOS-arm64.dmg.
+2. Drag PrimusCentral.app into Applications.
+3. Open PrimusCentral from Applications or Launchpad.
+
+Developer ID signed, notarized, and stapled releases should open without the old quarantine-removal workaround. If macOS still warns after download, confirm the release DMG checksum matches the published .sha256 file before overriding the warning.
+
+Local unsigned test builds
+
+Unsigned builds from build_sender_app.py without --sign-identity are for local testing only. macOS may block them until you allow the app in System Settings > Privacy & Security, or remove quarantine after you trust the build:
+
+  xattr -dr com.apple.quarantine "/path/to/PrimusCentral.app"
+
+Notes
+
+- PrimusCentral must be on the same network as your Primus receiver hardware.
+- Packaged app data is stored under ~/Library/Application Support/PrimusV3/V3_6/sender/
+- For release build steps, see V3_6/PACKAGING.md

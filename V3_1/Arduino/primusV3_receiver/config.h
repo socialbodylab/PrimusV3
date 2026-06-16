@@ -63,16 +63,17 @@ const OutputTypeDef OUTPUT_TYPE_TABLE[] = {
 #define NUM_OUTPUT_TYPES (sizeof(OUTPUT_TYPE_TABLE) / sizeof(OUTPUT_TYPE_TABLE[0]))
 
 // Convenience accessors
-inline const char*  typeName(OutputType t)       { return OUTPUT_TYPE_TABLE[t].name; }
-inline uint16_t     typePixels(OutputType t)      { return OUTPUT_TYPE_TABLE[t].pixels; }
-inline uint8_t      typeBpp(OutputType t)         { return OUTPUT_TYPE_TABLE[t].bytesPerPixel; }
-inline LayoutType   typeLayout(OutputType t)      { return OUTPUT_TYPE_TABLE[t].layout; }
+inline bool         isValidOutputType(OutputType t) { return (uint8_t)t < NUM_OUTPUT_TYPES; }
+inline const char*  typeName(OutputType t)       { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].name : "Off"; }
+inline uint16_t     typePixels(OutputType t)      { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].pixels : 0; }
+inline uint8_t      typeBpp(OutputType t)         { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].bytesPerPixel : 0; }
+inline LayoutType   typeLayout(OutputType t)      { return isValidOutputType(t) ? OUTPUT_TYPE_TABLE[t].layout : LAYOUT_NONE; }
 
 // =====================================================================
 //  Per-Output Configuration
 // =====================================================================
-#define NUM_OUTPUTS 3
-#define MAX_OUTPUTS 3   // hardware max (NeoPXL8 ports 0-2)
+#define NUM_OUTPUTS 2
+#define MAX_OUTPUTS 2   // two outputs via FeatherWing fixed outputs 6 and 7
 
 struct OutputConfig {
   OutputType  type;
@@ -92,23 +93,17 @@ inline void deriveFromType(OutputConfig& cfg) {
 // Change these to match what's physically plugged in.
 // Set unused outputs to OUTPUT_OFF.
 inline void loadDefaultConfig(OutputConfig outputs[NUM_OUTPUTS]) {
-  // Output 0 — Short strip, 68 RGB LEDs
+  // Output 0 — FeatherWing output 6 (A4 / GPIO14, fixed trace)
   outputs[0].type     = OUTPUT_SHORT_STRIP;
-  outputs[0].pxl8Port = 0;
+  outputs[0].pxl8Port = 6;
   outputs[0].universe = 0;
   deriveFromType(outputs[0]);
 
-  // Output 1 — Long strip, 72 RGB LEDs
+  // Output 1 — FeatherWing output 7 (A3 / GPIO15, fixed trace)
   outputs[1].type     = OUTPUT_LONG_STRIP;
-  outputs[1].pxl8Port = 1;
+  outputs[1].pxl8Port = 7;
   outputs[1].universe = 1;
   deriveFromType(outputs[1]);
-
-  // Output 2 — Grid 8x8, 64 RGB LEDs
-  outputs[2].type     = OUTPUT_GRID;
-  outputs[2].pxl8Port = 2;
-  outputs[2].universe = 2;
-  deriveFromType(outputs[2]);
 }
 
 // Count how many outputs are actually active
@@ -126,10 +121,12 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // Maximum pixels on any single port — NeoPXL8 allocates this for all 8 ports
 #define MAX_LEDS_PER_PORT 72
 
-// Pin mapping: ESP32-S3 GPIO → NeoPXL8 input port
-#define PIN_PORT_0  18   // A0 / GPIO18
-#define PIN_PORT_1  17   // A1 / GPIO17
-#define PIN_PORT_2  16   // A2 / GPIO16
+// Pin mapping: ESP32-S3 GPIO → NeoPXL8 strand index
+// Using FeatherWing (M0) outputs 6 and 7 — hardwired PCB traces, no solder bridges.
+// A4 (GPIO14) and A3 (GPIO15) have no conflicts with any other peripheral.
+// Connect LED strips to the physical output 6 and 7 connectors on the FeatherWing.
+#define PIN_PORT_6  14   // A4 / GPIO14 — FeatherWing output 6 (fixed trace)
+#define PIN_PORT_7  15   // A3 / GPIO15 — FeatherWing output 7 (fixed trace)
 
 // =====================================================================
 //  Buttons — ESP32-S3 Reverse TFT Feather
@@ -156,11 +153,13 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_POLLREPLY 0x2100
 #define ARTNET_OPCODE_ADDRESS  0x6000
 #define ARTNET_OPCODE_OUTPUT_CONFIG 0x8100  // Vendor-defined: set output types
+#define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
 #define ARTNET_PROTOCOL_VER    14
 
 // Device identity — reported in ArtPollReply
 #define DEVICE_SHORT_NAME  "PrimusV3"          // max 17 chars + null
 #define DEVICE_LONG_NAME   "PrimusV3 LED Node"  // max 63 chars + null
+#define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
 #define FIRMWARE_VERSION_L 0
 #define OEM_CODE           0xFFFF                // generic / unregistered

@@ -1,0 +1,92 @@
+{
+  "id": "8c4ae7c3-9cf8-464b-a063-a10aa17ddc9c",
+  "name": "Nick Test Look",
+  "description": "",
+  "outputs": [
+    {
+      "port": "A0",
+      "type": "short_strip"
+    },
+    {
+      "port": "A1",
+      "type": "short_strip"
+    }
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "d119ecac-9b80-4955-bb05-a693f2db823c",
+          "clip_id": "5e9f9558-d95b-425a-98d0-4695ac07ea5a",
+          "clip_name": "Sunset Chase",
+          "start_color": [
+            255,
+            80,
+            0
+          ],
+          "end_color": [
+            255,
+            200,
+            50
+          ],
+          "start_time": 0,
+          "duration": 5,
+          "fade_in": 0.5,
+          "fade_out": 0.5,
+          "speed_override": null
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "b9e5666d-3527-4768-8f1e-c80ff90fb5fd",
+          "clip_id": "0eb43744-fe6d-4ce4-a2dd-cf4ab3a96c76",
+          "clip_name": "Chase Forward",
+          "start_color": [
+            0,
+            0,
+            0
+          ],
+          "end_color": [
+            0,
+            255,
+            100
+          ],
+          "start_time": 0.8624999999999998,
+          "duration": 5,
+          "fade_in": 0.5,
+          "fade_out": 0.5,
+          "speed_override": null
+        },
+        {
+          "id": "ec5a8341-a35a-4254-b460-288086dff03a",
+          "clip_id": "eda1f83d-b32a-4216-8be6-5fceee3f5981",
+          "clip_name": "Frost Shimmer",
+          "start_color": [
+            150,
+            200,
+            255
+          ],
+          "end_color": [
+            255,
+            255,
+            255
+          ],
+          "start_time": 5.85,
+          "duration": 4,
+          "fade_in": 0.5,
+          "fade_out": 0.5,
+          "speed_override": null
+        }
+      ]
+    }
+  ],
+  "playback": "once",
+  "total_duration": 10,
+  "speed": 1,
+  "modified": "2026-05-11T19:49:55.435681+00:00",
+  "created": "2026-05-11T19:49:55.435681+00:00"
+}

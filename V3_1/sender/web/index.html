@@ -5,19 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PrimusV3.1 LED Controller</title>
 <link rel="stylesheet" href="/css/style.css">
-<script>
-window.PAGE_CONFIG = {
-    modes: ["mixer", "controller", "audio", "cues", "log"],
-    modeLabels: { mixer: "Look Mixer", controller: "Look Controller", audio: "Audio", cues: "Audio Cues", log: "Net Log" },
-};
-</script>
 <script defer src="/js/alpine.min.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/look-mixer.js"></script>
 <script src="/js/look-controller.js"></script>
-<script src="/js/audio-panel.js"></script>
-<script src="/js/audio-cues.js"></script>
-<script src="/js/net-log.js"></script>
 </head>
 <body>
 
@@ -33,10 +24,25 @@ window.PAGE_CONFIG = {
         </template>
     </div>
     <div class="navbar-status" x-data>
+        <div class="playback-chip"
+             :class="$store.app.playbackClass()"
+             :title="$store.app.playback.detail">
+            <span class="playback-chip-label">Output</span>
+            <span class="playback-chip-value" x-text="$store.app.playback.label"></span>
+            <span class="playback-chip-meta" x-text="$store.app.playback.summary"></span>
+        </div>
         <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
-        <span x-text="$store.conn.devices.filter(d=>d.connected).length + '/' + $store.conn.devices.length + ' devices'"></span>
+        <span x-text="$store.app.connectedDeviceSummary"></span>
     </div>
 </nav>
+
+<div class="notice-banner" x-data x-show="$store.app.notice" x-cloak>
+    <div class="notice-pill"
+         :class="'notice-' + ($store.app.notice?.level || 'info')">
+        <span class="notice-text" x-text="$store.app.notice?.message"></span>
+        <button class="notice-close" @click="$store.app.clearNotice()">&times;</button>
+    </div>
+</div>
 
 <!-- ==================== MAIN ==================== -->
 <div class="main-content" x-data>
@@ -57,7 +63,7 @@ window.PAGE_CONFIG = {
                     <template x-if="$store.conn.renamingDevice !== di">
                         <span class="device-name" x-text="dev.name"
                               @dblclick="$store.conn.startRename(di)"
-                              title="Double-click to rename"></span>
+                              :title="$store.conn.renameHint(dev)"></span>
                     </template>
                     <template x-if="$store.conn.renamingDevice === di">
                         <input class="device-rename-input" type="text" maxlength="17"
@@ -73,7 +79,14 @@ window.PAGE_CONFIG = {
                                 @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
                                 x-text="dev.connected ? 'Off' : 'On'"></button>
                         <button class="btn btn-sm" x-show="dev.connected"
-                                @click="api('POST', '/api/hello_device', { device: di, volume: dev.is_audio ? ($store.audio?.volume[di] ?? 80) : undefined })">Hello</button>
+                            :disabled="!$store.conn.canHelloDevice(dev)"
+                            :title="$store.conn.helloHint(dev)"
+                                @click="api('POST', '/api/hello_device', { device: di })">Hello</button>
+                        <button class="btn btn-sm"
+                                :class="{ 'btn-primary': $store.conn.ipConfigDevice === di }"
+                                :disabled="!$store.conn.canConfigureIp(dev)"
+                                :title="$store.conn.ipConfigHint(dev)"
+                                @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)">IP</button>
                         <button class="btn btn-sm btn-danger" @click="$store.conn.removeDevice(di)">&times;</button>
                     </div>
                 </div>
@@ -83,11 +96,44 @@ window.PAGE_CONFIG = {
                           x-show="dev.connected"
                           x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
                 </div>
+                <div class="device-capability-row">
+                    <span class="device-capability-status"
+                          :class="$store.conn.capabilityStatusClass(dev)"
+                          x-text="$store.conn.capabilityStatusLabel(dev)"></span>
+                    <div class="device-capability-pills">
+                        <template x-for="item in $store.conn.capabilityItems(dev)" :key="item.key">
+                            <span class="capability-pill"
+                                  :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
+                                  x-text="item.label"></span>
+                        </template>
+                    </div>
+                </div>
+                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
+                    <div class="form-group compact">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigIp" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigGateway" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
+                    </div>
+                    <div class="btn-group" style="margin-top:4px">
+                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(di)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(di)">Revert to DHCP</button>
+                    </div>
+                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change.</div>
+                </div>
                 <div class="device-outputs">
                     <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
                         <span class="output-badge" x-text="o.name + ': ' + o.type"></span>
                     </template>
-                    <span class="audio-badge" x-show="dev.is_audio" title="V3.2 Audio Node">♪</span>
                 </div>
                 <label class="device-preview-check" x-show="$store.app.mode === 'mixer'">
                     <input type="checkbox"
@@ -164,6 +210,11 @@ window.PAGE_CONFIG = {
             <span x-text="$store.conn.discovering ? 'Scanning...' : 'Discover Devices'"></span>
         </button>
 
+        <div class="sidebar-note" x-show="$store.app.mode === 'mixer'">
+            <span class="sidebar-note-label">Preview target</span>
+            <span class="sidebar-note-value" x-text="$store.app.mixerPreviewTarget.label"></span>
+        </div>
+
         <div class="mt-2" style="display:flex;gap:4px">
             <input type="text" class="input" placeholder="IP address"
                    x-model="$store.conn.manualIp"
@@ -181,6 +232,18 @@ window.PAGE_CONFIG = {
                     <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
                         <div class="device-name" x-text="node.short_name || node.ip"></div>
                         <div class="device-ip" x-text="node.ip"></div>
+                        <div class="device-capability-row">
+                            <span class="device-capability-status"
+                                  :class="$store.conn.capabilityStatusClass(node)"
+                                  x-text="$store.conn.capabilityStatusLabel(node)"></span>
+                            <div class="device-capability-pills">
+                                <template x-for="item in $store.conn.capabilityItems(node)" :key="item.key">
+                                    <span class="capability-pill"
+                                          :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
+                                          x-text="item.label"></span>
+                                </template>
+                            </div>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -201,6 +264,18 @@ window.PAGE_CONFIG = {
                 <button class="btn btn-primary" @click="openSave()">Save</button>
             </div>
             <div class="btn-group" x-show="subMode === 'designer'">
+            </div>
+        </div>
+
+        <div class="panel-owner-status" :class="mixerPanelStateClass()">
+            <div class="panel-owner-copy">
+                <div class="panel-owner-eyebrow">Output ownership</div>
+                <div class="panel-owner-title" x-text="mixerPanelTitle()"></div>
+                <div class="panel-owner-detail" x-text="mixerPanelDetail()"></div>
+            </div>
+            <div class="panel-owner-summary">
+                <span class="panel-owner-source" x-text="$store.app.playback.label"></span>
+                <span class="panel-owner-target" x-text="$store.app.playback.target_label"></span>
             </div>
         </div>
 
@@ -410,6 +485,8 @@ window.PAGE_CONFIG = {
 
         <!-- ═══ TIMELINE SUB-MODE ═══ -->
         <div x-show="subMode === 'timeline'">
+        <template x-if="look">
+        <div>
 
         <!-- Look settings -->
         <div class="flex gap-4 mb-4" x-show="look">
@@ -436,18 +513,38 @@ window.PAGE_CONFIG = {
             </div>
         </div>
 
+        <!-- Live Output Preview -->
+        <div class="mixer-preview" x-show="look">
+            <div class="mixer-preview-header">
+                <span class="section-title" style="margin:0;font-size:12px">Timeline Preview</span>
+                <span class="text-sm text-muted" x-text="playing ? 'playing' : formatTime(playTime)"></span>
+            </div>
+            <div class="mixer-preview-outputs">
+                <template x-for="(out, oi) in look?.outputs || []" :key="'mp-' + oi">
+                    <div class="mixer-preview-slot" x-show="out.type !== 'none'">
+                        <div class="mixer-preview-label">
+                            <span class="text-sm" x-text="out.port"></span>
+                            <span class="text-sm text-muted" x-text="out.type"></span>
+                        </div>
+                        <canvas class="preview-canvas"
+                                :id="'mixer_preview_' + oi"
+                                :style="out.type === 'grid' ? 'width:128px;height:128px' : 'width:100%;height:24px'"></canvas>
+                    </div>
+                </template>
+            </div>
+        </div>
+
         <!-- Transport -->
         <div class="transport" x-show="look">
+            <button class="btn" :class="{ 'btn-danger': previewing, 'btn-primary': !previewing }"
+                    @click="togglePreview()"
+                    x-text="previewing ? 'Live' : 'Preview'"></button>
             <button class="btn" @click="playing ? stop() : play()"
                     x-text="playing ? 'Pause' : 'Play'"></button>
             <button class="btn" @click="reset()">Reset</button>
             <span class="transport-time" x-text="formatTime(playTime)"></span>
             <span class="transport-status-black" x-show="transportStatus() === 'BLACK'">BLACK</span>
             <div style="flex:1"></div>
-            <button class="btn btn-primary" @click="previewOnDevices()"
-                    x-show="!previewing">Preview on Devices</button>
-            <button class="btn btn-danger" @click="stopPreview()"
-                    x-show="previewing">Stop Preview</button>
             <div class="zoom-control">
                 <label class="form-label" style="margin:0">Zoom</label>
                 <input type="range" class="form-range" min="40" max="200" step="10"
@@ -523,7 +620,8 @@ window.PAGE_CONFIG = {
 
                 <!-- Playhead -->
                 <div class="timeline-playhead"
-                     :style="'left:' + playheadLeft() + 'px'"></div>
+                     :style="'left:' + playheadLeft() + 'px'"
+                     @mousedown.stop="startPlayheadDrag($event)"></div>
             </div>
         </div>
 
@@ -542,7 +640,7 @@ window.PAGE_CONFIG = {
                                     @mouseenter="startClipPreview(clip, $el)"
                                     @mouseleave="stopClipPreview()">
                                 <div class="clip-palette-thumb"
-                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'}"></div>
+                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'"></div>
                                 <canvas class="clip-palette-preview-canvas"
                                         x-show="_clipPreviewId === clip.id"
                                         :style="clip.output_type === 'grid' ? 'width:100%;aspect-ratio:1' : 'width:100%;height:16px'">
@@ -673,6 +771,8 @@ window.PAGE_CONFIG = {
                 </div>
             </div>
         </div>
+        </div>
+        </template>
         </div><!-- end timeline sub-mode -->
     </div>
 
@@ -687,6 +787,18 @@ window.PAGE_CONFIG = {
                 <input type="range" class="fade-slider"
                        x-model.number="defaultFadeTime" min="0" max="5" step="0.25">
                 <span class="text-muted text-sm" style="min-width:28px;text-align:right" x-text="defaultFadeTime + 's'"></span>
+            </div>
+        </div>
+
+        <div class="panel-owner-status" :class="controllerPanelStateClass()">
+            <div class="panel-owner-copy">
+                <div class="panel-owner-eyebrow">Output ownership</div>
+                <div class="panel-owner-title" x-text="controllerPanelTitle()"></div>
+                <div class="panel-owner-detail" x-text="controllerPanelDetail()"></div>
+            </div>
+            <div class="panel-owner-summary">
+                <span class="panel-owner-source" x-text="$store.app.playback.label"></span>
+                <span class="panel-owner-target" x-text="$store.app.playback.target_label"></span>
             </div>
         </div>
 
@@ -848,6 +960,7 @@ window.PAGE_CONFIG = {
                     </div>
                     <p class="text-muted text-sm" x-show="devices.length === 0">No devices found.</p>
                 </div>
+                <div class="target-summary" x-text="addTargetSummary()"></div>
                 <div class="form-group">
                     <label class="flex items-center gap-2" style="cursor:pointer">
                         <input type="checkbox" x-model="addAutoFollow">
@@ -868,467 +981,6 @@ window.PAGE_CONFIG = {
             </div>
         </div>
     </div>
-
-    <!-- ──── AUDIO PANEL ──── -->
-    <div class="panel" x-show="$store.app.mode === 'audio'" x-data="audioPanel">
-
-        <div class="section-title">Radius Nodes</div>
-
-        <!-- Empty state -->
-        <template x-if="audioDevices.length === 0">
-            <div class="empty-state">
-                <div>No Radius nodes detected.</div>
-                <div class="text-muted text-sm" style="margin-top:6px">Radius nodes run V3.2 firmware and identify as "Radius" during discovery.</div>
-            </div>
-        </template>
-
-        <!-- One card per audio-capable device -->
-        <template x-for="dev in audioDevices" :key="dev.di">
-            <div class="audio-node-card" x-init="initDevice(dev.di)">
-
-                <!-- Header -->
-                <div class="audio-node-header">
-                    <span class="audio-node-name">
-                        <span class="audio-badge">♪</span>
-                        <span x-text="dev.name"></span>
-                    </span>
-                    <span class="device-ip" x-text="dev.ip"></span>
-                </div>
-
-                <!-- Transport + volume -->
-                <div class="audio-transport">
-                    <div class="btn-group">
-                        <button class="btn btn-sm btn-danger" @click="stop(dev.di)">&#9632; Stop</button>
-                        <button class="btn btn-sm" @click="pause(dev.di)">&#8214; Pause</button>
-                    </div>
-                    <div class="audio-vol-row">
-                        <span class="text-muted" style="font-size:11px;white-space:nowrap">Vol</span>
-                        <input type="range" class="audio-vol-slider" min="0" max="100"
-                               :value="getVolume(dev.di)"
-                               @input="onVolumeInput(dev.di, $event.target.value)">
-                        <span class="text-muted" style="font-size:11px;width:26px;text-align:right"
-                              x-text="getVolume(dev.di)"></span>
-                    </div>
-                </div>
-
-                <!-- Now playing -->
-                <div class="audio-now-playing" x-show="playing[dev.di]">
-                    <span x-text="playing[dev.di]?.cmd === 'loop' ? '↺' : '▶'"></span>
-                    <span x-text="playing[dev.di]?.file"></span>
-                </div>
-
-                <!-- File manager -->
-                <div class="audio-fm">
-
-                    <!-- Toolbar: breadcrumb + actions -->
-                    <div class="audio-fm-toolbar">
-                        <div class="audio-fm-breadcrumb">
-                            <span class="audio-fm-crumb" @click="navigateTo(dev.di, '/')">SD</span>
-                            <template x-for="(seg, i) in breadcrumbs(dev.di)" :key="i">
-                                <span class="audio-fm-crumb-seg">
-                                    <span class="text-muted">/</span>
-                                    <span class="audio-fm-crumb"
-                                          @click="navigateTo(dev.di, crumbPath(dev.di, i))"
-                                          x-text="seg"></span>
-                                </span>
-                            </template>
-                            <span class="text-muted" style="font-size:11px;margin-left:4px"
-                                  x-show="loading[dev.di]">…</span>
-                        </div>
-                        <div class="btn-group">
-                            <button class="btn btn-sm" @click="startNewFolder(dev.di)">+ Folder</button>
-                            <button class="btn btn-sm" @click="loadDir(dev.di)"
-                                    :disabled="loading[dev.di]">↺</button>
-                        </div>
-                    </div>
-
-                    <!-- Entry list -->
-                    <div class="audio-fm-list"
-                         :class="{ 'drag-active': dragOver[dev.di] }"
-                         @dragover.prevent="dragOver = {...dragOver, [dev.di]: true}"
-                         @dragleave.prevent="dragOver = {...dragOver, [dev.di]: false}"
-                         @drop.prevent="onDrop(dev.di, $event)">
-
-                        <!-- New folder input row -->
-                        <template x-if="newFolderMode[dev.di]">
-                            <div class="audio-fm-row">
-                                <span class="audio-fm-icon">📁</span>
-                                <input class="audio-fm-rename-input"
-                                       :id="'new-folder-input-' + dev.di"
-                                       x-model="newFolderName[dev.di]"
-                                       @keydown.enter="commitNewFolder(dev.di)"
-                                       @keydown.escape="cancelNewFolder(dev.di)"
-                                       placeholder="folder name">
-                                <button class="btn btn-sm btn-primary" @click="commitNewFolder(dev.di)">✓</button>
-                                <button class="btn btn-sm" @click="cancelNewFolder(dev.di)">✕</button>
-                            </div>
-                        </template>
-
-                        <!-- Loading skeleton -->
-                        <template x-if="loading[dev.di] && entries[dev.di] === undefined">
-                            <div class="audio-fm-empty text-muted">Loading…</div>
-                        </template>
-
-                        <!-- Empty directory -->
-                        <template x-if="!loading[dev.di] && entries[dev.di] && wavFiles(dev.di).length === 0 && !newFolderMode[dev.di]">
-                            <div class="audio-fm-empty text-muted">No WAV files on SD card</div>
-                        </template>
-
-                        <!-- Entries -->
-                        <template x-for="entry in wavFiles(dev.di)" :key="entry.name">
-                            <div class="audio-fm-row"
-                                 :class="{ 'fm-row-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }">
-
-                                <!-- Icon -->
-                                <span class="audio-fm-icon"
-                                      :class="{ 'icon-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }"
-                                      x-text="entryIcon(dev.di, entry)"></span>
-
-                                <!-- Name (or rename input) -->
-                                <template x-if="!isRenaming(dev.di, entry.name)">
-                                    <span class="audio-fm-name"
-                                          :class="{ 'audio-fm-folder': entry.is_dir }"
-                                          @click="entry.is_dir && navigateInto(dev.di, entry.name)"
-                                          x-text="entry.name"></span>
-                                </template>
-                                <template x-if="isRenaming(dev.di, entry.name)">
-                                    <input class="audio-fm-rename-input"
-                                           :value="renaming[dev.di]?.value"
-                                           @input="renaming = {...renaming, [dev.di]: {...renaming[dev.di], value: $event.target.value}}"
-                                           @keydown.enter="commitRename(dev.di, entry.name)"
-                                           @keydown.escape="cancelRename(dev.di)">
-                                </template>
-
-                                <!-- Size -->
-                                <span class="audio-fm-size text-muted"
-                                      x-text="entry.is_dir ? '' : formatSize(entry.size)"></span>
-
-                                <!-- Play buttons (WAV only, not while renaming) -->
-                                <template x-if="!entry.is_dir && entry.name.toLowerCase().endsWith('.wav') && !isRenaming(dev.di, entry.name)">
-                                    <div class="btn-group">
-                                        <button class="btn btn-sm"
-                                                :class="{ 'btn-primary': isPlaying(dev.di, entry.name) && !isLooping(dev.di, entry.name) }"
-                                                @click="play(dev.di, entry.name, 'play')" title="Play">▶</button>
-                                        <button class="btn btn-sm"
-                                                :class="{ 'btn-primary': isLooping(dev.di, entry.name) }"
-                                                @click="play(dev.di, entry.name, 'loop')" title="Loop">↺</button>
-                                    </div>
-                                </template>
-
-                                <!-- Rename / delete (not while renaming) -->
-                                <template x-if="!isRenaming(dev.di, entry.name)">
-                                    <div class="btn-group">
-                                        <button class="btn btn-sm" title="Rename"
-                                                @click="startRename(dev.di, entry.name)">✏</button>
-                                        <button class="btn btn-sm btn-danger" title="Delete"
-                                                @click="deleteEntry(dev.di, entry)">✕</button>
-                                    </div>
-                                </template>
-
-                                <!-- Commit / cancel (while renaming) -->
-                                <template x-if="isRenaming(dev.di, entry.name)">
-                                    <div class="btn-group">
-                                        <button class="btn btn-sm btn-primary"
-                                                @click="commitRename(dev.di, entry.name)">✓</button>
-                                        <button class="btn btn-sm"
-                                                @click="cancelRename(dev.di)">✕</button>
-                                    </div>
-                                </template>
-                            </div>
-                        </template>
-
-                        <!-- Drop hint overlay -->
-                        <div class="audio-fm-drop-hint" x-show="dragOver[dev.di]">
-                            Drop to upload
-                        </div>
-                    </div>
-
-                    <!-- Drop zone / upload trigger -->
-                    <div class="audio-fm-dropzone"
-                         :class="{ 'drag-active': dragOver[dev.di] }"
-                         @click="triggerFileInput(dev.di)"
-                         @dragover.prevent="dragOver = {...dragOver, [dev.di]: true}"
-                         @dragleave.prevent="dragOver = {...dragOver, [dev.di]: false}"
-                         @drop.prevent="onDrop(dev.di, $event)">
-                        <input type="file" accept=".wav,.WAV" multiple
-                               style="display:none" :id="'file-input-' + dev.di"
-                               @change="onFileInput(dev.di, $event)">
-                        <span x-text="dragOver[dev.di] ? 'Drop to upload' : '↑ Drop WAV files or click to upload'"></span>
-                    </div>
-
-                    <!-- Upload progress -->
-                    <template x-if="uploadStatus[dev.di]">
-                        <div class="audio-fm-upload-row">
-                            <span class="audio-fm-upload-name" x-text="uploadStatus[dev.di].name"></span>
-                            <div class="audio-fm-upload-bar">
-                                <div class="audio-fm-upload-fill"
-                                     :class="{ 'audio-fm-upload-sending': uploadStatus[dev.di].progress === null }"
-                                     :style="'width:' + (uploadStatus[dev.di].progress ?? 100) + '%'"></div>
-                            </div>
-                            <span class="audio-fm-upload-pct"
-                                  x-text="uploadStatus[dev.di].progress !== null ? uploadStatus[dev.di].progress + '%' : 'Sending…'"></span>
-                        </div>
-                    </template>
-
-                </div><!-- /.audio-fm -->
-
-            </div>
-        </template>
-
-    </div>
-
-    <!-- ──── AUDIO CUES PANEL ──── -->
-    <div class="panel" x-show="$store.app.mode === 'cues'" x-data="audioCues">
-
-        <!-- Top bar -->
-        <div class="flex justify-between items-center mb-4">
-            <span class="section-title" style="margin:0">Audio Cues</span>
-            <div class="btn-group">
-                <button class="btn btn-sm" @click="addCue()">+ Cue</button>
-                <button class="btn btn-sm" @click="exportCueSheet()">↓ Export</button>
-                <button class="btn btn-sm" @click="triggerCueImport()">↑ Import</button>
-                <button class="btn btn-sm btn-primary" @click="startSync()">⟳ Sync All</button>
-            </div>
-        </div>
-
-        <!-- Two-column header: project library + devices -->
-        <div class="cues-header-cols">
-
-            <!-- Project audio library -->
-            <div class="cues-col-box">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="form-label" style="margin:0">Project Library</span>
-                    <button class="btn btn-sm" @click="triggerProjectImport()">+ WAV</button>
-                </div>
-                <template x-if="projectFiles.length === 0">
-                    <p class="text-muted text-sm">No WAV files imported yet.</p>
-                </template>
-                <template x-for="f in projectFiles" :key="f.name">
-                    <div class="cues-library-row">
-                        <span class="text-sm" x-text="f.name"></span>
-                        <span class="text-muted" style="font-size:11px" x-text="formatSize(f.size)"></span>
-                        <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
-                    </div>
-                </template>
-            </div>
-
-            <!-- Radius devices -->
-            <div class="cues-col-box">
-                <div class="form-label mb-2">Radius Devices</div>
-                <template x-if="audioDevices.length === 0">
-                    <p class="text-muted text-sm">No Radius nodes connected.</p>
-                </template>
-                <template x-for="dev in audioDevices" :key="dev.ip">
-                    <div class="cues-device-row">
-                        <span class="audio-badge">♪</span>
-                        <span class="text-sm" x-text="dev.name"></span>
-                        <span class="device-ip" x-text="dev.ip"></span>
-                        <span class="cues-dev-status"
-                              :class="dev.connected ? 'cues-dev-online' : 'cues-dev-offline'"
-                              x-text="dev.connected ? '●' : '○'"
-                              :title="dev.connected ? 'connected' : 'disconnected'"></span>
-                    </div>
-                </template>
-            </div>
-
-        </div><!-- /.cues-header-cols -->
-
-        <!-- Cue list -->
-        <template x-if="cues.length === 0">
-            <p class="text-muted text-sm mt-4">No cues yet. Click "+ Cue" to add one.</p>
-        </template>
-
-        <template x-for="(cue, idx) in sortedCues" :key="cue.number">
-            <div class="cue-card">
-
-                <!-- Cue header row -->
-                <div class="cue-card-header">
-                    <div class="flex items-center gap-2">
-                        <span class="form-label" style="margin:0;white-space:nowrap">Cue</span>
-                        <input type="number" class="form-input" min="1" max="255" style="width:60px"
-                               :value="cue.number"
-                               @change="updateCueField(idx, 'number', parseInt($event.target.value) || 1)">
-                        <input type="text" class="form-input" placeholder="note…" style="flex:1"
-                               :value="cue.note"
-                               @input="updateCueField(idx, 'note', $event.target.value)">
-                    </div>
-                    <div class="btn-group">
-                        <button class="btn btn-sm btn-primary" @click="fireCue(idx)">▶ Fire</button>
-                        <button class="btn btn-sm btn-danger" @click="removeCue(idx)">✕</button>
-                    </div>
-                </div>
-
-                <!-- Per-device action rows -->
-                <template x-if="audioDevices.length === 0">
-                    <p class="text-muted text-sm" style="padding:4px 0">No Radius devices.</p>
-                </template>
-
-                <template x-for="dev in audioDevices" :key="dev.ip">
-                    <div class="cue-action-row"
-                         :class="{ 'cue-action-inactive': !actionIsActive(idx, dev.ip) }">
-
-                        <!-- Device name -->
-                        <span class="cue-action-device"
-                              :class="dev.connected ? '' : 'text-muted'"
-                              x-text="dev.name"
-                              :title="dev.connected ? dev.ip : dev.ip + ' (disconnected)'"></span>
-
-                        <!-- Fire result badge -->
-                        <template x-if="fireStatusForDevice(cue.number, dev.ip)">
-                            <span class="fire-result-badge"
-                                  :class="fireStatusClass(fireStatusForDevice(cue.number, dev.ip))"
-                                  :title="fireStatusForDevice(cue.number, dev.ip).reason || ''"
-                                  x-text="fireStatusIcon(fireStatusForDevice(cue.number, dev.ip))"></span>
-                        </template>
-                        <template x-if="!fireStatusForDevice(cue.number, dev.ip) && !dev.connected">
-                            <span class="fire-result-badge fire-skipped" title="disconnected">○</span>
-                        </template>
-
-                        <!-- Command select -->
-                        <select class="form-select" style="width:80px"
-                                :value="getAction(idx, dev.ip).cmd"
-                                @change="setActionField(idx, dev.ip, 'cmd', $event.target.value)">
-                            <option value="none">—</option>
-                            <option value="play">Play</option>
-                            <option value="loop">Loop</option>
-                            <option value="stop">Stop</option>
-                        </select>
-
-                        <!-- Filename select (hidden when cmd is none/stop) -->
-                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
-                            <select class="form-select" style="flex:1;min-width:120px"
-                                    :value="getAction(idx, dev.ip).filename"
-                                    @change="setActionField(idx, dev.ip, 'filename', $event.target.value)">
-                                <option value="">— select file —</option>
-                                <template x-for="f in projectFiles" :key="f.name">
-                                    <option :value="f.name" x-text="f.name"></option>
-                                </template>
-                            </select>
-                        </template>
-
-                        <!-- Volume (hidden when none/stop) -->
-                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
-                            <div class="flex items-center gap-1">
-                                <span class="text-muted" style="font-size:11px">Vol</span>
-                                <input type="number" class="form-input" min="0" max="100" style="width:52px"
-                                       :value="getAction(idx, dev.ip).volume"
-                                       @input="setActionField(idx, dev.ip, 'volume', parseInt($event.target.value) || 0)">
-                            </div>
-                        </template>
-
-                        <!-- Duration (hidden when none/stop) -->
-                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
-                            <div class="flex items-center gap-1">
-                                <span class="text-muted" style="font-size:11px">Dur</span>
-                                <input type="number" class="form-input" min="0" max="3600" style="width:60px"
-                                       :value="getAction(idx, dev.ip).duration"
-                                       @input="setActionField(idx, dev.ip, 'duration', parseInt($event.target.value) || 0)"
-                                       placeholder="0=full">
-                                <span class="text-muted" style="font-size:11px">s</span>
-                            </div>
-                        </template>
-
-                    </div>
-                </template>
-
-            </div>
-        </template>
-
-        <!-- Sync modal -->
-        <template x-teleport="body">
-            <div class="modal-overlay" x-show="syncModal" @click.self="closeSyncModal()" style="z-index:200">
-                <div class="modal" style="max-width:600px;width:95vw">
-                    <div class="modal-title">
-                        <span x-text="syncJob?.status === 'planning' ? 'Planning sync…' :
-                                      syncJob?.status === 'running'  ? 'Syncing…' :
-                                      syncJob?.status === 'done'     ? 'Sync complete' :
-                                      syncJob?.status === 'error'    ? 'Sync error' : 'Sync'"></span>
-                        <span class="text-muted text-sm" style="margin-left:12px"
-                              x-text="syncSummary()"></span>
-                    </div>
-
-                    <!-- Planning spinner -->
-                    <template x-if="syncJob?.status === 'planning' || (syncJob?.items || []).length === 0">
-                        <p class="text-muted text-sm" style="padding:12px 0">Checking devices…</p>
-                    </template>
-
-                    <!-- Item list -->
-                    <div class="sync-item-list" x-show="(syncJob?.items || []).length > 0">
-                        <template x-for="(item, i) in (syncJob?.items || [])" :key="i">
-                            <div class="sync-item" :class="syncItemClass(item)">
-
-                                <span class="sync-item-icon" x-text="syncItemIcon(item)"></span>
-
-                                <div class="sync-item-info">
-                                    <span class="sync-item-device" x-text="item.device_name || item.device_ip"></span>
-                                    <template x-if="item.filename">
-                                        <span class="sync-item-file" x-text="item.filename"></span>
-                                    </template>
-                                    <template x-if="item.error">
-                                        <span class="sync-item-error" x-text="item.error"></span>
-                                    </template>
-                                </div>
-
-                                <!-- Progress bar (uploading only) -->
-                                <template x-if="item.status === 'uploading' && item.bytes_total > 0">
-                                    <div class="sync-progress-bar">
-                                        <div class="sync-progress-fill"
-                                             :style="'width:' + syncProgress(item) + '%'"></div>
-                                    </div>
-                                </template>
-                                <template x-if="item.status === 'uploading' && item.bytes_total > 0">
-                                    <span class="sync-pct text-muted"
-                                          x-text="syncProgress(item) + '%'"></span>
-                                </template>
-
-                            </div>
-                        </template>
-                    </div>
-
-                    <div class="modal-actions">
-                        <button class="btn" @click="closeSyncModal()">Close</button>
-                    </div>
-                </div>
-            </div>
-        </template>
-
-    </div><!-- /.Audio Cues panel -->
-
-    <!-- ──── NET LOG PANEL ──── -->
-    <div class="panel" x-show="$store.app.mode === 'log'" x-data="netLog">
-
-        <div class="flex justify-between items-center mb-3">
-            <span class="section-title" style="margin:0">Network Log</span>
-            <div class="btn-group">
-                <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px">
-                    <input type="checkbox" x-model="autoScroll">
-                    <span>Auto-scroll</span>
-                </label>
-                <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px">
-                    <input type="checkbox" x-model="showFps">
-                    <span>FPS</span>
-                </label>
-                <button class="btn btn-sm" @click="clear()">Clear</button>
-                <button class="btn btn-sm" @click="download()">↓ Download</button>
-            </div>
-        </div>
-
-        <div class="log-list" x-ref="logList">
-            <template x-if="entries.filter(e => showFps || e.type !== 'fps_telemetry').length === 0">
-                <p class="text-muted text-sm" style="padding:8px">No events logged yet.</p>
-            </template>
-            <template x-for="entry in entries.filter(e => showFps || e.type !== 'fps_telemetry')" :key="entry.id">
-                <div class="log-row">
-                    <span class="log-time" x-text="formatTime(entry.ts)"></span>
-                    <span class="log-dir" :class="dirClass(entry.dir)" x-text="entry.dir"></span>
-                    <span class="log-type" :class="typeClass(entry.type)"
-                          x-text="typeLabel(entry.type)"></span>
-                    <span class="log-summary" x-text="entry.summary"></span>
-                </div>
-            </template>
-        </div>
-
-    </div><!-- /.Net Log panel -->
 
 </div>
 

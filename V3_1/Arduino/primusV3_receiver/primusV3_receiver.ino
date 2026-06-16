@@ -30,8 +30,8 @@
 OutputConfig outputs[NUM_OUTPUTS];
 
 int8_t pxl8Pins[8] = {
-  PIN_PORT_0, PIN_PORT_1, PIN_PORT_2,
-  -1, -1, -1, -1, -1
+  -1, -1, -1, -1, -1, -1,
+  PIN_PORT_6, PIN_PORT_7
 };
 
 Adafruit_NeoPXL8* leds = nullptr;
@@ -77,6 +77,12 @@ Preferences prefs;
 char customShortName[18] = {0};
 bool hasCustomName = false;
 
+// ── Static IP config (stored in NVS) ─────────────────────────────────
+bool useStaticIP = false;
+uint8_t storedIP[4]      = {0};
+uint8_t storedGateway[4] = {0};
+uint8_t storedSubnet[4]  = {0};
+
 // ── Timing / FPS ─────────────────────────────────────────────────────
 unsigned long lastShowTime  = 0;
 unsigned long showDuration  = 2000;   // measured leds->show() time in µs
@@ -121,12 +127,19 @@ void clearPort(uint8_t port, uint16_t count) {
 // =====================================================================
 
 bool connectWifi() {
-  IPAddress localIP(DEFAULT_STATIC_IP);
-  IPAddress gateway(DEFAULT_GATEWAY);
-  IPAddress subnet(DEFAULT_SUBNET);
-
   WiFi.begin(DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD);
-  WiFi.config(localIP, gateway, subnet);
+
+  if (useStaticIP) {
+    IPAddress localIP(storedIP[0], storedIP[1], storedIP[2], storedIP[3]);
+    IPAddress gateway(storedGateway[0], storedGateway[1], storedGateway[2], storedGateway[3]);
+    IPAddress subnet(storedSubnet[0], storedSubnet[1], storedSubnet[2], storedSubnet[3]);
+    WiFi.config(localIP, gateway, subnet);
+    Serial.print("Using static IP: ");
+    Serial.println(localIP);
+  } else {
+    Serial.println("Using DHCP");
+  }
+
   WiFi.setSleep(false);
 
   Serial.print("Connecting to WiFi");
@@ -217,7 +230,7 @@ void sendArtPollReply(IPAddress dest) {
   strncpy((char*)&reply[26], nameToUse, 17);
 
   // Long Name (bytes 44-107, max 64 chars)
-  // Build dynamically: "PrimusV3 LED Node | A0:Short Strip A1:Long Strip ..."
+  // Keep this human-readable for generic Art-Net tooling.
   char longBuf[64];
   int pos = snprintf(longBuf, sizeof(longBuf), "%s | ", DEVICE_LONG_NAME);
   for (uint8_t i = 0; i < NUM_OUTPUTS && pos < 60; i++) {
@@ -228,9 +241,20 @@ void sendArtPollReply(IPAddress dest) {
   strncpy((char*)&reply[44], longBuf, 63);
 
   // Node Report (bytes 108-171, max 64 chars)
+  // Append a versioned capability tag so the sender can discover output
+  // types and universe mapping without scraping the Long Name.
   char reportBuf[64];
-  snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] PrimusV3 OK — %.0f fps",
-           (int)packetCount, currentFps);
+  int reportPos = snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] PrimusV3 OK|%s",
+                           (int)packetCount, NODE_CAPS_PREFIX);
+  for (uint8_t i = 0; i < NUM_OUTPUTS && reportPos < (int)sizeof(reportBuf) - 1; i++) {
+    if (outputs[i].type == OUTPUT_OFF) continue;
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|%u:%u:%u", i, (uint8_t)outputs[i].type, outputs[i].universe);
+  }
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|F:RIOH");
+  }
   strncpy((char*)&reply[108], reportBuf, 63);
 
   // NumPorts (bytes 172-173, big-endian)
@@ -371,6 +395,50 @@ void handleArtOutputConfig(uint8_t* data, uint16_t len) {
 }
 
 // =====================================================================
+//  ArtIPConfig — remote static/DHCP IP assignment (opcode 0x8200)
+// =====================================================================
+
+void handleArtIPConfig(uint8_t* data, uint16_t len) {
+  // Packet layout: [Art-Net header 8][opcode 2][version 2][mode 1][ip 4][gateway 4][subnet 4]
+  // mode: 0 = DHCP, 1 = static
+  if (len < 25) return;
+
+  uint8_t mode = data[12];
+
+  if (mode == 0) {
+    // Revert to DHCP
+    useStaticIP = false;
+    prefs.remove("staticIP");
+    prefs.remove("gateway");
+    prefs.remove("subnet");
+    Serial.println("ArtIPConfig: reverted to DHCP — rebooting...");
+    broadcastArtPollReply();
+    delay(200);
+    ESP.restart();
+  } else if (mode == 1) {
+    // Set static IP
+    memcpy(storedIP, data + 13, 4);
+    memcpy(storedGateway, data + 17, 4);
+    memcpy(storedSubnet, data + 21, 4);
+    useStaticIP = true;
+
+    prefs.putBytes("staticIP", storedIP, 4);
+    prefs.putBytes("gateway", storedGateway, 4);
+    prefs.putBytes("subnet", storedSubnet, 4);
+
+    Serial.print("ArtIPConfig: static IP set to ");
+    Serial.print(storedIP[0]); Serial.print(".");
+    Serial.print(storedIP[1]); Serial.print(".");
+    Serial.print(storedIP[2]); Serial.print(".");
+    Serial.println(storedIP[3]);
+    Serial.println("Rebooting...");
+    broadcastArtPollReply();
+    delay(200);
+    ESP.restart();
+  }
+}
+
+// =====================================================================
 //  Art-Net Packet Router — branch on opcode
 // =====================================================================
 
@@ -401,6 +469,12 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     return;
   }
 
+  if (opcode == ARTNET_OPCODE_IP_CONFIG) {
+    // ArtIPConfig — remote static/DHCP IP assignment
+    handleArtIPConfig(data, len);
+    return;
+  }
+
   if (opcode != ARTNET_OPCODE_DMX) return;
 
   // ── ArtDmx handling (unchanged) ──────────────────────────────────
@@ -428,8 +502,12 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     if (outputs[o].universe != universe) continue;
 
     uint16_t needed = outputs[o].pixelCount * outputs[o].bytesPerPixel;
+    if (needed > MAX_BUFFER_SIZE) needed = MAX_BUFFER_SIZE;
     uint16_t toCopy = (dataLen < needed) ? dataLen : needed;
     memcpy(outputBuffers[o], pixelData, toCopy);
+    if (toCopy < needed) {
+      memset(outputBuffers[o] + toCopy, 0, needed - toCopy);
+    }
     outputDataReady[o] = true;
     outputActive[o]    = true;
     outputLastPacket[o] = now;
@@ -466,9 +544,14 @@ void applyBufferedData() {
     uint8_t  port  = outputs[o].pxl8Port;
     uint16_t count = outputs[o].pixelCount;
     uint8_t  bpp   = outputs[o].bytesPerPixel;
+    if (bpp != 3 && bpp != 4) {
+      outputDataReady[o] = false;
+      continue;
+    }
 
     for (uint16_t p = 0; p < count; p++) {
       uint16_t base = p * bpp;
+      if ((uint16_t)(base + bpp) > MAX_BUFFER_SIZE) break;
       if (bpp == 4) {
         setStripPixel(port, p, Adafruit_NeoPixel::Color(
           outputBuffers[o][base],     outputBuffers[o][base + 1],
@@ -693,6 +776,21 @@ void setup() {
       Serial.print("Loaded custom name: \"");
       Serial.print(customShortName);
       Serial.println("\"");
+    }
+  }
+
+  // Load static IP config from NVS
+  if (prefs.isKey("staticIP")) {
+    size_t ipLen = prefs.getBytes("staticIP", storedIP, 4);
+    size_t gwLen = prefs.getBytes("gateway", storedGateway, 4);
+    size_t snLen = prefs.getBytes("subnet", storedSubnet, 4);
+    if (ipLen == 4 && gwLen == 4 && snLen == 4) {
+      useStaticIP = true;
+      Serial.print("Loaded static IP: ");
+      Serial.print(storedIP[0]); Serial.print(".");
+      Serial.print(storedIP[1]); Serial.print(".");
+      Serial.print(storedIP[2]); Serial.print(".");
+      Serial.println(storedIP[3]);
     }
   }
 

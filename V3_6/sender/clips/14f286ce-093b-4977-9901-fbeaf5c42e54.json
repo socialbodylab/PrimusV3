@@ -1,0 +1,25 @@
+{
+  "id": "14f286ce-093b-4977-9901-fbeaf5c42e54",
+  "name": "Glacier Scanner",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    120,
+    240,
+    255
+  ],
+  "end_color": [
+    0,
+    20,
+    60
+  ],
+  "speed": 0.9,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 7,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-05-08T22:02:11.862346+00:00",
+  "modified": "2026-05-08T22:02:11.862358+00:00"
+}

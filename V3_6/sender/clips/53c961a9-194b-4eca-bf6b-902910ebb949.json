@@ -1,0 +1,25 @@
+{
+  "id": "53c961a9-194b-4eca-bf6b-902910ebb949",
+  "name": "Fast Strobe",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    255,
+    255
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 5.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 1.0,
+  "created": "2026-04-08T13:57:40.284489+00:00",
+  "modified": "2026-04-08T13:57:40.284543+00:00"
+}

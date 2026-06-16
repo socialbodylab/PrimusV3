@@ -87,8 +87,39 @@ document.addEventListener("alpine:init", () => {
             return l ? l.name : "(unknown)";
         },
 
-        get devices() { return Alpine.store("app").devices || []; },
+        get playbackInfo() { return Alpine.store("app").playback; },
+        get devices() { return Alpine.store("app").state?.devices || []; },
         get deviceGroups() { return Alpine.store("app").state?.device_groups || []; },
+
+        controllerPanelStateClass() {
+            if (this.playbackInfo.source === 'controller') {
+                return 'panel-owner-live';
+            }
+            if (this.playing || this.activeLookId) {
+                return 'panel-owner-warn';
+            }
+            return 'panel-owner-idle';
+        },
+
+        controllerPanelTitle() {
+            if (this.playbackInfo.source === 'controller') {
+                return 'Controller owns output';
+            }
+            if (this.playing || this.activeLookId) {
+                return 'Controller is queued but not live';
+            }
+            return 'Controller is standing by';
+        },
+
+        controllerPanelDetail() {
+            if (this.playbackInfo.source === 'controller') {
+                return 'Cue playback is live on ' + this.playbackInfo.target_label.toLowerCase() + '.';
+            }
+            if (this.playing || this.activeLookId) {
+                return 'Controller state exists, but output is currently owned by ' + this.playbackInfo.label.toLowerCase() + '.';
+            }
+            return 'Use GO or activate a look to take output ownership from idle.';
+        },
 
         lookOutputs(look) {
             return (look.outputs || []).map(o => o.port + ':' + o.type).join(', ');
@@ -108,11 +139,13 @@ document.addEventListener("alpine:init", () => {
 
         // ── Control Panel ──
         async activateLook(lookId) {
-            await api("POST", "/api/controller/activate", {
+            const result = await api("POST", "/api/controller/activate", {
                 look_id: lookId,
                 fade_time: this.defaultFadeTime,
             });
-            this.activeLookId = lookId;
+            if (result?.ok) {
+                await this.refresh();
+            }
         },
 
         async doBlackout() {
@@ -127,20 +160,18 @@ document.addEventListener("alpine:init", () => {
 
         // ── Transport ──
         async go() {
-            await api("POST", "/api/set_playback_source", { source: "controller" });
             await api("POST", "/api/cues/go");
-            this.refresh();
+            await this.refresh();
         },
 
         async stop() {
             await api("POST", "/api/cues/stop");
-            this.refresh();
+            await this.refresh();
         },
 
         async goToCue(number) {
-            await api("POST", "/api/set_playback_source", { source: "controller" });
             await api("POST", "/api/cues/goto", { number });
-            this.refresh();
+            await this.refresh();
         },
 
         // ── Cue management ──
@@ -227,6 +258,21 @@ document.addEventListener("alpine:init", () => {
                 return cue.device_ips.length + ' device' + (cue.device_ips.length > 1 ? 's' : '');
             }
             return 'All';
+        },
+
+        addTargetSummary() {
+            if (this.addTargetMode === 'group') {
+                const group = this.deviceGroups.find(g => g.id === this.addGroupId);
+                if (!group) return 'No group selected.';
+                const count = (group.device_ips || []).length;
+                return 'Cue will target group ' + group.name + ' (' + count + ' device' + (count === 1 ? '' : 's') + ').';
+            }
+            if (this.addTargetMode === 'devices') {
+                const count = this.addDeviceIps.length;
+                if (!count) return 'No devices selected yet.';
+                return 'Cue will target ' + count + ' selected device' + (count === 1 ? '' : 's') + '.';
+            }
+            return 'Cue will target all available devices.';
         },
 
         toggleDeviceIp(ip) {

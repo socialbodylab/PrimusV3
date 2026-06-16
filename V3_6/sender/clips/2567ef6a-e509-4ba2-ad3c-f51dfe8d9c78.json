@@ -1,0 +1,25 @@
+{
+  "id": "2567ef6a-e509-4ba2-ad3c-f51dfe8d9c78",
+  "name": "Mini Radial Bloom",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "radial",
+  "start_color": [
+    255,
+    0,
+    120
+  ],
+  "end_color": [
+    0,
+    80,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.5,
+  "created": "2026-05-08T22:02:11.846142+00:00",
+  "modified": "2026-05-08T22:02:11.847500+00:00"
+}

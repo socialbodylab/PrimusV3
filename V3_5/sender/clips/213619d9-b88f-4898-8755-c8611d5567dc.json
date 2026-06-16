@@ -1,0 +1,25 @@
+{
+  "id": "213619d9-b88f-4898-8755-c8611d5567dc",
+  "name": "Crimson Sweep",
+  "group": "Crimson Sweep",
+  "output_type": "short_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    0,
+    30
+  ],
+  "end_color": [
+    40,
+    0,
+    5
+  ],
+  "speed": 1.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 4,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.672207+00:00",
+  "modified": "2026-04-08T18:59:58.672223+00:00"
+}

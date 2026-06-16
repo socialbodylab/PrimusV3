@@ -1,0 +1,25 @@
+{
+  "id": "4df4ab66-1c23-40c1-ad69-f355085626dc",
+  "name": "Diagonal Pop Grid",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "chase",
+  "start_color": [
+    10,
+    0,
+    20
+  ],
+  "end_color": [
+    255,
+    0,
+    180
+  ],
+  "speed": 1.1,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.4,
+  "created": "2026-05-08T22:02:11.852330+00:00",
+  "modified": "2026-05-08T22:02:11.852343+00:00"
+}

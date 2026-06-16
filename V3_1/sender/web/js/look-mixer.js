@@ -15,6 +15,7 @@ document.addEventListener("alpine:init", () => {
         clips: [],
         playing: false,
         playTime: 0,
+        transportTime: 0,
         _playInterval: null,
         saveModal: false,
         saveName: "",
@@ -39,6 +40,13 @@ document.addEventListener("alpine:init", () => {
         clipSaveDuration: 5.0,
         loadedClips: {},   // oi -> {id, name} of clip loaded in that output
 
+        // ── Mixer preview rendering ──
+        _mixerPreviewInterval: null,
+        _mixerPreviewPending: false,
+        _lastMixerFrameTime: null,
+        _mixerFrameDirty: true,
+        _mixerUpdateSeq: 0,
+
         // ── Library state ──
         libSearch: "",
         libFilterType: "",
@@ -47,6 +55,56 @@ document.addEventListener("alpine:init", () => {
 
         get outputTypes() {
             return Alpine.store("app").state?.look_output_types || [];
+        },
+
+        get playbackInfo() {
+            return Alpine.store("app").playback;
+        },
+
+        mixerPanelStateClass() {
+            if (this.subMode === 'designer') {
+                return this.playbackInfo.source === 'designer'
+                    ? 'panel-owner-live'
+                    : 'panel-owner-idle';
+            }
+            if (this.previewing && this.playbackInfo.source === 'mixer') {
+                return 'panel-owner-live';
+            }
+            if (this.previewing || this.playbackInfo.source === 'mixer') {
+                return 'panel-owner-warn';
+            }
+            return 'panel-owner-idle';
+        },
+
+        mixerPanelTitle() {
+            if (this.subMode === 'designer') {
+                return this.playbackInfo.source === 'designer'
+                    ? 'Designer owns output'
+                    : 'Designer is editing only';
+            }
+            if (this.previewing && this.playbackInfo.source === 'mixer') {
+                return 'Timeline preview owns output';
+            }
+            if (this.previewing) {
+                return 'Timeline preview is armed';
+            }
+            return 'Timeline is editing only';
+        },
+
+        mixerPanelDetail() {
+            if (this.subMode === 'designer') {
+                if (this.playbackInfo.source === 'designer') {
+                    return 'Designer edits are live on ' + this.playbackInfo.target_label.toLowerCase() + '.';
+                }
+                return 'Designer changes are local while output is owned by ' + this.playbackInfo.label.toLowerCase() + '.';
+            }
+            if (this.previewing && this.playbackInfo.source === 'mixer') {
+                return 'Timeline preview is ' + this.playbackInfo.activity.toLowerCase() + ' on ' + this.playbackInfo.target_label.toLowerCase() + '.';
+            }
+            if (this.previewing) {
+                return 'Preview is enabled, but output is currently owned by ' + this.playbackInfo.label.toLowerCase() + '.';
+            }
+            return 'Enable Preview to put the timeline live. Output is currently owned by ' + this.playbackInfo.label.toLowerCase() + '.';
         },
 
         // ── Designer getters ──
@@ -60,7 +118,11 @@ document.addEventListener("alpine:init", () => {
 
         async init() {
             await this.loadClips();
+            if (!Alpine.store("app").state) {
+                await Alpine.store("app").fetchState();
+            }
             this.newLook();
+            this._startMixerPreviewLoop();
             document.addEventListener('keydown', (e) => {
                 if (Alpine.store('app').mode !== 'mixer') return;
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
@@ -82,9 +144,15 @@ document.addEventListener("alpine:init", () => {
         // ── Sub-mode switching ──
         async setSubMode(m) {
             if (m === 'designer' && this.previewing) {
+                this.stop();
                 await this.stopPreview();
             }
             this.subMode = m;
+            if (m === 'timeline') {
+                this._startMixerPreviewLoop();
+            } else {
+                this._stopMixerPreviewLoop();
+            }
             await api("POST", "/api/set_playback_source", {
                 source: m === "designer" ? "designer" : "idle"
             });
@@ -323,17 +391,100 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ══════════════════════════════════════════════════
+        //  MIXER PREVIEW RENDERING
+        // ══════════════════════════════════════════════════
+
+        _startMixerPreviewLoop() {
+            if (this._mixerPreviewInterval) return;
+            this._mixerPreviewInterval = setInterval(() => this._fetchMixerFrame(), 66);
+            this._fetchMixerFrame();
+        },
+
+        _stopMixerPreviewLoop() {
+            if (this._mixerPreviewInterval) {
+                clearInterval(this._mixerPreviewInterval);
+                this._mixerPreviewInterval = null;
+            }
+        },
+
+        async _fetchMixerFrame() {
+            if (!this.look || this._mixerPreviewPending) return;
+            if (this.subMode !== 'timeline') return;
+            if (Alpine.store('app').mode !== 'mixer') return;
+            // Skip refetch if playTime hasn't changed and look hasn't been modified
+            if (this.playTime === this._lastMixerFrameTime && !this._mixerFrameDirty) return;
+            this._mixerPreviewPending = true;
+            try {
+                const res = await api("POST", "/api/mixer/frame", {
+                    look: this.look,
+                    t: this.playTime,
+                });
+                this._lastMixerFrameTime = this.playTime;
+                this._mixerFrameDirty = false;
+                this._drawMixerPreviews(res.outputs || []);
+            } catch (e) { /* ignore */ }
+            this._mixerPreviewPending = false;
+        },
+
+        _drawMixerPreviews(outputs) {
+            for (let oi = 0; oi < outputs.length; oi++) {
+                const out = outputs[oi];
+                const pixels = out.pixels || [];
+                const grid = out.grid;
+                const canvas = document.getElementById("mixer_preview_" + oi);
+                if (!canvas) continue;
+                const ctx = canvas.getContext("2d");
+                if (grid) {
+                    const [cols, rows] = grid;
+                    canvas.width = cols;
+                    canvas.height = rows;
+                    const img = ctx.createImageData(cols, rows);
+                    const d = img.data;
+                    for (let i = 0; i < pixels.length; i++) {
+                        const p = pixels[i] || [0,0,0];
+                        const off = i * 4;
+                        d[off] = p[0]; d[off+1] = p[1]; d[off+2] = p[2]; d[off+3] = 255;
+                    }
+                    ctx.putImageData(img, 0, 0);
+                } else if (pixels.length > 0) {
+                    canvas.width = pixels.length;
+                    canvas.height = 1;
+                    const img = ctx.createImageData(pixels.length, 1);
+                    const d = img.data;
+                    for (let i = 0; i < pixels.length; i++) {
+                        const p = pixels[i] || [0,0,0];
+                        const off = i * 4;
+                        d[off] = p[0]; d[off+1] = p[1]; d[off+2] = p[2]; d[off+3] = 255;
+                    }
+                    ctx.putImageData(img, 0, 0);
+                }
+            }
+        },
+
+        // ══════════════════════════════════════════════════
         //  TIMELINE METHODS
         // ══════════════════════════════════════════════════
 
         newLook() {
+            const backendOutputs = Alpine.store("app").state?.look?.outputs || [];
+            if (this.previewing) {
+                api("POST", "/api/mixer/stop_preview");
+                this.previewing = false;
+            }
+            if (this.playing) {
+                this.playing = false;
+                if (this._playInterval) {
+                    clearInterval(this._playInterval);
+                    this._playInterval = null;
+                }
+            }
             this.look = {
                 id: "",
                 name: "New Look",
                 description: "",
                 outputs: [
-                    { port: "A0", type: "short_strip" },
-                    { port: "A1", type: "long_strip" },
+                    { port: "A0", type: backendOutputs[0]?.type || "short_strip" },
+                    { port: "A1", type: backendOutputs[1]?.type || "long_strip" },
                 ],
                 tracks: [
                     { port: "A0", segments: [] },
@@ -344,13 +495,16 @@ document.addEventListener("alpine:init", () => {
                 speed: 1.0,
             };
             this.playTime = 0;
-            this.stop();
+            this.transportTime = 0;
+            this._mixerFrameDirty = true;
         },
 
         setTrackOutputType(trackIdx, type) {
             if (this.look.outputs[trackIdx]) {
                 this.look.outputs[trackIdx].type = type;
             }
+            this._mixerFrameDirty = true;
+            api("POST", "/api/update", { output: trackIdx, output_type: type });
         },
 
         addSegment(trackIdx, clip) {
@@ -374,10 +528,14 @@ document.addEventListener("alpine:init", () => {
             if (newEnd > this.look.total_duration) {
                 this.look.total_duration = Math.ceil(newEnd);
             }
+            this._mixerFrameDirty = true;
+            if (this.previewing) this._sendPreview();
         },
 
         removeSegment(trackIdx, segIdx) {
             this.look.tracks[trackIdx]?.segments.splice(segIdx, 1);
+            this._mixerFrameDirty = true;
+            if (this.previewing) this._sendPreview();
         },
 
         openEditSegment(trackIdx, segIdx) {
@@ -423,7 +581,9 @@ document.addEventListener("alpine:init", () => {
             seg.fade_in = Math.max(0, Math.min(this.editData.fade_in, seg.duration / 2));
             seg.fade_out = Math.max(0, Math.min(this.editData.fade_out, seg.duration / 2));
             seg.speed_override = this.editData.speed_override;
+            this._mixerFrameDirty = true;
             this.editModal = false;
+            if (this.previewing) this._sendPreview();
         },
 
         duplicateSegment() {
@@ -448,7 +608,9 @@ document.addEventListener("alpine:init", () => {
             if (dup.start_time < dur) {
                 this.look.tracks[this.editTrack].segments.push(dup);
             }
+            this._mixerFrameDirty = true;
             this.editModal = false;
+            if (this.previewing) this._sendPreview();
         },
 
         startDrag(event, trackIdx, segIdx, mode) {
@@ -466,6 +628,7 @@ document.addEventListener("alpine:init", () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
                 this._drag = null;
+                if (this.previewing) this._sendPreview();
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
@@ -487,11 +650,13 @@ document.addEventListener("alpine:init", () => {
                 const dEnd = Math.abs(snappedEnd - (newStart + seg.duration));
                 newStart = dEnd < dStart ? snappedEnd - seg.duration : snappedStart;
                 seg.start_time = Math.max(0, Math.min(newStart, dur - seg.duration));
+                this._mixerFrameDirty = true;
             } else if (this._drag.mode === 'resize-end') {
                 let endTime = seg.start_time + this._drag.origDuration + dtSec;
                 endTime = this._snap(endTime, snaps);
                 const newDur = endTime - seg.start_time;
                 seg.duration = Math.max(0.5, Math.min(newDur, dur - seg.start_time));
+                this._mixerFrameDirty = true;
             }
         },
 
@@ -529,26 +694,90 @@ document.addEventListener("alpine:init", () => {
             const t = x / this.pixelsPerSecond;
             const dur = this.look?.total_duration || 10;
             this.playTime = Math.max(0, Math.min(t, dur));
+            this.transportTime = this.playTime;
             if (this.playing) {
                 this.stop();
                 this.play();
+            } else {
+                this._updateMixerTime(this.playTime, false, this.transportTime);
             }
         },
 
-        async previewOnDevices() {
-            if (!this.look) return;
-            const payload = { ...this.look };
-            const filter = Alpine.store("app").mixerPreviewDevices;
-            if (filter) payload.device_filter = filter;
-            await api("POST", "/api/mixer/preview", payload);
-            this.previewing = true;
-            this.play();
+        _playheadDrag: null,
+
+        startPlayheadDrag(event) {
+            event.preventDefault();
+            const container = event.currentTarget.closest('.timeline-container');
+            if (!container) return;
+            const wasPlaying = this.playing;
+            if (wasPlaying) {
+                this.playing = false;
+                if (this._playInterval) {
+                    clearInterval(this._playInterval);
+                    this._playInterval = null;
+                }
+            }
+            this._playheadDrag = { container, wasPlaying };
+            const onMove = (e) => {
+                const rect = this._playheadDrag.container.getBoundingClientRect();
+                const x = e.clientX - rect.left + this._playheadDrag.container.scrollLeft;
+                const dur = this.look?.total_duration || 10;
+                this.playTime = Math.max(0, Math.min(x / this.pixelsPerSecond, dur));
+                this.transportTime = this.playTime;
+                this._updateMixerTime(this.playTime, false, this.transportTime);
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (this._playheadDrag?.wasPlaying) this.play();
+                this._playheadDrag = null;
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        },
+
+        async togglePreview() {
+            if (this.previewing) {
+                this.stop();
+                await api("POST", "/api/mixer/stop_preview");
+                this.previewing = false;
+            } else {
+                if (!this.look) return;
+                this.previewing = true;
+                this._sendPreview();
+            }
         },
 
         async stopPreview() {
+            if (!this.previewing) return;
+            this.stop();
             await api("POST", "/api/mixer/stop_preview");
             this.previewing = false;
-            this.stop();
+        },
+
+        _sendPreview() {
+            if (!this.previewing || !this.look) return;
+            // Reset sequence counter — start_mixer_preview on the server resets
+            // its own counter, so subsequent update calls start fresh.
+            this._mixerUpdateSeq = 0;
+            const payload = { ...this.look };
+            payload.play_time = this.playTime;
+            payload.transport_time = this.transportTime;
+            payload.playing = this.playing;
+            const filter = Alpine.store("app").mixerPreviewDevices;
+            if (filter) payload.device_filter = filter;
+            api("POST", "/api/mixer/preview", payload);
+        },
+
+        _updateMixerTime(playTime, playing, transportTime) {
+            if (!this.previewing) return;
+            const seq = ++this._mixerUpdateSeq;
+            const body = {};
+            if (playTime !== undefined) body.play_time = playTime;
+            if (transportTime !== undefined) body.transport_time = transportTime;
+            if (playing !== undefined) body.playing = playing;
+            body.seq = seq;
+            api("POST", "/api/mixer/update", body);
         },
 
         segmentStyle(seg) {
@@ -616,11 +845,12 @@ document.addEventListener("alpine:init", () => {
         play() {
             if (this.playing) return;
             this.playing = true;
-            const start = performance.now() - this.playTime * 1000 / (this.look?.speed || 1);
+            const start = performance.now() - this.transportTime * 1000 / (this.look?.speed || 1);
             this._playInterval = setInterval(() => {
                 const globalSpeed = this.look?.speed || 1;
                 const elapsed = (performance.now() - start) / 1000 * globalSpeed;
                 const dur = this.look?.total_duration || 10;
+                this.transportTime = elapsed;
                 if (this.look?.playback === "loop") {
                     this.playTime = elapsed % dur;
                 } else if (this.look?.playback === "boomerang") {
@@ -631,28 +861,31 @@ document.addEventListener("alpine:init", () => {
                     if (elapsed >= dur) this.stop();
                 }
             }, 33);
-            if (this.previewing) {
-                const payload = { ...this.look };
-                const filter = Alpine.store("app").mixerPreviewDevices;
-                if (filter) payload.device_filter = filter;
-                api("POST", "/api/mixer/preview", payload);
-            }
+            this._updateMixerTime(this.playTime, true, this.transportTime);
         },
 
         stop() {
+            if (!this.playing) return;
             this.playing = false;
             if (this._playInterval) {
                 clearInterval(this._playInterval);
                 this._playInterval = null;
             }
-            if (this.previewing) {
-                api("POST", "/api/mixer/stop_preview");
-            }
+            this._updateMixerTime(this.playTime, false, this.transportTime);
         },
 
         reset() {
-            this.stop();
+            const wasPlaying = this.playing;
+            if (wasPlaying) {
+                this.playing = false;
+                if (this._playInterval) {
+                    clearInterval(this._playInterval);
+                    this._playInterval = null;
+                }
+            }
             this.playTime = 0;
+            this.transportTime = 0;
+            this._updateMixerTime(0, false, 0);
         },
 
         formatTime(t) {
@@ -758,6 +991,8 @@ document.addEventListener("alpine:init", () => {
             if (newEnd > this.look.total_duration) {
                 this.look.total_duration = Math.ceil(newEnd);
             }
+            this._mixerFrameDirty = true;
+            if (this.previewing) this._sendPreview();
         },
 
         clipsForTrack(trackIdx) {
@@ -796,9 +1031,21 @@ document.addEventListener("alpine:init", () => {
         async loadLook(id) {
             const look = await api("GET", "/api/looks/" + id);
             if (look) {
+                if (this.previewing) {
+                    api("POST", "/api/mixer/stop_preview");
+                    this.previewing = false;
+                }
+                if (this.playing) {
+                    this.playing = false;
+                    if (this._playInterval) {
+                        clearInterval(this._playInterval);
+                        this._playInterval = null;
+                    }
+                }
                 this.look = look;
                 this.playTime = 0;
-                this.stop();
+                this.transportTime = 0;
+                this._mixerFrameDirty = true;
             }
         },
     }));

@@ -1,0 +1,25 @@
+{
+  "id": "3e000759-9675-47ea-a9e3-2ab34a28d97a",
+  "name": "Grid Rainbow Wash",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.485037+00:00",
+  "modified": "2026-04-08T15:30:31.485052+00:00"
+}

@@ -86,8 +86,8 @@
 #define ARTNET_OPCODE_POLL       0x2000
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000
-#define ARTNET_OPCODE_AUDIO_CMD  0x8200  // Vendor: audio play/stop/loop/pause
-#define ARTNET_OPCODE_FTP_CMD    0x8201  // Vendor: FTP server control (0=stop, 1=start)
+#define ARTNET_OPCODE_AUDIO_CMD  0x8300  // Vendor: audio play/stop/loop/pause
+#define ARTNET_OPCODE_FTP_CMD    0x8301  // Vendor: FTP server control (0=stop, 1=start)
 
 #define DEVICE_SHORT_NAME  "Radius"
 #if TARGET_BOARD == BOARD_FEATHER_ESP32

@@ -1,0 +1,25 @@
+{
+  "id": "b4d1b801-8d72-4821-bec7-86d31ba2628a",
+  "name": "Breathing Green",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    60,
+    0
+  ],
+  "end_color": [
+    0,
+    255,
+    80
+  ],
+  "speed": 0.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.291433+00:00",
+  "modified": "2026-04-08T13:57:40.291475+00:00"
+}

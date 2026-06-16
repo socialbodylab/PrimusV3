@@ -1,0 +1,25 @@
+{
+  "id": "71a62933-5e48-4955-81ac-837929874990",
+  "name": "Violet Swell",
+  "group": "Violet Swell",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    150,
+    0,
+    255
+  ],
+  "end_color": [
+    30,
+    0,
+    60
+  ],
+  "speed": 0.6,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.676488+00:00",
+  "modified": "2026-04-08T18:59:58.676500+00:00"
+}

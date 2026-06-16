@@ -1,0 +1,25 @@
+{
+  "id": "782acb70-6d87-4f47-8a0a-a14ed26c5fb2",
+  "name": "Grid Breathe Pink",
+  "group": "Grid Breathe Pink",
+  "output_type": "grid",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    80,
+    150
+  ],
+  "end_color": [
+    50,
+    10,
+    30
+  ],
+  "speed": 0.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.686710+00:00",
+  "modified": "2026-04-08T18:59:58.686727+00:00"
+}

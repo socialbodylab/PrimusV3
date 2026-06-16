@@ -1,0 +1,29 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Local setup environments and tools
+.venv/
+.tools/
+
+# macOS
+.DS_Store
+
+# Primus sender runtime state
+V3_1/sender/.primus_state.json
+V3_5/sender/.primus_state.json
+V3_6/sender/.primus_state.json
+sender/.primus_state.json
+
+# Packaging outputs
+V3_5/build/
+V3_5/dist/
+V3_6/build/
+V3_6/dist/
+
+# Local Apple signing material
+*.certSigningRequest
+*.cer
+*.p12
+*.mobileprovision
+DeveloperIDApplication.key

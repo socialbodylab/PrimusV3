@@ -1,0 +1,25 @@
+{
+  "id": "47546707-61a2-437d-a65d-10f66ec2c345",
+  "name": "White Comet",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    255,
+    255
+  ],
+  "end_color": [
+    0,
+    0,
+    20
+  ],
+  "speed": 1.4,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 4,
+  "chase_origin": "start",
+  "duration": 3.8,
+  "created": "2026-05-08T22:02:11.859586+00:00",
+  "modified": "2026-05-08T22:02:11.859605+00:00"
+}

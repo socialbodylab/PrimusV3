@@ -1,0 +1,25 @@
+{
+  "id": "00529241-4ec8-4543-8ac7-b716c11c78a4",
+  "name": "Violet Comet",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    180,
+    0,
+    255
+  ],
+  "end_color": [
+    15,
+    0,
+    35
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.4,
+  "created": "2026-05-08T22:02:11.865986+00:00",
+  "modified": "2026-05-08T22:02:11.866000+00:00"
+}

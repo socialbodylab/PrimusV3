@@ -1,0 +1,25 @@
+{
+  "id": "a342b3b3-d969-4c84-abe2-20f835b6a8df",
+  "name": "Magenta Pulse",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    0,
+    150
+  ],
+  "end_color": [
+    80,
+    0,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.291074+00:00",
+  "modified": "2026-04-08T13:57:40.291110+00:00"
+}

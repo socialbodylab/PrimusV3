@@ -1,0 +1,25 @@
+{
+  "id": "b7517182-8e0b-48ba-8c64-09c9065f3640",
+  "name": "Aurora Ribbon",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    0,
+    255,
+    180
+  ],
+  "end_color": [
+    130,
+    0,
+    255
+  ],
+  "speed": 0.7,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 6.0,
+  "created": "2026-05-08T22:02:11.858813+00:00",
+  "modified": "2026-05-08T22:02:11.858830+00:00"
+}

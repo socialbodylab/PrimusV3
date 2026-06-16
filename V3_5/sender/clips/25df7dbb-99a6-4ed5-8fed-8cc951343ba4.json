@@ -1,0 +1,25 @@
+{
+  "id": "25df7dbb-99a6-4ed5-8fed-8cc951343ba4",
+  "name": "Starfield Sparkle Grid",
+  "group": "noise",
+  "output_type": "grid",
+  "effect": "sparkle_noise",
+  "start_color": [
+    0,
+    0,
+    20
+  ],
+  "end_color": [
+    245,
+    245,
+    255
+  ],
+  "speed": 0.8,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 8.0,
+  "created": "2026-05-13T20:00:09+00:00",
+  "modified": "2026-05-13T20:00:09+00:00"
+}

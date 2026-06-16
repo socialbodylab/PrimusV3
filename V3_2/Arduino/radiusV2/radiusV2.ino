@@ -5,12 +5,12 @@
  * + Music Maker FeatherWing. No LED / NeoPXL8 output — LED nodes are
  * separate V3.1 hardware.
  *
- * Receives Art-Net audio commands (opcode 0x8200) and FTP commands
- * (opcode 0x8201). Responds to ArtPoll and ArtAddress.
+ * Receives Art-Net audio commands (opcode 0x8300) and FTP commands
+ * (opcode 0x8301). Responds to ArtPoll and ArtAddress.
  *
- * Audio command packet (opcode 0x8200):
+ * Audio command packet (opcode 0x8300):
  *   [0-7]  "Art-Net\0"
- *   [8-9]  0x00, 0x82      — opcode LE
+ *   [8-9]  0x00, 0x83      — opcode LE
  *   [10-11] 0x00, 0x0E     — protocol version 14
  *   [12]   command         — 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 6=play cue, 7=loop cue
  *   [13]   volume (0–100) or cue number (cmd 6/7)
@@ -218,7 +218,7 @@ void handleArtAddress(uint8_t* data, uint16_t len) {
 }
 
 // =====================================================================
-//  ArtFtpCmd (opcode 0x8201)
+//  ArtFtpCmd (opcode 0x8301)
 // =====================================================================
 
 void handleArtFtpCmd(uint8_t* data, uint16_t len) {
@@ -238,7 +238,7 @@ void handleArtFtpCmd(uint8_t* data, uint16_t len) {
 }
 
 // =====================================================================
-//  ArtAudioCmd (opcode 0x8200)
+//  ArtAudioCmd (opcode 0x8300)
 // =====================================================================
 
 void handleArtAudioCmd(uint8_t* data, uint16_t len) {

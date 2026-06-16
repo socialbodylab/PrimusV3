@@ -274,7 +274,7 @@ void displayAudioStatus(const char* filename, uint8_t volume, bool playing) {
     tft.setCursor(4, 70);
     tft.setTextSize(1);
     tft.setTextColor(0x7BEF);
-    tft.print("Awaiting opcode 0x8200");
+    tft.print("Awaiting opcode 0x8300");
   }
 
   tft.drawFastHLine(0, 105, 240, 0x4208);

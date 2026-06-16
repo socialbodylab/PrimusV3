@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Primus Central LED Controller</title>
+<link rel="stylesheet" href="/css/style.css">
+<script defer src="/js/alpine.min.js"></script>
+<script src="/js/app.js"></script>
+<script src="/js/look-mixer.js"></script>
+<script src="/js/look-controller.js"></script>
+<script src="/js/firmware.js"></script>
+<script src="/js/settings.js"></script>
+</head>
+<body>
+
+<!-- ==================== NAVBAR ==================== -->
+<nav class="navbar">
+    <div class="navbar-brand">Primus Central</div>
+    <div class="navbar-tabs navbar-tabs-primary">
+        <template x-data x-for="m in ['mixer', 'controller']">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="$store.app.modeLabels[m]"></div>
+        </template>
+    </div>
+    <div class="navbar-tabs navbar-tabs-secondary">
+        <template x-data x-for="m in ['firmware', 'settings']">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="$store.app.modeLabels[m]"></div>
+        </template>
+    </div>
+    <div class="navbar-status" x-data>
+        <div class="playback-chip"
+             :class="$store.app.playbackClass()"
+             :title="$store.app.playback.detail">
+            <span class="playback-chip-label">Output</span>
+            <span class="playback-chip-value" x-text="$store.app.playback.label"></span>
+            <span class="playback-chip-meta" x-text="$store.app.playback.summary"></span>
+        </div>
+        <button class="network-chip"
+                :class="$store.app.networkChipClass()"
+                :title="$store.app.networkChipTitle()"
+                @click="$store.app.setMode('settings')">
+            <span class="network-chip-label">Net</span>
+            <span class="network-chip-value" x-text="$store.app.networkChipLabel()"></span>
+        </button>
+        <div class="status-dot" :class="{ connected: $store.conn.anyConnected }"></div>
+        <span x-text="$store.app.connectedDeviceSummary"></span>
+    </div>
+</nav>
+
+<div class="notice-banner" x-data x-show="$store.app.notice" x-cloak>
+    <div class="notice-pill"
+         :class="'notice-' + ($store.app.notice?.level || 'info')">
+        <span class="notice-text" x-text="$store.app.notice?.message"></span>
+        <button class="notice-close" @click="$store.app.clearNotice()">&times;</button>
+    </div>
+</div>
+
+<!-- ==================== MAIN ==================== -->
+<div class="main-content" x-data>
+
+    <!-- ──── SIDEBAR: Devices ──── -->
+    <div class="sidebar" :class="{ 'sidebar-collapsed': $store.conn.sidebarCollapsed }"
+            x-show="!['controller', 'firmware', 'settings'].includes($store.app.mode)">
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Devices</span>
+            <button class="btn btn-sm" @click="$store.conn.sidebarCollapsed = !$store.conn.sidebarCollapsed"
+                    x-text="$store.conn.sidebarCollapsed ? 'Show' : 'Hide'"></button>
+        </div>
+
+        <div class="sidebar-body" x-show="!$store.conn.sidebarCollapsed" x-cloak>
+            <div class="sidebar-top-actions">
+                <button class="btn btn-sm btn-primary"
+                        @click="$store.conn.discover()"
+                        :disabled="$store.conn.discovering"
+                        x-text="$store.conn.discovering ? 'Scanning...' : 'Discover Devices'"></button>
+                <div class="sidebar-action-row">
+                    <button class="btn btn-sm" @click="$store.conn.connectAll()">Connect All</button>
+                    <button class="btn btn-sm" @click="$store.conn.disconnectAll()">Disconnect All</button>
+                </div>
+                <button class="btn btn-sm sidebar-wide" x-show="$store.app.mode === 'mixer'"
+                    @click="$store.app.setMixerPreviewAll()">Preview All Devices</button>
+            </div>
+
+            <div class="sidebar-note" x-show="$store.app.mode === 'mixer'">
+                <span class="sidebar-note-label">Preview target</span>
+                <span class="sidebar-note-value" x-text="$store.app.mixerPreviewTarget.label"></span>
+            </div>
+
+        <template x-for="(dev, di) in $store.conn.devices" :key="di">
+            <div class="device-card" :class="{ 'device-connected': dev.connected, 'device-static-ip': dev.ip_mode === 'static' && !dev.ip_config_pending }">
+                <div class="device-header">
+                    <template x-if="$store.conn.renamingDevice !== di">
+                        <span class="device-name" x-text="dev.name"
+                              @click="$store.conn.startRename(di)"
+                              :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(dev) }"
+                              :title="$store.conn.renameHint(dev)"></span>
+                    </template>
+                    <template x-if="$store.conn.renamingDevice === di">
+                        <input class="device-rename-input" type="text" maxlength="17"
+                               x-model="$store.conn.renameValue"
+                               @keydown.enter="$store.conn.finishRename(di)"
+                               @keydown.escape="$store.conn.cancelRename()"
+                               @blur="$store.conn.finishRename(di)"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
+                    <span class="device-fps"
+                          x-show="dev.connected"
+                          x-text="dev.receiver_fps != null ? (dev.receiver_fps + ' fps') : '-- fps'"></span>
+                </div>
+                <div class="device-meta">
+                    <button class="device-ip-button"
+                            :class="{ active: $store.conn.ipConfigDevice === di }"
+                            :disabled="!$store.conn.canConfigureIp(dev)"
+                            :title="$store.conn.ipConfigHint(dev)"
+                            @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)"
+                            x-text="dev.ip"></button>
+                      <span class="device-network-badge"
+                          :class="$store.conn.networkModeClass(dev)"
+                          :title="$store.conn.networkModeTitle(dev)"
+                          x-text="$store.conn.networkModeLabel(dev)"></span>
+                    <span class="device-profile" x-text="$store.conn.hardwareLabel(dev)"></span>
+                    <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
+                </div>
+                <div class="btn-group device-actions device-actions-primary">
+                    <button class="btn btn-sm device-action-main"
+                            :class="{ 'btn-primary': !dev.connected }"
+                            @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
+                        x-text="dev.connected ? 'Disconnect' : 'Connect'"></button>
+                    <button class="btn btn-sm device-action-main" x-show="dev.connected"
+                        :disabled="!$store.conn.canHelloDevice(dev)"
+                        :title="$store.conn.helloHint(dev)"
+                            @click="$store.conn.helloDevice(di)">Hello</button>
+                </div>
+                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
+                    <div class="form-group compact">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigIp" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigGateway" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
+                    </div>
+                    <div class="btn-group" style="margin-top:4px">
+                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(di)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(di)">Revert to DHCP</button>
+                    </div>
+                    <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
+                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Primus will rescan.</div>
+                </div>
+                <div class="device-outputs">
+                    <template x-for="(o, oi) in dev.outputs.slice(0, ($store.app.state?.look?.outputs || []).length)">
+                        <span class="output-badge" x-text="$store.app.outputLabel(o.name, oi) + ': ' + $store.app.outputTypeLabel(o.type)"></span>
+                    </template>
+                </div>
+                <div class="device-footer-actions">
+                    <label class="device-preview-check" x-show="$store.app.mode === 'mixer'">
+                        <input type="checkbox"
+                               :checked="!$store.app.mixerPreviewDevices || $store.app.mixerPreviewDevices.includes(di)"
+                               @change="$store.app.toggleMixerDevice(di)">
+                        <span class="text-sm">Include in preview</span>
+                    </label>
+                    <button class="btn btn-sm btn-danger device-remove-btn" @click="$store.conn.removeDevice(di)">Remove</button>
+                </div>
+            </div>
+        </template>
+
+        <!-- Device Groups -->
+        <div class="mt-4" x-show="$store.conn.devices.length > 0">
+            <div class="flex justify-between items-center mb-2">
+                <span class="section-title" style="margin:0;font-size:12px">Groups</span>
+                <button class="btn btn-sm" @click="$store.conn.openNewGroup()">+ Group</button>
+            </div>
+            <template x-for="group in $store.conn.deviceGroups" :key="group.id">
+                <div class="device-group-card">
+                    <div class="device-group-header">
+                        <span class="device-group-name" x-text="group.name"></span>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" @click="$store.conn.connectGroup(group)"
+                                    title="Connect group">On</button>
+                            <button class="btn btn-sm" @click="$store.conn.disconnectGroup(group)"
+                                    title="Disconnect group">Off</button>
+                            <button class="btn btn-sm" @click="$store.conn.openEditGroup(group)"
+                                    title="Edit group">E</button>
+                            <button class="btn btn-sm btn-danger" @click="$store.conn.deleteGroup(group.id)">&times;</button>
+                        </div>
+                    </div>
+                    <div class="device-group-members">
+                        <template x-for="ip in group.device_ips" :key="ip">
+                            <span class="text-sm text-muted" x-text="($store.conn.devices.find(d => d.ip === ip)?.name || ip)"></span>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Device Group Modal -->
+        <template x-teleport="body">
+            <div class="modal-overlay" x-show="$store.conn.groupModal"
+                 @click.self="$store.conn.groupModal = false" style="z-index:100">
+                <div class="modal">
+                    <div class="modal-title" x-text="$store.conn.editGroup ? 'Edit Group' : 'New Group'"></div>
+                    <div class="form-group">
+                        <label class="form-label">Group Name</label>
+                        <input class="form-input" type="text" maxlength="32"
+                               x-model="$store.conn.editGroupName"
+                               placeholder="e.g. Stage Left">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Devices</label>
+                        <template x-for="(dev, di) in $store.conn.devices" :key="di">
+                            <label class="device-group-check">
+                                <input type="checkbox"
+                                       :checked="$store.conn.editGroupIps.includes(dev.ip)"
+                                       @change="$store.conn.toggleGroupIp(dev.ip)">
+                                <span x-text="dev.name + ' (' + dev.ip + ')'"></span>
+                            </label>
+                        </template>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn" @click="$store.conn.groupModal = false">Cancel</button>
+                        <button class="btn btn-primary" @click="$store.conn.saveGroup()">Save</button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <div class="mt-2" style="display:flex;gap:4px">
+            <input type="text" class="input" placeholder="IP address"
+                   x-model="$store.conn.manualIp"
+                   @keydown.enter="$store.conn.addManualIp()"
+                   style="flex:1;font-size:12px;padding:4px 6px">
+            <button class="btn btn-sm"
+                    @click="$store.conn.addManualIp()"
+                    :disabled="!$store.conn.manualIp">Add</button>
+        </div>
+
+        <template x-if="$store.conn.discovered.length > 0">
+            <div class="mt-2">
+                <div class="text-sm text-muted mb-2">Discovered:</div>
+                <template x-for="node in $store.conn.discovered" :key="node.ip">
+                    <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
+                        <div class="device-name" x-text="node.short_name || node.ip"></div>
+                        <div class="device-ip" x-text="node.ip"></div>
+                        <div class="device-ip" x-text="$store.conn.hardwareLabel(node)"></div>
+                        <div class="device-capability-row">
+                            <span class="device-capability-status"
+                                  :class="$store.conn.capabilityStatusClass(node)"
+                                  x-text="$store.conn.capabilityStatusLabel(node)"></span>
+                            <div class="device-capability-pills">
+                                <template x-for="item in $store.conn.capabilityItems(node)" :key="item.key">
+                                    <span class="capability-pill"
+                                          :class="item.supported ? 'capability-pill-on' : 'capability-pill-off'"
+                                          x-text="item.label"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+        </div>
+    </div>
+
+    <!-- ──── PANEL: Look Designer ──── -->
+    <div class="panel mixer-panel" x-show="$store.app.mode === 'mixer'" x-data="lookMixer">
+        <input type="file" x-ref="importBundleInput" accept=".json,application/json"
+               style="display:none" @change="importBundleFile($event)">
+        <!-- Sub-mode toggle -->
+        <div class="flex justify-between items-center mb-4">
+            <div class="sub-mode-toggle">
+                <button class="sub-mode-btn" :class="{ active: subMode === 'timeline' }" @click="setSubMode('timeline')">Looks</button>
+                <button class="sub-mode-btn" :class="{ active: subMode === 'designer' }" @click="setSubMode('designer')">Clips</button>
+            </div>
+            <div class="btn-group" x-show="subMode === 'timeline'">
+                <button class="btn" @click="newLook()">New</button>
+                <button class="btn" @click="openLoad()">Load</button>
+                <button class="btn" @click="openImportFile()">Import</button>
+                <button class="btn" @click="exportLook()" :disabled="!look?.id">Export</button>
+                <button class="btn btn-primary" @click="openSave()">Save</button>
+            </div>
+            <div class="btn-group" x-show="subMode === 'designer'">
+                <button class="btn" @click="openImportFile()">Import Clip</button>
+                <span class="text-sm text-muted" x-text="designerReceiverFpsLabel()"></span>
+            </div>
+        </div>
+
+        <!-- ═══ DESIGNER SUB-MODE ═══ -->
+        <div x-show="subMode === 'designer'">
+
+            <!-- Per-output controls -->
+            <template x-for="(out, oi) in outputs" :key="oi">
+                <div class="output-section">
+                    <div class="output-header">
+                        <div class="flex items-center gap-2">
+                            <span class="output-name" x-text="outputLabel(out.name, oi)"></span>
+                            <span class="designer-clip-label"
+                                  x-text="loadedClips[oi]?.name || 'Untitled'"></span>
+                        </div>
+                        <span class="text-sm text-muted" x-text="out.count + 'px'"></span>
+                    </div>
+
+                    <div class="designer-output-layout">
+                        <div class="designer-preview-pane">
+                            <canvas class="preview-canvas designer-preview-canvas"
+                                    :class="{
+                                        'designer-preview-grid': out.type === 'grid',
+                                        'designer-preview-small-grid': out.type === 'small_grid',
+                                        'designer-preview-strip': !out.grid
+                                    }"
+                                    :id="'preview_' + oi"></canvas>
+                        </div>
+
+                        <div class="designer-controls-pane">
+                            <!-- Output Type -->
+                            <div class="form-group">
+                                <label class="form-label">Output Type</label>
+                                <select class="form-select"
+                                        :value="out.type"
+                                        @change="updateOutputType(oi, $event.target.value)">
+                                    <template x-for="t in outputTypes">
+                                            <option :value="t" x-text="typeLabel(t)"></option>
+                                    </template>
+                                </select>
+                            </div>
+
+                            <!-- Effect -->
+                            <div class="form-group" x-show="out.type !== 'none'">
+                                <label class="form-label">Effect</label>
+                                <select class="form-select"
+                                        :value="out.effect"
+                                        @change="updateOutput(oi, 'effect', $event.target.value)">
+                                    <template x-for="e in effects">
+                                            <option :value="e" x-text="effectLabel(e)"></option>
+                                    </template>
+                                </select>
+                            </div>
+
+                            <!-- Colors -->
+                            <div class="form-group" x-show="out.type !== 'none' && needsColors(out.effect)">
+                                <label class="form-label">Colors</label>
+                                <div class="color-row">
+                                    <input type="color"
+                                           :value="startHex(oi)"
+                                           @input="updateColor(oi, 'start_color', $event.target.value)">
+                                    <span class="text-sm">Start</span>
+                                    <input type="color"
+                                           :value="endHex(oi)"
+                                           @input="updateColor(oi, 'end_color', $event.target.value)">
+                                    <span class="text-sm">End</span>
+                                </div>
+                            </div>
+
+                            <!-- Speed -->
+                            <div class="form-group" x-show="out.type !== 'none' && out.effect !== 'none' && out.effect !== 'solid'">
+                                <label class="form-label">Speed</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="0.1" max="10" step="0.1"
+                                           :value="out.speed"
+                                           @input="updateOutput(oi, 'speed', parseFloat($event.target.value))">
+                                    <span class="text-sm" x-text="out.speed?.toFixed(1)"></span>
+                                </div>
+                            </div>
+
+                            <!-- Brightness -->
+                            <div class="form-group" x-show="out.type !== 'none'">
+                                <label class="form-label">Brightness</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="0" max="100" step="1"
+                                           :value="brightnessPercent(out.brightness)"
+                                           @input="updateOutputBrightness(oi, $event.target.value)">
+                                    <span class="text-sm" x-text="brightnessPercent(out.brightness) + '%'"></span>
+                                </div>
+                            </div>
+
+                            <!-- Playback -->
+                            <div class="form-group" x-show="out.type !== 'none' && out.effect !== 'none' && out.effect !== 'solid'">
+                                <label class="form-label">Playback</label>
+                                <select class="form-select"
+                                        :value="out.playback"
+                                        @change="updateOutput(oi, 'playback', $event.target.value)">
+                                    <option value="loop">Loop</option>
+                                    <option value="boomerang">Boomerang</option>
+                                    <option value="once">Once</option>
+                                </select>
+                            </div>
+
+                            <!-- Angle (linear/chase) -->
+                            <div class="form-group" x-show="out.type !== 'none' && needsAngle(out.effect)">
+                                <label class="form-label">Angle</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="0" max="360" step="15"
+                                           :value="out.angle || 0"
+                                           @input="updateOutput(oi, 'angle', parseFloat($event.target.value))">
+                                    <span class="text-sm" x-text="(out.angle || 0) + '\u00B0'"></span>
+                                </div>
+                            </div>
+
+                            <!-- Highlight width (knight_rider) -->
+                            <div class="form-group" x-show="out.type !== 'none' && needsHighlight(out.effect)">
+                                <label class="form-label">Highlight Width</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="1" max="30"
+                                           :value="out.highlight_width || 5"
+                                           @input="updateOutput(oi, 'highlight_width', parseInt($event.target.value))">
+                                    <span class="text-sm" x-text="out.highlight_width || 5"></span>
+                                </div>
+                            </div>
+
+                            <!-- Chase origin -->
+                            <div class="form-group" x-show="out.type !== 'none' && needsChaseOrigin(out.effect)">
+                                <label class="form-label">Chase Origin</label>
+                                <select class="form-select"
+                                        :value="out.chase_origin || 'start'"
+                                        @change="updateOutput(oi, 'chase_origin', $event.target.value)">
+                                    <option value="start">Start</option>
+                                    <option value="center">Center</option>
+                                    <option value="end">End</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Per-output save buttons -->
+                    <div class="designer-save-row" x-show="out.type !== 'none'">
+                        <button class="btn btn-sm btn-primary" @click="openSaveClip(oi)"
+                                x-text="loadedClips[oi] ? 'Update Clip' : 'Save as Clip'"></button>
+                        <button class="btn btn-sm" @click="openSaveNewClip(oi)"
+                                x-show="loadedClips[oi]">Save as New</button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Inline Clip Library -->
+            <div class="mt-4">
+                <h3 class="section-title" style="font-size:14px">Clip Library</h3>
+                <div class="search-bar">
+                    <input class="form-input" placeholder="Search clips..."
+                           x-model="libSearch" @input.debounce.300ms="doLibSearch()">
+                    <select class="form-select" style="width:auto"
+                            :value="libSortBy" @change="setLibSort($event.target.value)">
+                        <option value="modified">Recent</option>
+                        <option value="name">Name</option>
+                        <option value="output_type">Type</option>
+                        <option value="effect">Effect</option>
+                    </select>
+                </div>
+                <div class="filter-pills mb-4">
+                    <div class="filter-pill" :class="{ active: !libFilterType }"
+                         @click="setLibFilter('')">All</div>
+                    <template x-for="t in outputTypes.filter(t => t !== 'none')">
+                        <div class="filter-pill" :class="{ active: libFilterType === t }"
+                             @click="setLibFilter(t)" x-text="typeLabel(t)"></div>
+                    </template>
+                </div>
+                <div class="card-grid">
+                    <template x-for="clip in clips" :key="clip.id">
+                        <div class="card"
+                             @mouseenter="startClipPreview(clip, $el)"
+                             @mouseleave="stopClipPreview()">
+                            <div class="card-thumb" :style="thumbStyle(clip)"></div>
+                            <canvas class="clip-preview-canvas"
+                                    x-show="_clipPreviewId === clip.id"
+                                    :style="clip.output_type === 'grid' ? 'width:100%;aspect-ratio:1' : (clip.output_type === 'small_grid' ? 'width:100%;aspect-ratio:2/1' : 'width:100%;height:24px')">
+                            </canvas>
+                            <div class="card-body">
+                                <div class="card-title" x-text="clip.name"></div>
+                                <div class="card-meta">
+                                    <span x-text="typeLabel(clip.output_type)"></span> &middot;
+                                    <span x-text="effectLabel(clip.effect)"></span>
+                                </div>
+                            </div>
+                            <div class="card-hover-actions">
+                                <button class="btn btn-sm btn-primary"
+                                        @click.stop="loadIntoDesigner(clip)">Open In Designer</button>
+                                <button class="btn btn-sm"
+                                    @click.stop="exportClip(clip)">Export</button>
+                                <button class="btn btn-sm btn-danger"
+                                        @click.stop="deleteClip(clip)">Delete</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <p class="text-muted mt-2" x-show="clips.length === 0">No clips saved yet. Design an effect above and save it as a clip.</p>
+            </div>
+
+            <!-- Clip save modal -->
+            <div class="modal-overlay" x-show="clipSaveModal" @click.self="clipSaveModal = false">
+                <div class="modal">
+                    <div class="modal-title" x-text="loadedClips[clipSaveOi] ? 'Update Clip' : 'Save Clip'"></div>
+                    <div class="form-group">
+                        <label class="form-label">Clip Name</label>
+                        <input class="form-input" x-model="clipSaveName"
+                               placeholder="e.g. OpeningChase"
+                               @keydown.enter="doSaveClip()">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Duration (seconds)</label>
+                        <div class="flex items-center gap-2">
+                            <input type="range" class="form-range" min="0.5" max="60" step="0.5"
+                                   x-model.number="clipSaveDuration">
+                            <span class="text-sm" x-text="clipSaveDuration + 's'"></span>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn" @click="clipSaveModal = false">Cancel</button>
+                        <button class="btn btn-primary" @click="doSaveClip()"
+                                x-text="loadedClips[clipSaveOi] ? 'Update' : 'Save'"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ TIMELINE SUB-MODE ═══ -->
+        <div x-show="subMode === 'timeline'">
+        <template x-if="look">
+        <div>
+
+        <div class="preview-control-row" x-show="look">
+            <button class="btn btn-preview" :class="{ 'btn-preview-live': timelinePreviewLive }"
+                @click="togglePreview()"
+                x-text="timelinePreviewLive ? 'LIVE' : 'GO LIVE'"></button>
+        </div>
+
+        <div class="transport look-transport-row" x-show="look">
+            <button class="btn" @click="playing ? stop() : play()"
+                x-text="playing ? 'Pause' : 'Play'"></button>
+            <button class="btn" @click="reset()">Reset</button>
+            <span class="transport-time" x-text="formatTime(playTime)"></span>
+            <span class="transport-status-black" x-show="transportStatus() === 'BLACK'">BLACK</span>
+            <div class="transport-fields">
+                <div class="transport-field">
+                    <label class="form-label">Duration</label>
+                    <input class="form-input" type="number" min="1" max="600" step="1"
+                           :value="look.total_duration"
+                           @input.debounce.120ms="updateLookDuration($event.target.value)"
+                           @change="updateLookDuration($event.target.value)">
+                </div>
+                <div class="transport-field">
+                    <label class="form-label">Playback</label>
+                    <select class="form-select" :value="look.playback"
+                            @change="updateLookPlayback($event.target.value)">
+                        <option value="loop">Loop</option>
+                        <option value="boomerang">Boomerang</option>
+                        <option value="once">Once</option>
+                    </select>
+                </div>
+                <div class="transport-field transport-field-speed">
+                    <label class="form-label">Speed</label>
+                    <div class="flex items-center gap-1">
+                        <input type="range" class="form-range" min="0.1" max="4" step="0.1"
+                               :value="look.speed || 1"
+                               @input.debounce.120ms="updateLookSpeed($event.target.value)">
+                        <span class="text-sm" x-text="(look.speed || 1).toFixed(1) + 'x'"></span>
+                    </div>
+                </div>
+                <div class="transport-field transport-field-speed">
+                    <label class="form-label">Brightness</label>
+                    <div class="flex items-center gap-1">
+                        <input type="range" class="form-range" min="0" max="100" step="1"
+                               :value="brightnessPercent(look.brightness)"
+                               @input.debounce.80ms="updateLookBrightness($event.target.value)">
+                        <span class="text-sm" x-text="brightnessPercent(look.brightness) + '%'"></span>
+                    </div>
+                </div>
+                <div class="zoom-control">
+                    <label class="form-label" style="margin:0">Zoom</label>
+                    <input type="range" class="form-range" min="40" max="200" step="10"
+                           x-model.number="pixelsPerSecond">
+                </div>
+            </div>
+        </div>
+
+        <!-- Timeline -->
+        <div class="timeline-wrapper" x-show="look">
+            <!-- Track sidebar: output type selectors -->
+            <div class="timeline-sidebar">
+                <div class="timeline-sidebar-header">Outputs</div>
+                <template x-for="(track, ti) in look?.tracks || []" :key="'side-' + ti">
+                    <div class="timeline-sidebar-item" :class="{ active: selectedTrackIdx === ti }"
+                         @click="selectTrack(ti)">
+                        <div class="timeline-sidebar-copy">
+                            <span class="timeline-sidebar-label" x-text="outputLabel(track.port, ti)"></span>
+                            <select class="form-select form-select-sm"
+                                    x-effect="$el.value = (look.outputs[ti] || {}).type || 'none'"
+                                    @click.stop
+                                    @change="setTrackOutputType(ti, $event.target.value)">
+                                <template x-for="t in outputTypes">
+                                    <option :value="t"
+                                            :selected="t === (look.outputs[ti] || {}).type"
+                                            x-text="typeLabel(t)"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="timeline-output-preview-frame"
+                             :class="{ 'timeline-output-preview-frame-empty': (look.outputs[ti] || {}).type === 'none' }">
+                            <canvas class="preview-canvas timeline-output-preview"
+                                    :class="{
+                                        'timeline-output-preview-grid': (look.outputs[ti] || {}).type === 'grid',
+                                        'timeline-output-preview-small-grid': (look.outputs[ti] || {}).type === 'small_grid',
+                                        'timeline-output-preview-strip': !['grid', 'small_grid', 'none'].includes((look.outputs[ti] || {}).type)
+                                    }"
+                                    x-show="(look.outputs[ti] || {}).type !== 'none'"
+                                    :id="'mixer_preview_' + ti"></canvas>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <!-- Scrollable timeline -->
+            <div class="timeline-container"
+                  :style="'min-width:' + timelineWidth() + 'px'">
+                <!-- Ruler -->
+                 <div class="timeline-ruler" :style="'min-width:' + timelineWidth() + 'px'"
+                     @click="clickTimeline($event)">
+                    <template x-for="tick in rulerTicks()" :key="tick.t">
+                        <div :class="tick.major ? 'tick-major' : 'tick-minor'"
+                             :style="'left:' + tick.left + 'px'">
+                            <span x-show="tick.major" x-text="tick.t + 's'"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Tracks -->
+                <template x-for="(track, ti) in look?.tracks || []" :key="ti">
+                    <div class="timeline-track"
+                         :class="{ 'drag-over': _dropIndicator?.trackIdx === ti }"
+                         :style="'--pps:' + pixelsPerSecond + 'px'"
+                         @click="selectTrack(ti); clearSelectedSegment(); clickTimeline($event)"
+                         @dragover="selectTrack(ti); onTrackDragOver($event, ti)"
+                         @dragleave="onTrackDragLeave($event, ti)"
+                         @drop="selectTrack(ti); onTrackDrop($event, ti)">
+                    <template x-for="(seg, si) in track.segments" :key="seg.id || si">
+                        <div class="timeline-segment"
+                             :class="{
+                                'segment-active': playTime >= seg.start_time && playTime < seg.start_time + seg.duration,
+                                'segment-selected': isSelectedSegment(ti, si)
+                             }"
+                             :style="segmentStyle(seg)"
+                             :title="seg.clip_name + ' (' + seg.duration.toFixed(1) + 's)'"
+                             @mousedown="startDrag($event, ti, si, 'move')"
+                             @dblclick.stop="openEditSegment(ti, si)"
+                             @click.stop="selectSegment(ti, si)">
+                            <span class="segment-label" x-text="seg.clip_name"></span>
+                            <div class="segment-resize-handle"
+                                 @mousedown.stop="startDrag($event, ti, si, 'resize-end')"></div>
+                        </div>
+                    </template>
+                    <template x-for="(zone, zi) in crossfadeZones(ti)" :key="'xf-' + zi">
+                        <div class="crossfade-zone"
+                             :style="'left:' + zone.left + 'px;width:' + zone.width + 'px'"></div>
+                    </template>
+                </div>
+            </template>
+
+                <!-- Drop indicator -->
+                <div class="timeline-drop-indicator"
+                     x-show="_dropIndicator"
+                     :style="'left:' + (_dropIndicator?.time || 0) * pixelsPerSecond + 'px;top:' + ((_dropIndicator?.trackIdx || 0) * 132 + 24) + 'px'"></div>
+
+                <!-- Playhead -->
+                <div class="timeline-playhead"
+                     :style="'left:' + playheadLeft() + 'px'"
+                     @mousedown.stop="startPlayheadDrag($event)"></div>
+            </div>
+        </div>
+
+        <!-- Clip palette by output type -->
+        <div class="timeline-clip-library" x-show="look">
+            <h3 class="form-label mb-2">Add Clips to Look</h3>
+            <div class="search-bar">
+                <input class="form-input"
+                       :placeholder="timelineSearchPlaceholder()"
+                       x-model="timelineSearch"
+                       :disabled="selectedTimelineType() === 'none'">
+                <button class="btn btn-sm"
+                        x-show="timelineSearch"
+                        @click="timelineSearch = ''">Clear</button>
+            </div>
+            <template x-for="group in timelineClipGroups()" :key="'palette-' + group.type">
+                <div class="clip-type-group" :class="{ active: group.trackIndices.includes(selectedTrackIdx) }">
+                    <div class="clip-type-group-header">
+                        <span x-text="typeLabel(group.type)"></span>
+                        <span class="text-sm text-muted" x-text="group.ports.join(', ')"></span>
+                    </div>
+                    <div class="flex gap-2 mt-2" style="flex-wrap:wrap">
+                        <template x-for="clip in timelineClipsForType(group.type)" :key="clip.id">
+                            <div class="clip-palette-btn"
+                                    draggable="true"
+                                    @dragstart="onClipDragStart($event, clip, selectedTrackForType(group.type))"
+                                    @click="addSegment(selectedTrackForType(group.type), clip)"
+                                    @mouseenter="startClipPreview(clip, $el)"
+                                    @mouseleave="stopClipPreview()">
+                                <div class="clip-palette-thumb"
+                                     :style="'background:linear-gradient(90deg, rgb(' + (clip.start_color||[80,80,200]).join(',') + '), rgb(' + (clip.end_color||[200,80,80]).join(',') + '))'"></div>
+                                <canvas class="clip-palette-preview-canvas"
+                                        x-show="_clipPreviewId === clip.id"
+                                        :style="clip.output_type === 'grid' ? 'width:100%;aspect-ratio:1' : (clip.output_type === 'small_grid' ? 'width:100%;aspect-ratio:2/1' : 'width:100%;height:16px')">
+                                </canvas>
+                                <span x-text="clip.name"></span>
+                                <div class="clip-palette-hover-actions">
+                                    <button class="btn btn-xs btn-primary"
+                                            @click.stop="loadIntoDesigner(clip)">Clips</button>
+                                    <button class="btn btn-xs btn-danger"
+                                            @click.stop="deleteClip(clip)">Delete</button>
+                                </div>
+                            </div>
+                        </template>
+                        <span class="text-sm text-muted"
+                              x-show="timelineClipsForType(group.type).length === 0"
+                              x-text="timelineClipEmptyMessage(group)">
+                        </span>
+                    </div>
+                </div>
+            </template>
+            <span class="text-sm text-muted" x-show="timelineClipGroups().length === 0">
+                Choose an output type before adding clips to this Look.
+            </span>
+        </div>
+
+        <!-- Segment edit modal -->
+        <div class="modal-overlay" x-show="editModal" @click.self="editModal = false">
+            <div class="modal">
+                <div class="modal-title">Edit Segment</div>
+                <template x-if="editData">
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label">Start Time (s)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" class="form-input" min="0" step="0.1"
+                                       x-model.number="editData.start_time" style="width:100px">
+                                <span class="text-sm text-muted" x-text="editData.start_time.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Duration (s)</label>
+                            <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="0.5" step="0.5"
+                                        :max="editDurationMax()"
+                                        :value="editData.duration"
+                                        @input="updateEditDuration($event.target.value)">
+                                <span class="text-sm" x-text="editData.duration.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Fade In (s)</label>
+                            <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="0" step="0.1"
+                                        :max="editFadeMax('fade_in')"
+                                        :value="editData.fade_in"
+                                        @input="updateEditFade('fade_in', $event.target.value)">
+                                <span class="text-sm" x-text="editData.fade_in.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Fade Out (s)</label>
+                            <div class="flex items-center gap-2">
+                                    <input type="range" class="form-range" min="0" step="0.1"
+                                        :max="editFadeMax('fade_out')"
+                                        :value="editData.fade_out"
+                                        @input="updateEditFade('fade_out', $event.target.value)">
+                                <span class="text-sm" x-text="editData.fade_out.toFixed(1) + 's'"></span>
+                            </div>
+                        </div>
+                        <div class="crossfade-info" x-show="editOverlapBefore > 0 || editOverlapAfter > 0">
+                            <span class="form-label">Crossfade</span>
+                            <span class="text-sm text-muted" x-show="editOverlapBefore > 0"
+                                  x-text="'Overlap before: ' + editOverlapBefore + 's'"></span>
+                            <span class="text-sm text-muted" x-show="editOverlapAfter > 0"
+                                  x-text="'Overlap after: ' + editOverlapAfter + 's'"></span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Speed Override</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" class="form-range" min="0.1" max="4" step="0.1"
+                                       :value="editData.speed_override ?? 1" @input="editData.speed_override = parseFloat($event.target.value)">
+                                <span class="text-sm" x-text="editData.speed_override != null ? (editData.speed_override.toFixed(1) + 'x') : 'Clip default'"></span>
+                                <button class="btn btn-sm" x-show="editData.speed_override != null"
+                                        @click="editData.speed_override = null">Reset</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Brightness Override</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" class="form-range" min="0" max="100" step="1"
+                                       :value="editData.brightness_override != null ? brightnessPercent(editData.brightness_override) : 100"
+                                       @input="editData.brightness_override = parseFloat($event.target.value) / 100">
+                                <span class="text-sm" x-text="editData.brightness_override != null ? (brightnessPercent(editData.brightness_override) + '%') : 'Clip default'"></span>
+                                <button class="btn btn-sm" x-show="editData.brightness_override != null"
+                                        @click="editData.brightness_override = null">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+                <div class="modal-actions">
+                    <button class="btn btn-danger btn-sm" @click="removeSegment(editTrack, editSeg); editModal = false">Delete</button>
+                    <button class="btn btn-sm" @click="duplicateSegment()">Duplicate</button>
+                    <div style="flex:1"></div>
+                    <button class="btn" @click="editModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="applyEditSegment()">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Save modal -->
+        <div class="modal-overlay" x-show="saveModal" @click.self="saveModal = false">
+            <div class="modal">
+                <div class="modal-title">Save Look</div>
+                <div class="form-group">
+                    <label class="form-label">Name</label>
+                    <input class="form-input" x-model="saveName"
+                           @keydown.enter="doSave()">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input class="form-input" x-model="saveDesc">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Devices</label>
+                    <div class="device-checklist">
+                        <template x-for="dev in devices" :key="dev.ip">
+                            <label class="device-check-item">
+                                <input type="checkbox"
+                                       :checked="saveDeviceIps.includes(dev.ip)"
+                                       @change="toggleSaveDeviceIp(dev.ip)">
+                                <span x-text="dev.name"></span>
+                                <span class="text-muted text-sm" x-text="dev.ip"></span>
+                            </label>
+                        </template>
+                    </div>
+                    <p class="text-muted text-sm" x-show="devices.length === 0">No devices saved in the list.</p>
+                </div>
+                <div class="target-summary" x-text="saveTargetSummary()"></div>
+                <div class="modal-actions">
+                    <button class="btn" @click="saveModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="doSave()">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Load modal -->
+        <div class="modal-overlay" x-show="loadModal" @click.self="loadModal = false">
+            <div class="modal">
+                <div class="modal-title">Load Look</div>
+                <template x-if="savedLooks.length === 0">
+                    <p class="text-muted">No saved looks yet.</p>
+                </template>
+                <div style="max-height:300px;overflow-y:auto">
+                    <template x-for="sl in savedLooks" :key="sl.id">
+                        <div class="device-card" style="cursor:pointer" @click="loadLook(sl.id); loadModal = false">
+                            <div class="device-name" x-text="sl.name"></div>
+                            <div class="text-sm text-muted" x-text="sl.description || 'No description'"></div>
+                            <div class="text-sm text-muted" x-text="lookTargetLabel(sl)"></div>
+                            <div class="text-sm text-muted" x-text="sl.total_duration + 's · ' + (sl.tracks?.reduce((n,t) => n + t.segments.length, 0) || 0) + ' segments'"></div>
+                            <div class="mt-2">
+                                <button class="btn btn-sm" @click.stop="exportLook(sl)">Export</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" @click="openImportFile()">Import Look</button>
+                    <button class="btn" @click="loadModal = false">Cancel</button>
+                </div>
+            </div>
+        </div>
+        </div>
+        </template>
+        </div><!-- end timeline sub-mode -->
+    </div>
+
+    <!-- ---- PANEL: Cue Controller ---- -->
+    <div class="panel cue-controller-panel" x-show="$store.app.mode === 'controller'" x-data="lookController">
+        <div class="cue-controller-header">
+            <div>
+                <h1 class="cue-controller-title">Cue Controller</h1>
+                <div class="cue-controller-subtitle">
+                    <span x-text="connectedCount + '/' + devices.length + ' saved devices connected'"></span>
+                    <span x-show="preparingController">Preparing controller...</span>
+                </div>
+            </div>
+            <div class="cue-controller-actions">
+                <button class="btn btn-primary" @click="openAddCue()">Add Cue</button>
+            </div>
+        </div>
+
+        <div class="output-section osc-control-section">
+            <div class="output-header">
+                <span class="output-name">External Control</span>
+                <span class="osc-status-pill" :class="oscStatusClass()" x-text="oscStatusLabel()"></span>
+            </div>
+            <div class="osc-control-grid">
+                <label class="osc-enable-row">
+                    <input type="checkbox" x-model="oscConfig.enabled">
+                    <span>OSC</span>
+                </label>
+                <div class="form-group">
+                    <label class="form-label">Host</label>
+                    <input class="form-input" type="text" x-model="oscConfig.host" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="form-group osc-port-field">
+                    <label class="form-label">Port</label>
+                    <input class="form-input" type="number" min="0" max="65535" x-model.number="oscConfig.port">
+                </div>
+                <button class="btn btn-sm" @click="saveOscConfig()" :disabled="oscSaving" x-text="oscSaving ? 'Saving...' : 'Apply'"></button>
+            </div>
+            <div class="osc-detail-row">
+                <span class="osc-endpoint" x-text="oscEndpointLabel()"></span>
+                <span x-text="oscLastMessage()"></span>
+            </div>
+            <div class="osc-example-strip" x-show="cues.length > 0">
+                <template x-for="cue in cues.slice(0, 4)" :key="'osc-' + cue.number">
+                    <span class="cue-assignment-pill">
+                        <span x-text="cue.name"></span>
+                        <span class="cue-assignment-target" x-text="cueExternalAddress(cue)"></span>
+                    </span>
+                </template>
+                <span class="look-target-more" x-show="cues.length > 4" x-text="'+' + (cues.length - 4)"></span>
+            </div>
+        </div>
+
+        <div class="cue-board-header">
+            <div>
+                <span class="section-title" style="margin:0">Cue Board</span>
+                <span class="text-sm text-muted" x-text="cues.length + ' cue' + (cues.length === 1 ? '' : 's')"></span>
+            </div>
+        </div>
+
+        <div class="cue-card-grid">
+            <template x-for="(cue, idx) in cues" :key="cue.number + '-' + idx">
+                <div class="cue-card" :class="cueCardClass(idx)" role="button" tabindex="0"
+                     @click="triggerCue(cue.number)" @keydown.enter.prevent="triggerCue(cue.number)" @keydown.space.prevent="triggerCue(cue.number)">
+                    <div class="cue-card-topline">
+                        <span class="cue-card-number" x-text="cue.number"></span>
+                        <button class="btn btn-sm cue-card-edit" @click.stop="openEditCue(cue, idx)">Edit</button>
+                    </div>
+                    <div class="cue-card-main">
+                        <span class="cue-card-name" x-text="cue.name"></span>
+                        <span class="cue-card-summary" x-text="cueLookSummary(cue)"></span>
+                    </div>
+                    <div class="cue-assignment-strip">
+                        <template x-for="(assignment, ai) in cueAssignments(cue).slice(0, 2)" :key="ai">
+                            <span class="cue-assignment-pill">
+                                <span x-text="assignmentName(assignment)"></span>
+                                <span class="cue-assignment-target" x-text="assignmentTargetLabel(assignment)"></span>
+                            </span>
+                        </template>
+                        <span class="look-target-more" x-show="cueAssignments(cue).length > 2"
+                              x-text="'+' + (cueAssignments(cue).length - 2)"></span>
+                    </div>
+                    <div class="cue-card-meta">
+                        <span class="cue-card-state" x-show="isActive(idx)">Live</span>
+                        <span x-text="(cue.fade_time || 0) + 's fade'"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div class="cue-empty-state" x-show="cues.length === 0">
+            No cues yet. Add a cue from saved Looks to build the production board.
+        </div>
+
+        <div class="modal-overlay" x-show="cueModal" @click.self="closeCueModal()" x-cloak>
+            <div class="modal cue-modal">
+                <div class="modal-title" x-text="cueEditIndex >= 0 ? 'Edit Cue' : 'Add Cue'"></div>
+                <div class="cue-modal-grid" x-show="cueForm">
+                    <div class="form-group">
+                        <label class="form-label">Cue Name</label>
+                        <input class="form-input" type="text" x-model="cueForm.name" autocomplete="off">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Fade Time (s)</label>
+                        <input class="form-input" type="number" min="0" max="30" step="0.5" x-model.number="cueForm.fade_time">
+                    </div>
+                </div>
+                <div class="cue-assignment-editor" x-show="cueForm">
+                    <div class="cue-assignment-editor-header">
+                        <span class="section-title" style="margin:0">Looks</span>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" @click="addLookAssignment()" :disabled="looks.length === 0">Add Look</button>
+                            <button class="btn btn-sm btn-danger" @click="addBlackoutAssignment()">Add Blackout</button>
+                        </div>
+                    </div>
+                    <template x-for="(assignment, ai) in cueForm.assignments" :key="assignment._key || ('assignment-' + ai)">
+                        <div class="cue-assignment-row">
+                            <div class="cue-assignment-blackout" x-show="assignment.action === 'blackout'">
+                                <div class="cue-assignment-preview blackout-preview"></div>
+                                <div>
+                                    <div class="look-card-name">Blackout</div>
+                                    <div class="text-sm text-muted">Fade every target to black.</div>
+                                </div>
+                            </div>
+                            <div class="cue-assignment-look-grid" x-show="assignment.action === 'look'">
+                                <div class="cue-assignment-preview" :style="lookThumbStyle(assignmentLook(assignment))"></div>
+                                <div class="form-group">
+                                    <label class="form-label">Look</label>
+                                    <select class="form-select"
+                                            :value="assignment.look_id"
+                                            @change="setAssignmentLookId(assignment, $event.target.value)">
+                                        <template x-for="look in cueModalLooks" :key="look.id">
+                                            <option :value="look.id" x-text="look.name"></option>
+                                        </template>
+                                    </select>
+                                    <div class="text-sm text-muted" x-text="lookOutputs(assignmentLook(assignment)) || 'No outputs'"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Target</label>
+                                    <select class="form-select"
+                                            :value="assignment.target_mode"
+                                            @change="setAssignmentTargetMode(assignment, $event.target.value)">
+                                        <option value="look">Look target</option>
+                                        <option value="all">All devices</option>
+                                        <option value="group">Device group</option>
+                                        <option value="devices">Selected devices</option>
+                                    </select>
+                                    <div class="text-sm text-muted" x-text="assignmentTargetLabel(assignment)"></div>
+                                </div>
+                            </div>
+                            <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'group'">
+                                <label class="form-label">Group</label>
+                                <select class="form-select"
+                                        :value="assignment.device_group_id"
+                                        @change="setAssignmentGroupId(assignment, $event.target.value)">
+                                    <template x-for="group in cueModalGroups" :key="group.id">
+                                        <option :value="group.id" x-text="group.name"></option>
+                                    </template>
+                                </select>
+                                <p class="text-muted text-sm" x-show="cueModalGroups.length === 0">No groups defined.</p>
+                            </div>
+                            <div class="form-group" x-show="assignment.action === 'look' && assignment.target_mode === 'devices'">
+                                <label class="form-label">Devices</label>
+                                <div class="device-checklist target-device-grid">
+                                    <template x-for="dev in devices" :key="dev.ip">
+                                        <label class="device-check-item target-device-item"
+                                               :class="{ active: (assignment.device_ips || []).includes(dev.ip) }">
+                                            <input type="checkbox"
+                                                   :checked="(assignment.device_ips || []).includes(dev.ip)"
+                                                   @change="toggleAssignmentDevice(assignment, dev.ip)">
+                                            <span x-text="dev.name"></span>
+                                            <span class="text-muted text-sm" x-text="dev.ip"></span>
+                                        </label>
+                                    </template>
+                                </div>
+                            </div>
+                            <div class="cue-assignment-actions">
+                                <button class="btn btn-sm" @click="moveAssignment(ai, -1)" :disabled="ai === 0">Up</button>
+                                <button class="btn btn-sm" @click="moveAssignment(ai, 1)" :disabled="ai === cueForm.assignments.length - 1">Down</button>
+                                <button class="btn btn-sm btn-danger" @click="removeAssignment(ai)">Remove</button>
+                            </div>
+                        </div>
+                    </template>
+                    <p class="text-muted text-sm" x-show="cueForm.assignments.length === 0">Add at least one Look or Blackout item.</p>
+                </div>
+                <p class="text-muted text-sm" x-show="looks.length === 0">No looks saved yet. Create Looks in Look Designer first, or add a Blackout cue.</p>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" x-show="cueEditIndex >= 0" @click="deleteCueFromModal()">Delete Cue</button>
+                    <button class="btn" @click="closeCueModal()">Cancel</button>
+                    <button class="btn btn-primary" @click="saveCueForm()" :disabled="!cueFormValid">Save Cue</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-overlay" x-show="targetModal" @click.self="targetModal = false" x-cloak>
+            <div class="modal">
+                <div class="modal-title">Edit Look Targets</div>
+                <div class="target-editor-heading">
+                    <span class="look-card-name" x-text="targetEditLook()?.name || 'Look'"></span>
+                    <span class="text-sm text-muted" x-text="targetDeviceIps.length + ' selected'"></span>
+                </div>
+                <div class="device-checklist target-device-grid">
+                    <template x-for="dev in devices" :key="dev.ip">
+                        <label class="device-check-item target-device-item"
+                               :class="{ active: targetDeviceIps.includes(dev.ip) }">
+                            <input type="checkbox"
+                                   :checked="targetDeviceIps.includes(dev.ip)"
+                                   @change="toggleTargetDevice(dev.ip)">
+                            <span x-text="dev.name"></span>
+                            <span class="text-muted text-sm" x-text="dev.ip"></span>
+                        </label>
+                    </template>
+                </div>
+                <p class="text-muted text-sm" x-show="devices.length === 0">No devices saved in the list.</p>
+                <div class="target-summary" x-text="targetDeviceIps.length ? ('This Look will target ' + targetDeviceIps.length + ' device' + (targetDeviceIps.length === 1 ? '' : 's') + '.') : 'This Look will not target any devices.'"></div>
+                <div class="modal-actions">
+                    <button class="btn" @click="targetModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="saveTargetEditor()">Save Targets</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---- PANEL: Firmware ---- -->
+    <div class="panel" x-show="$store.app.mode === 'firmware'" x-data="firmwareUploader">
+        <div class="flex justify-between items-center mb-4 firmware-title-row">
+            <div>
+                <h2 class="section-title" style="margin:0">Firmware</h2>
+                <div class="text-sm text-muted" x-text="availabilityMessage"></div>
+                <div class="firmware-tools-path" x-show="toolsDir" x-text="toolsDir"></div>
+            </div>
+            <button class="btn btn-primary firmware-install-tools"
+                    x-show="showInstallTools"
+                    @click="installTools()">Install Firmware Tools</button>
+            <div class="firmware-status-pill" :class="statusClass()">
+                <span x-text="jobLabel()"></span>
+            </div>
+        </div>
+
+        <div class="output-section firmware-tool-callout" x-show="showInstallTools" x-cloak>
+            <div class="output-header">
+                <span class="output-name">Firmware Tools Required</span>
+                <span class="text-sm text-muted">One-time setup</span>
+            </div>
+            <p class="text-sm text-muted">Download Arduino CLI, install ESP32 board support, and prepare the receiver firmware libraries before compiling or uploading.</p>
+        </div>
+
+        <div class="firmware-grid firmware-workflow-grid">
+            <div class="output-section firmware-section">
+                <div class="output-header">
+                    <span class="output-name">Device Version</span>
+                    <span class="text-sm text-muted" x-text="profileLabel()"></span>
+                </div>
+                <div class="sub-mode-toggle firmware-profile-toggle">
+                    <template x-for="item in profiles" :key="item.id">
+                        <button class="sub-mode-btn"
+                                :class="{ active: profile === item.id }"
+                                :disabled="running"
+                                @click="setProfile(item.id)">
+                            <span x-text="item.label"></span>
+                        </button>
+                    </template>
+                </div>
+                <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+            </div>
+
+            <div class="output-section firmware-section firmware-device-section">
+                <div class="output-header">
+                    <span class="output-name">Device</span>
+                    <button class="btn btn-sm" @click="scanPorts()" :disabled="!available || running">Refresh Devices</button>
+                </div>
+                <div class="firmware-target-summary" x-text="targetSummary()"></div>
+                <div class="firmware-port-list">
+                    <template x-if="candidatePorts.length === 0">
+                        <div class="firmware-empty-state">No firmware devices found. Refresh after connecting a receiver over USB.</div>
+                    </template>
+                    <button type="button" class="firmware-port-row firmware-port-all"
+                            :class="{ 'firmware-port-selected': portMode === 'all' }"
+                            x-show="candidatePorts.length > 0"
+                            :disabled="running || candidatePorts.length === 0"
+                            @click="selectAllDevices()">
+                        <span class="firmware-port-address">All Available Devices</span>
+                        <span class="firmware-port-board" x-text="candidatePorts.length + ' detected'"></span>
+                        <span class="firmware-port-badge">All</span>
+                        <span class="firmware-port-reason">Upload the selected firmware version to every detected ESP32-like port.</span>
+                    </button>
+                    <template x-for="port in candidatePorts" :key="port.address">
+                        <button type="button" class="firmware-port-row"
+                                :class="portRowClass(port)"
+                                :disabled="running"
+                                @click="selectPort(port)">
+                            <span class="firmware-port-address" x-text="port.address"></span>
+                            <span class="firmware-port-board" x-text="port.board"></span>
+                            <span class="firmware-port-badge" x-text="portBadge(port)"></span>
+                            <span class="firmware-port-reason" x-text="port.reason"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="output-section firmware-section">
+                <div class="output-header">
+                    <span class="output-name">Overrides</span>
+                </div>
+                <div class="firmware-override-toggles">
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="nameEnabled" :disabled="running">
+                        <span>Use custom name</span>
+                    </label>
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="wifiEnabled" :disabled="running">
+                        <span>Use custom credentials</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Device Name</label>
+                    <input class="form-input" type="text" maxlength="17"
+                           x-model="deviceName" :disabled="running || !nameEnabled"
+                           placeholder="PrimusV3" autocomplete="off">
+                </div>
+                <div class="firmware-form-grid">
+                    <div class="form-group">
+                        <label class="form-label">SSID</label>
+                        <input class="form-input" type="text" x-model="wifiSsid" :disabled="running || !wifiEnabled" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Firmware IP override mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'keep' }"
+                            :disabled="running"
+                            @click="ipMode = 'keep'">Keep IP Setting</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'static' }"
+                            :disabled="running"
+                            @click="ipMode = 'static'">Set Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: ipMode === 'dhcp' }"
+                            :disabled="running"
+                            @click="ipMode = 'dhcp'">Use DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="ipMode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="running" autocomplete="off" placeholder="192.168.1.50">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="running" autocomplete="off" placeholder="192.168.1.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
+                    </div>
+                </div>
+                <div class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></div>
+            </div>
+
+            <div class="output-section firmware-section firmware-actions-section">
+                <div class="output-header">
+                    <span class="output-name">Compile / Upload</span>
+                    <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
+                </div>
+                <div class="firmware-actions">
+                    <button class="btn" @click="startJob('compile')" :disabled="!canCompile">Compile</button>
+                    <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="output-section firmware-log-section">
+            <div class="output-header">
+                <span class="output-name">Output</span>
+                <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
+            </div>
+            <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
+            <div class="firmware-log" x-show="activeJob" x-cloak>
+                <template x-for="(line, idx) in outputLines" :key="idx">
+                    <div class="firmware-log-line" x-text="line"></div>
+                </template>
+            </div>
+            <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
+        </div>
+    </div>
+
+    <!-- ---- PANEL: Settings ---- -->
+    <div class="panel settings-panel" x-show="$store.app.mode === 'settings'" x-data="settingsPanel">
+        <div class="flex justify-between items-center mb-4 settings-title-row">
+            <div>
+                <h2 class="section-title" style="margin:0">Settings</h2>
+                <div class="text-sm text-muted" x-text="$store.app.networkChipTitle()"></div>
+            </div>
+            <button class="btn btn-sm" @click="refresh()" :disabled="loading" x-text="loading ? 'Refreshing...' : 'Refresh'"></button>
+        </div>
+
+        <template x-if="warnings.length">
+            <div class="output-section settings-warning-section">
+                <template x-for="warning in warnings" :key="warning">
+                    <div class="settings-warning-line" x-text="warning"></div>
+                </template>
+            </div>
+        </template>
+
+        <div class="settings-grid">
+            <div class="output-section settings-section settings-router-section">
+                <div class="output-header">
+                    <span class="output-name">Show Router Setup</span>
+                    <span class="settings-status-pill settings-pill-router" x-text="routerStatusLabel"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="routerSetupSummary()"></div>
+                <div class="settings-detail-grid settings-router-grid">
+                    <div>
+                        <span class="settings-detail-label">Connection</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.service || selectedInterface?.device || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Sender IP</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.source_ip || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.cidr || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.usable_range || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-primary" @click="selectInterface(selectedInterface)" :disabled="!selectedInterface?.id || applying">Use for Art-Net</button>
+                    <button class="btn" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Receivers</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-current-section">
+                <div class="output-header">
+                    <span class="output-name">Sender Route</span>
+                    <span class="settings-status-pill" :class="statusPillClass(selectedInterface)" x-text="selectedInterface?.is_preferred ? 'Preferred' : (selectedInterface?.is_default ? 'Default' : 'Status')"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="interfaceMeta(selectedInterface)"></div>
+                <div class="settings-detail-grid">
+                    <div>
+                        <span class="settings-detail-label">Type</span>
+                        <span class="settings-detail-value" x-text="typeLabel(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None' "></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">SSID</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.ssid || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-sm" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-sm btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Devices</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-interface-section">
+                <div class="output-header">
+                    <span class="output-name">Active Connections</span>
+                    <span class="text-sm text-muted" x-text="visibleInterfaces.length + ' active' + (hiddenInterfaceCount ? ', ' + hiddenInterfaceCount + ' hidden' : '')"></span>
+                </div>
+                <div class="settings-interface-list">
+                    <template x-if="visibleInterfaces.length === 0">
+                        <div class="firmware-empty-state">No active IPv4 connections found.</div>
+                    </template>
+                    <template x-for="iface in visibleInterfaces" :key="iface.id">
+                        <button type="button" class="settings-interface-row"
+                                :class="interfaceRowClass(iface)"
+                                @click="selectInterface(iface)">
+                            <span class="settings-interface-name" x-text="interfaceLabel(iface)"></span>
+                            <span class="settings-interface-meta" x-text="interfaceMeta(iface)"></span>
+                            <span class="settings-interface-badges">
+                                <span class="settings-status-pill" :class="statusPillClass(iface)" x-text="iface.connected ? 'Active' : 'Inactive'"></span>
+                                <span class="settings-status-pill settings-pill-controller" x-show="iface.is_controller">Controller</span>
+                                <span class="settings-status-pill settings-pill-preferred" x-show="iface.is_preferred">Preferred</span>
+                                <span class="settings-status-pill" x-show="iface.is_default">Default</span>
+                            </span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-profile-section">
+                <div class="output-header">
+                    <span class="output-name">Sender IP on Show Router</span>
+                    <span class="text-sm text-muted" x-text="scope === 'ssid' ? (profileSsid || 'SSID') : (selectedInterface?.service || 'Service')"></span>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Sender IP mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'static' }"
+                            :disabled="applying"
+                            @click="mode = 'static'">Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'dhcp' }"
+                            :disabled="applying"
+                            @click="mode = 'dhcp'">DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="mode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Sender Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="applying" autocomplete="off" placeholder="10.0.0.10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="applying" autocomplete="off" placeholder="10.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="applying" autocomplete="off" placeholder="255.255.255.0">
+                    </div>
+                </div>
+                <div class="settings-detail-grid settings-profile-network" x-show="mode === 'static'" x-cloak>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="profileNetworkLabel"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="profileUsableRange"></span>
+                    </div>
+                </div>
+                <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!validationMessage }" x-text="validationMessage || profileModeNote()"></div>
+                <div class="settings-actions-row">
+                    <button class="btn" @click="saveProfile()" :disabled="!canSaveProfile" x-text="saving ? 'Saving...' : 'Save Sender Profile'"></button>
+                    <button class="btn btn-primary" x-show="mode === 'static'" @click="applyStaticIp()" :disabled="!canApplyStatic" x-text="applying ? 'Applying...' : applyStaticLabel"></button>
+                    <button class="btn btn-danger" @click="revertDhcp()" :disabled="!canRevertDhcp" x-text="applying ? 'Applying...' : 'Revert to DHCP'"></button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-receiver-section">
+                <div class="output-header">
+                    <span class="output-name">Receiver Network</span>
+                    <span class="text-sm text-muted" x-text="receiverRangeCounts.inRange + ' in range, ' + receiverRangeCounts.outOfRange + ' different'"></span>
+                </div>
+                <div class="settings-receiver-list">
+                    <template x-if="$store.conn.devices.length === 0">
+                        <div class="firmware-empty-state">No receivers saved.</div>
+                    </template>
+                    <template x-for="dev in $store.conn.devices" :key="dev.ip">
+                        <div class="settings-receiver-row">
+                            <span class="settings-receiver-name" x-text="dev.name"></span>
+                            <span class="settings-receiver-meta" x-text="receiverSummary(dev)"></span>
+                            <span class="settings-status-pill" :class="receiverRangeClass(dev)" x-text="receiverRangeLabel(dev)"></span>
+                            <span class="device-network-badge"
+                                  :class="$store.conn.networkModeClass(dev)"
+                                  :title="$store.conn.networkModeTitle(dev)"
+                                  x-text="$store.conn.networkModeLabel(dev)"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <details class="output-section settings-section settings-controller-section settings-advanced-wifi">
+                <summary class="settings-advanced-summary">
+                    <span class="output-name">Advanced WiFi Router</span>
+                    <span class="settings-status-pill" :class="{ 'settings-pill-controller': controllerNetworkActive, 'settings-pill-muted': !controllerSsidValue }" x-text="controllerNetworkStatusLabel"></span>
+                </summary>
+                <div class="settings-current-main" x-text="controllerSsidValue || 'No controller SSID set'"></div>
+                <div class="settings-current-meta" x-text="'Current WiFi: ' + currentWifiLabel()"></div>
+                <div class="settings-controller-form">
+                    <div class="form-group">
+                        <label class="form-label">Controller SSID</label>
+                        <input class="form-input" type="text" x-model="controllerSsid" :disabled="applying" autocomplete="off" placeholder="PrimusController">
+                    </div>
+                    <div class="settings-actions-row settings-controller-actions">
+                        <button class="btn btn-primary" @click="saveControllerNetwork()" :disabled="!canSaveControllerNetwork">Save WiFi Router</button>
+                        <button class="btn" @click="useCurrentWifiAsController()" :disabled="!currentWifi?.ssid || applying">Use Current WiFi</button>
+                        <button class="btn btn-danger" @click="clearControllerWifi()" x-show="controllerConnection.ssid" :disabled="applying">Clear</button>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>

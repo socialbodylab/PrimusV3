@@ -1,0 +1,25 @@
+{
+  "id": "c7bcd757-0d7f-460a-9232-0d96605385e2",
+  "name": "Small Grid Rainfall",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    20
+  ],
+  "end_color": [
+    0,
+    180,
+    255
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 90,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-05-08T22:02:11.848500+00:00",
+  "modified": "2026-05-08T22:02:11.848515+00:00"
+}
