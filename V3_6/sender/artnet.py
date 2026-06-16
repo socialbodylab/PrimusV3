@@ -730,11 +730,27 @@ def ftp_list_dir(ip, path="/"):
     return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
 
 
-def ftp_download(ip, path):
-    """Download and return bytes from path on the SD card."""
+def ftp_download(ip, path, progress_callback=None):
+    """Download and return bytes from path on the SD card.
+
+    progress_callback: optional callable(bytes_received, bytes_total).
+    bytes_total is 0 if the server does not report a file size.
+    """
     buf = io.BytesIO()
     with _ftp_session(ip) as ftp:
-        ftp.retrbinary(f"RETR {path}", buf.write)
+        if progress_callback:
+            try:
+                total = ftp.size(path) or 0
+            except Exception:
+                total = 0
+            received = [0]
+            def _cb(block):
+                buf.write(block)
+                received[0] += len(block)
+                progress_callback(received[0], total)
+            ftp.retrbinary(f"RETR {path}", _cb)
+        else:
+            ftp.retrbinary(f"RETR {path}", buf.write)
     return buf.getvalue()
 
 

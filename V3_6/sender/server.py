@@ -18,7 +18,7 @@ from firmware import FirmwareRequestError, firmware_jobs
 import mixer
 import netlog
 import sharing
-from artnet import discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download
+from artnet import discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download, send_audio_cmd
 from network_settings import (
     NetworkSettingsError,
     apply_static_ip,
@@ -36,8 +36,11 @@ from state import OUTPUT_TYPES, ControllerState
 _WEB_DIR = web_dir()
 _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 
-_sync_lock = threading.Lock()
-_sync_job   = None
+_sync_lock       = threading.Lock()
+_sync_job        = None
+
+_inventory_lock  = threading.Lock()
+_device_inventory = {}   # {ip: {name, files: [str], scanned_at: float}}
 
 
 def _safe_id(value):
@@ -228,13 +231,33 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/audio_sync/status":
             with _sync_lock:
                 job = dict(_sync_job) if _sync_job else None
-                if job and "items" in job:
+                if job:
                     job = dict(job)
-                    job["items"] = list(job["items"])
+                    job["items"]     = list(job.get("items", []))
+                    job["conflicts"] = list(job.get("conflicts", []))
+                    job["errors"]    = list(job.get("errors", []))
             self._json_response(job or {"status": "idle"})
             return
         if path == "/api/project_audio":
-            self._json_response({"files": _audio_cues_mod.list_project_audio()})
+            local_files = _audio_cues_mod.list_project_audio()
+            with _inventory_lock:
+                inventory = dict(_device_inventory)
+            # annotate each local file with which device IPs also have it
+            inv_by_ip = {ip: set(v.get("files", [])) for ip, v in inventory.items()}
+            for f in local_files:
+                sources = ["local"] + [
+                    ip for ip, names in inv_by_ip.items() if f["name"] in names
+                ]
+                f["sources"] = sources
+                f["local"]   = True
+            # compute inventory age
+            ages = [v["scanned_at"] for v in inventory.values() if "scanned_at" in v]
+            age = time.time() - min(ages) if ages else None
+            self._json_response({
+                "files":             local_files,
+                "device_inventory":  inventory,
+                "inventory_age_seconds": age,
+            })
             return
         if path.startswith("/api/"):
             self._json_error(404, "not found")
@@ -814,9 +837,12 @@ class Handler(BaseHTTPRequestHandler):
                     })
                     return
                 new_job = {
-                    "job_id": str(uuid.uuid4())[:8],
-                    "status": "planning",
-                    "items": [],
+                    "job_id":    str(uuid.uuid4())[:8],
+                    "type":      "push",
+                    "status":    "planning",
+                    "items":     [],
+                    "conflicts": [],
+                    "errors":    [],
                 }
                 _sync_job = new_job
 
@@ -829,6 +855,99 @@ class Handler(BaseHTTPRequestHandler):
                 daemon=True,
             ).start()
             self._json_response({"job_id": new_job["job_id"]})
+
+        elif path == "/api/audio_sync/pull":
+            with _sync_lock:
+                if _sync_job and _sync_job.get("status") == "running":
+                    self._json_response({
+                        "error": "sync already running",
+                        "job_id": _sync_job["job_id"],
+                    })
+                    return
+                new_job = {
+                    "job_id":    str(uuid.uuid4())[:8],
+                    "type":      "pull",
+                    "status":    "planning",
+                    "items":     [],
+                    "conflicts": [],
+                    "errors":    [],
+                }
+                _sync_job = new_job
+
+            threading.Thread(
+                target=_run_pull_job,
+                args=(new_job, self.controller_state),
+                daemon=True,
+            ).start()
+            self._json_response({"job_id": new_job["job_id"]})
+
+        elif path == "/api/audio_sync/rescan":
+            threading.Thread(
+                target=_run_rescan_job,
+                args=(self.controller_state,),
+                daemon=True,
+            ).start()
+            self._ok()
+
+        elif path == "/api/audio_sync/resolve":
+            filename    = data.get("filename", "")
+            resolutions = data.get("resolutions", [])
+            if not filename or not isinstance(resolutions, list):
+                self._json_error(400, "filename and resolutions required")
+                return
+            with _sync_lock:
+                job = _sync_job
+            if not job:
+                self._json_error(400, "no active sync job")
+                return
+            conflict = next(
+                (c for c in job.get("conflicts", []) if c["filename"] == filename),
+                None,
+            )
+            if conflict is None:
+                self._json_error(400, f"no conflict for {filename}")
+                return
+            saved    = []
+            discarded = []
+            for res in resolutions:
+                checksum = res.get("checksum", "")
+                action   = res.get("action", "")
+                group = next(
+                    (g for g in conflict["groups"] if g["checksum"] == checksum),
+                    None,
+                )
+                if group is None:
+                    self._json_error(400, f"unknown checksum {checksum}")
+                    return
+                if action == "discard":
+                    if group.get("temp_path"):
+                        _audio_cues_mod.discard_project_audio_temp(checksum)
+                    discarded.append(checksum)
+                elif action == "save":
+                    save_as = res.get("save_as", "")
+                    if not save_as:
+                        self._json_error(400, "save_as required for save action")
+                        return
+                    try:
+                        if group.get("temp_path"):
+                            _audio_cues_mod.resolve_project_audio_temp(checksum, save_as)
+                        saved.append(save_as)
+                    except _audio_cues_mod.ChecksumConflictError as e:
+                        self._respond(409, "application/json",
+                                      json.dumps({"error": str(e)}).encode())
+                        return
+                    except FileNotFoundError as e:
+                        self._json_error(400, str(e))
+                        return
+                else:
+                    self._json_error(400, f"unknown action {action}")
+                    return
+            # Remove resolved conflict from job
+            with _sync_lock:
+                job["conflicts"] = [
+                    c for c in job["conflicts"] if c["filename"] != filename
+                ]
+            self._json_response({"ok": True, "saved": saved, "discarded": discarded})
 
         elif path == "/api/netlog/clear":
             netlog.clear()
@@ -1019,23 +1138,50 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _snap_audio_devices(state):
+    """Return a list of {ip, name, connected} for all is_audio devices."""
+    with state.lock:
+        return [
+            {
+                "ip":        d["ip"],
+                "name":      d["name"],
+                "connected": d["sender"].connected,
+            }
+            for d in state.devices
+            if d.get("is_audio", False)
+        ]
+
+
+def _stop_all_audio(devices):
+    """Send stop command to every device IP and wait 300 ms for SD bus to clear."""
+    for dev in devices:
+        try:
+            send_audio_cmd(dev["ip"], 0)
+        except Exception:
+            pass
+    time.sleep(0.3)
+
+
+def _update_inventory(devices, entries_by_ip):
+    """Update the module-level device inventory cache."""
+    now = time.time()
+    with _inventory_lock:
+        for dev in devices:
+            ip = dev["ip"]
+            _device_inventory[ip] = {
+                "name":       dev["name"],
+                "files":      entries_by_ip.get(ip, []),
+                "scanned_at": now,
+            }
+
+
 def _run_sync_job(job, state, cues_data):
     """Background thread: build sync plan then upload missing files."""
     try:
         project_files = {f["name"]: f for f in _audio_cues_mod.list_project_audio()}
 
-        with state.lock:
-            devices_snap = [
-                {
-                    "ip":        d["ip"],
-                    "name":      d["name"],
-                    "is_audio":  d.get("is_audio", False),
-                    "connected": d["sender"].connected,
-                }
-                for d in state.devices
-            ]
-
-        radius_devs = [d for d in devices_snap if d["is_audio"]]
+        devices_snap = _snap_audio_devices(state)
+        radius_devs  = [d for d in devices_snap if d["connected"]]
 
         if not radius_devs:
             with _sync_lock:
@@ -1043,8 +1189,13 @@ def _run_sync_job(job, state, cues_data):
             return
 
         with _sync_lock:
+            job["status"] = "stopping"
+        _stop_all_audio(radius_devs)
+
+        with _sync_lock:
             job["status"] = "running"
 
+        entries_by_ip = {}
         for dev in radius_devs:
             ip        = dev["ip"]
             dev_name  = dev["name"]
@@ -1089,6 +1240,7 @@ def _run_sync_job(job, state, cues_data):
             try:
                 entries   = ftp_list_dir(ip, "/")
                 on_device = {e["name"] for e in entries if not e["is_dir"]}
+                entries_by_ip[ip] = sorted(on_device)
             except Exception as e:
                 for fname in sorted(needed):
                     with _sync_lock:
@@ -1160,6 +1312,8 @@ def _run_sync_job(job, state, cues_data):
                     netlog.log("OUT", "ftp_sync",
                                f"sync failed {fname} → {ip}: {e}")
 
+        _update_inventory(radius_devs, entries_by_ip)
+
         with _sync_lock:
             job["status"] = "done"
 
@@ -1167,6 +1321,190 @@ def _run_sync_job(job, state, cues_data):
         with _sync_lock:
             job["status"] = "error"
             job["error"]  = str(e)
+
+
+def _run_pull_job(job, state):
+    """Background thread: download files from all Radius devices to local library."""
+    import hashlib as _hashlib
+
+    def _checksum(data):
+        return "sha256:" + _hashlib.sha256(data).hexdigest()
+
+    def _suggested_name(filename, groups):
+        base, ext = os.path.splitext(filename)
+        # Group with most sources wins the original name
+        majority = max(groups, key=lambda g: len(g["sources"]))
+        for g in groups:
+            if g is majority:
+                g["suggested_name"] = filename
+            else:
+                first_dev = next(
+                    (s["device_name"] for s in g["sources"] if s.get("type") == "device"),
+                    "unknown",
+                )
+                slug = first_dev.lower().replace(" ", "-")
+                g["suggested_name"] = f"{base}_{slug}{ext}"
+
+    try:
+        radius_devs = _snap_audio_devices(state)
+        connected   = [d for d in radius_devs if d["connected"]]
+
+        if not connected:
+            with _sync_lock:
+                job["status"] = "done"
+            return
+
+        with _sync_lock:
+            job["status"] = "stopping"
+        _stop_all_audio(connected)
+
+        with _sync_lock:
+            job["status"] = "running"
+
+        # FTP-list all devices
+        listing = {}   # ip → set of filenames
+        for dev in connected:
+            ip = dev["ip"]
+            try:
+                entries    = ftp_list_dir(ip, "/")
+                listing[ip] = {e["name"] for e in entries if not e["is_dir"]}
+            except Exception as e:
+                with _sync_lock:
+                    job["errors"].append({
+                        "device_ip":   ip,
+                        "device_name": dev["name"],
+                        "error":       f"FTP list failed: {e}",
+                    })
+
+        _update_inventory(connected, {ip: sorted(names) for ip, names in listing.items()})
+
+        # Build filename → [device dicts] map across all devices
+        filename_map = {}   # filename → [{ip, name}]
+        for dev in connected:
+            ip = dev["ip"]
+            for fname in listing.get(ip, set()):
+                filename_map.setdefault(fname, []).append(dev)
+
+        # Process each filename
+        for fname, sources in sorted(filename_map.items()):
+            # Download all copies
+            downloaded = {}   # checksum → (data, [source_dicts])
+            for dev in sources:
+                ip       = dev["ip"]
+                item = {
+                    "filename":       fname,
+                    "device_ip":      ip,
+                    "device_name":    dev["name"],
+                    "bytes_total":    0,
+                    "bytes_received": 0,
+                    "status":         "downloading",
+                }
+                with _sync_lock:
+                    job["items"].append(item)
+
+                try:
+                    def _progress(recv, total, _item=item):
+                        _item["bytes_received"] = recv
+                        _item["bytes_total"]    = total
+
+                    data = ftp_download(ip, f"/{fname}", progress_callback=_progress)
+                    cs   = _checksum(data)
+                    item["status"] = "checksumming"
+
+                    if cs in downloaded:
+                        downloaded[cs][1].append({"type": "device", "device_ip": ip, "device_name": dev["name"]})
+                    else:
+                        downloaded[cs] = (data, [{"type": "device", "device_ip": ip, "device_name": dev["name"]}])
+
+                    item["bytes_received"] = item["bytes_total"]
+                    item["status"] = "done"
+
+                except Exception as e:
+                    item["status"] = "error"
+                    item["error"]  = str(e)
+                    netlog.log("OUT", "ftp_pull", f"pull failed {fname} from {ip}: {e}")
+
+            if not downloaded:
+                continue
+
+            # Check local library
+            local_path     = _audio_cues_mod.get_project_audio_path(fname)
+            local_checksum = _audio_cues_mod._get_cached_checksum(fname) if local_path else None
+
+            if local_checksum:
+                if local_checksum in downloaded:
+                    downloaded[local_checksum][1].insert(0, {"type": "local"})
+                else:
+                    # Read local bytes for staging if needed
+                    try:
+                        with open(local_path, "rb") as f:
+                            local_data = f.read()
+                        downloaded[local_checksum] = (local_data, [{"type": "local"}])
+                    except OSError:
+                        pass
+
+            if len(downloaded) == 1:
+                cs, (data, srcs) = next(iter(downloaded.items()))
+                has_local = any(s.get("type") == "local" for s in srcs)
+                if not has_local:
+                    try:
+                        _audio_cues_mod.save_project_audio(fname, data)
+                    except Exception as e:
+                        with _sync_lock:
+                            job["errors"].append({"filename": fname, "error": str(e)})
+            else:
+                # Multiple versions — build conflict groups
+                groups = []
+                for cs, (data, srcs) in downloaded.items():
+                    is_local_group = any(s.get("type") == "local" for s in srcs)
+                    temp_path = None
+                    if not is_local_group:
+                        try:
+                            temp_path = _audio_cues_mod.save_project_audio_temp(cs, data)
+                        except Exception:
+                            pass
+                    groups.append({
+                        "checksum":       cs,
+                        "size":           len(data),
+                        "sources":        srcs,
+                        "temp_path":      temp_path,
+                        "suggested_name": fname,
+                    })
+                _suggested_name(fname, groups)
+                with _sync_lock:
+                    job["conflicts"].append({"filename": fname, "groups": groups})
+
+        with _sync_lock:
+            job["status"] = "done"
+
+    except Exception as e:
+        with _sync_lock:
+            job["status"] = "error"
+            job["error"]  = str(e)
+
+
+def _run_rescan_job(state):
+    """Background thread: FTP-list all Radius devices and update inventory cache."""
+    try:
+        radius_devs = _snap_audio_devices(state)
+        connected   = [d for d in radius_devs if d["connected"]]
+        _stop_all_audio(connected)
+
+        entries_by_ip = {}
+        for dev in connected:
+            ip = dev["ip"]
+            try:
+                entries = ftp_list_dir(ip, "/")
+                entries_by_ip[ip] = sorted(
+                    e["name"] for e in entries if not e["is_dir"]
+                )
+            except Exception:
+                pass
+
+        _update_inventory(connected, entries_by_ip)
+
+    except Exception:
+        pass
 
 
 def create_server(host, port, controller_state, cue_list, ui_lifecycle_enabled=False, osc_service=None):
