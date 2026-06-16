@@ -72,8 +72,12 @@
 // =====================================================================
 //  Network Defaults
 // =====================================================================
-#define DEFAULT_WIFI_SSID      "RUR"
-#define DEFAULT_WIFI_PASSWORD  "rurrurrur"
+#ifndef DEFAULT_WIFI_SSID
+  #define DEFAULT_WIFI_SSID      "OPERADEV"
+#endif
+#ifndef DEFAULT_WIFI_PASSWORD
+  #define DEFAULT_WIFI_PASSWORD  "torrentoflight"
+#endif
 
 #define DEFAULT_STATIC_IP      192, 168, 8, 150
 #define DEFAULT_GATEWAY        192, 168, 8, 1

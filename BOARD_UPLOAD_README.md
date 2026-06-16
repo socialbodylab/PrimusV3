@@ -155,44 +155,33 @@ Required Arduino libraries (all profiles):
 | ArduinoJson | Parsing `/cues.json` from SD card |
 | SimpleFTPServer | FTP server for SD card file management |
 
-**Default WiFi**: `RUR` / `rurrurrur` — already baked in. No credential flags needed for the RUR router.
+**Default WiFi**: `OPERADEV` / `torrentoflight` — same as the LED receiver. Use `-ssid` / `-pw` flags to override at flash time (see [WiFi Credentials](#wifi-credentials) below).
 
 ---
 
 ## WiFi Credentials
 
-### LED receiver
-
-The LED receiver firmware defaults to `OPERADEV`. To compile for the RUR router without editing source files:
+Both firmware types default to `OPERADEV` / `torrentoflight`. To compile for a different network without editing source files, pass `-ssid` and `-pw` flags to `upload.sh`:
 
 ```bash
+# LED receiver — flash for RUR network
 cd V3_6/Arduino && ./upload.sh -v3 -ssid "RUR" -pw "rurrurrur" --auto
+
+# Radius — flash for RUR network
+cd V3_6/Arduino && ./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" --auto
+cd V3_6/Arduino && ./upload.sh -rv1 -ssid "RUR" -pw "rurrurrur" --auto
 ```
 
 Credential flags work with all upload modes:
 
 ```bash
-./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" --compile
-./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" --auto
-./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" --all
-./upload.sh -v2 -ssid "RUR" -pw "rurrurrur" /dev/cu.usbserial-XXXX
+./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" --compile
+./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" --auto
+./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" --all
+./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" /dev/cu.usbmodemXXXX
 ```
 
-These values are compiled into the binary for that build only. They do not modify `config.h`.
-
-### Radius firmware
-
-The Radius firmware defaults to `RUR` / `rurrurrur`. No credential flags are required:
-
-```bash
-cd V3_6/Arduino && ./upload.sh -rv2 --auto
-```
-
-To override for a different network:
-
-```bash
-./upload.sh -rv2 -ssid "OtherNetwork" -pw "other-password" --auto
-```
+These values are compiled into the binary for that build only. They do not modify `config.h`. Quote SSIDs or passwords that contain spaces or shell-special characters.
 
 ---
 
@@ -347,11 +336,11 @@ cd V3_6/Arduino && ./upload.sh --ports
 ./upload.sh -v3 -ssid "RUR" -pw "rurrurrur" --all
 
 # ── Radius audio ────────────────────────────────────────────────
-# Flash one Radius V2 (display) — RUR credentials already in firmware
-./upload.sh -rv2 --auto
+# Flash one Radius V2 (display) for RUR network
+./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" --auto
 
-# Flash one Radius V1 (headless)
-./upload.sh -rv1 --auto
+# Flash one Radius V1 (headless) for RUR network
+./upload.sh -rv1 -ssid "RUR" -pw "rurrurrur" --auto
 
 # Compile only
 ./upload.sh -rv2 --compile
