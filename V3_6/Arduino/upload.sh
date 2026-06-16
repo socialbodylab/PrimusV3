@@ -96,13 +96,24 @@ Usage:
     ./upload.sh -v3 --name "StageLeft" --auto
       Compile with a default Art-Net short-name override for this build.
 
+  ./upload.sh -rv2 --compile
+      Compile the Radius V2 (ESP32-S3 Reverse TFT) audio firmware only.
+
+  ./upload.sh -rv1 --auto
+      Compile the Radius V1 (HUZZAH32 headless) audio firmware and upload.
+
+  ./upload.sh -rv2 -ssid "RUR" -pw "rurrurrur" --auto
+      Compile Radius V2 with WiFi credential overrides, then upload.
+
   Behavior:
     Upload commands always compile first, then upload. You do not need to run
     --compile before uploading; use --compile only when you want a verify-only pass.
 
 Flags:
-  -v1, -v2, -v3          Select hardware profile. Default: -v3.
-  --board v1|v2|v3       Long-form hardware profile selection.
+  -v1, -v2, -v3          Select LED hardware profile. Default: -v3.
+  -rv2, -radius          Select Radius V2 audio profile (ESP32-S3 Reverse TFT).
+  -rv1                   Select Radius V1 audio profile (HUZZAH32 headless).
+  --board v1|v2|v3|rv1|rv2  Long-form hardware profile selection.
   --auto, -auto            Select the only detected ESP32-like serial port.
   --all, -all              Select every detected ESP32-like serial port.
   --all-ports              Alias for --all.
@@ -116,10 +127,10 @@ Flags:
   --password <password>    Alias for -pw.
   -name, --name <name>     Override the default device short name for this build.
   --device-name <name>     Alias for --name.
-  --static-ip <ip>         Store a static IP on boot for this build.
+  --static-ip <ip>         Store a static IP on boot for this build (LED profiles only).
   --gateway <ip>           Gateway to store with --static-ip.
   --subnet <ip>            Subnet mask to store with --static-ip.
-  --dhcp                   Clear saved static IP settings on boot for this build.
+  --dhcp                   Clear saved static IP settings on boot for this build (LED profiles only).
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
 EOF
@@ -139,9 +150,17 @@ while [[ $# -gt 0 ]]; do
       BOARD_PROFILE="v3"
       shift
       ;;
+    -rv2|-radius)
+      BOARD_PROFILE="rv2"
+      shift
+      ;;
+    -rv1)
+      BOARD_PROFILE="rv1"
+      shift
+      ;;
     --board)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        err "--board requires a value: v1, v2, or v3"
+        err "--board requires a value: v1, v2, v3, rv1, or rv2"
         exit 1
       fi
       BOARD_PROFILE="${2:-}"
@@ -299,9 +318,38 @@ case "$BOARD_PROFILE" in
       "Adafruit GFX Library"
     )
     ;;
+  rv2|radius|radius_v2|radius-v2)
+    BOARD_PROFILE="rv2"
+    SKETCH_DIR="$SCRIPT_DIR/radiusV2"
+    FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
+    # SimpleFTPServer requires these storage/network type flags — must be passed
+    # as build properties because arduino-cli compiles libraries separately and
+    # sketch-level #defines do not reach them.
+    EXTRA_FLAGS="-DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
+    DEFAULT_BAUD=921600
+    REQUIRED_LIBS=(
+      "Adafruit ST7735 and ST7789 Library"
+      "Adafruit GFX Library"
+      "Adafruit VS1053 Library"
+      "ArduinoJson"
+      "SimpleFTPServer"
+    )
+    ;;
+  rv1|radius_v1|radius-v1)
+    BOARD_PROFILE="rv1"
+    SKETCH_DIR="$SCRIPT_DIR/radiusV2"
+    FQBN="esp32:esp32:featheresp32"
+    EXTRA_FLAGS="-DTARGET_BOARD=2 -DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
+    DEFAULT_BAUD=460800
+    REQUIRED_LIBS=(
+      "Adafruit VS1053 Library"
+      "ArduinoJson"
+      "SimpleFTPServer"
+    )
+    ;;
   *)
     err "Unknown board profile: $BOARD_PROFILE"
-    err "Expected one of: v1, v2, v3"
+    err "Expected one of: v1, v2, v3, rv1 (Radius V1), rv2 (Radius V2)"
     exit 1
     ;;
 esac

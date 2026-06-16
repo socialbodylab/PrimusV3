@@ -70,6 +70,12 @@ Preferences prefs;
 char customShortName[18] = {0};
 bool hasCustomName = false;
 
+// ── Static IP config (stored in NVS) ─────────────────────────────────
+bool    useStaticIP      = false;
+uint8_t storedIP[4]      = {0};
+uint8_t storedGateway[4] = {0};
+uint8_t storedSubnet[4]  = {0};
+
 // ── Packet telemetry ─────────────────────────────────────────────────
 unsigned long lastFpsTime  = 0;
 unsigned long packetCount  = 0;
@@ -78,14 +84,46 @@ unsigned long packetCount  = 0;
 uint8_t infoScreenIndex = 0;
 
 // =====================================================================
+//  NVS helpers
+// =====================================================================
+
+void printIpBytes(const uint8_t* bytes) {
+  Serial.print(bytes[0]); Serial.print(".");
+  Serial.print(bytes[1]); Serial.print(".");
+  Serial.print(bytes[2]); Serial.print(".");
+  Serial.print(bytes[3]);
+}
+
+void loadStoredNetworkConfig() {
+  if (prefs.isKey("staticIP")) {
+    size_t ipLen = prefs.getBytes("staticIP", storedIP, 4);
+    size_t gwLen = prefs.getBytes("gateway",  storedGateway, 4);
+    size_t snLen = prefs.getBytes("subnet",   storedSubnet, 4);
+    if (ipLen == 4 && gwLen == 4 && snLen == 4) {
+      useStaticIP = true;
+      Serial.print("Loaded static IP: ");
+      printIpBytes(storedIP);
+      Serial.println();
+    }
+  }
+}
+
+// =====================================================================
 //  WiFi
 // =====================================================================
 
 void startWifiConnect() {
-  IPAddress localIP(DEFAULT_STATIC_IP);
-  IPAddress gateway(DEFAULT_GATEWAY);
-  IPAddress subnet(DEFAULT_SUBNET);
-  WiFi.config(localIP, gateway, subnet);
+  if (useStaticIP) {
+    IPAddress localIP(storedIP[0],      storedIP[1],      storedIP[2],      storedIP[3]);
+    IPAddress gateway(storedGateway[0], storedGateway[1], storedGateway[2], storedGateway[3]);
+    IPAddress subnet (storedSubnet[0],  storedSubnet[1],  storedSubnet[2],  storedSubnet[3]);
+    WiFi.config(localIP, gateway, subnet);
+  } else {
+    IPAddress localIP(DEFAULT_STATIC_IP);
+    IPAddress gateway(DEFAULT_GATEWAY);
+    IPAddress subnet(DEFAULT_SUBNET);
+    WiFi.config(localIP, gateway, subnet);
+  }
   WiFi.begin(DEFAULT_WIFI_SSID, DEFAULT_WIFI_PASSWORD);
   WiFi.setSleep(false);
   wifiConnecting    = true;
@@ -167,8 +205,8 @@ void sendArtPollReply(IPAddress dest) {
   strncpy((char*)&reply[44], DEVICE_LONG_NAME, 63);
 
   char reportBuf[64];
-  snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] PrimusV3-Audio OK",
-           (int)packetCount);
+  snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] OK|PV3CAP1|F:RIH|IP:%c",
+           (int)packetCount, useStaticIP ? 'S' : 'D');
   strncpy((char*)&reply[108], reportBuf, 63);
 
   // reply[173] = 0  (no LED outputs — already zeroed by memset)
@@ -295,6 +333,41 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
 }
 
 // =====================================================================
+//  ArtIPConfig — remote static/DHCP IP assignment (opcode 0x8200)
+// =====================================================================
+
+void handleArtIPConfig(uint8_t* data, uint16_t len) {
+  if (len < 25) return;
+  uint8_t mode = data[12];
+
+  if (mode == 0) {
+    useStaticIP = false;
+    prefs.remove("staticIP");
+    prefs.remove("gateway");
+    prefs.remove("subnet");
+    Serial.println("ArtIPConfig: reverted to DHCP — rebooting...");
+    broadcastArtPollReply();
+    delay(200);
+    ESP.restart();
+  } else if (mode == 1) {
+    memcpy(storedIP,      data + 13, 4);
+    memcpy(storedGateway, data + 17, 4);
+    memcpy(storedSubnet,  data + 21, 4);
+    useStaticIP = true;
+    prefs.putBytes("staticIP", storedIP,      4);
+    prefs.putBytes("gateway",  storedGateway, 4);
+    prefs.putBytes("subnet",   storedSubnet,  4);
+    Serial.print("ArtIPConfig: static IP set to ");
+    printIpBytes(storedIP);
+    Serial.println();
+    Serial.println("Rebooting...");
+    broadcastArtPollReply();
+    delay(200);
+    ESP.restart();
+  }
+}
+
+// =====================================================================
 //  Art-Net Packet Router
 // =====================================================================
 
@@ -311,6 +384,10 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   }
   if (opcode == ARTNET_OPCODE_ADDRESS) {
     handleArtAddress(data, len);
+    return;
+  }
+  if (opcode == ARTNET_OPCODE_IP_CONFIG) {
+    handleArtIPConfig(data, len);
     return;
   }
   if (opcode == ARTNET_OPCODE_AUDIO_CMD) {
@@ -414,7 +491,7 @@ void setup() {
   displayInit();
   displayStartup();
 
-  // NVS / custom name
+  // NVS / custom name + network config
   prefs.begin("artnet", false);
   if (prefs.isKey("shortName")) {
     String stored = prefs.getString("shortName", "");
@@ -423,6 +500,7 @@ void setup() {
       hasCustomName = true;
     }
   }
+  loadStoredNetworkConfig();
   setDisplayName(hasCustomName ? customShortName : DEVICE_SHORT_NAME);
 
   // WiFi — non-blocking: kick off connect and continue setup immediately

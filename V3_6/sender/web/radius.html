@@ -51,12 +51,13 @@ window.PAGE_CONFIG = {
         </div>
 
         <template x-for="item in $store.conn.devices.map((d,i) => ({...d, _di: i})).filter(d => d.is_audio)" :key="item._di">
-            <div class="device-card" :class="{ 'device-connected': item.connected }">
+            <div class="device-card" :class="{ 'device-connected': item.connected, 'device-static-ip': item.ip_mode === 'static' && !item.ip_config_pending }">
                 <div class="device-header">
                     <template x-if="$store.conn.renamingDevice !== item._di">
                         <span class="device-name" x-text="item.name"
-                              @dblclick="$store.conn.startRename(item._di)"
-                              title="Double-click to rename"></span>
+                              @click="$store.conn.startRename(item._di)"
+                              :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(item) }"
+                              :title="$store.conn.renameHint(item)"></span>
                     </template>
                     <template x-if="$store.conn.renamingDevice === item._di">
                         <input class="device-rename-input" type="text" maxlength="17"
@@ -73,8 +74,40 @@ window.PAGE_CONFIG = {
                     </div>
                 </div>
                 <div class="device-meta">
-                    <span class="device-ip" x-text="item.ip"></span>
+                    <button class="device-ip-button"
+                            :class="{ active: $store.conn.ipConfigDevice === item._di }"
+                            :disabled="!$store.conn.canConfigureIp(item)"
+                            :title="$store.conn.ipConfigHint(item)"
+                            @click="$store.conn.ipConfigDevice === item._di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(item._di)"
+                            x-text="item.ip"></button>
+                    <span class="device-network-badge"
+                          :class="$store.conn.networkModeClass(item)"
+                          :title="$store.conn.networkModeTitle(item)"
+                          x-text="$store.conn.networkModeLabel(item)"></span>
                     <span class="audio-badge" title="V3.2 Audio Node">♪</span>
+                </div>
+                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === item._di" x-cloak>
+                    <div class="form-group compact">
+                        <label class="form-label">Static IP</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigIp" placeholder="192.168.8.150">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigGateway" placeholder="192.168.8.1">
+                    </div>
+                    <div class="form-group compact">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input form-input-sm" type="text"
+                               x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
+                    </div>
+                    <div class="btn-group" style="margin-top:4px">
+                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(item._di)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(item._di)">Revert to DHCP</button>
+                    </div>
+                    <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(item)"></div>
+                    <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change.</div>
                 </div>
             </div>
         </template>
