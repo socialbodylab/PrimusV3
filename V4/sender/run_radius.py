@@ -21,7 +21,7 @@ import time
 import webbrowser
 
 from artnet import RadiusTelemetryListener
-from paths import ensure_runtime_data, is_bundled, log_path
+from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path
 from radius_state import RadiusState
 from server import create_server
 
@@ -394,7 +394,7 @@ def main():
     server = _create_server_with_fallback(
         "127.0.0.1", args.port, state, ui_lifecycle_enabled=ui_lifecycle_enabled)
     port = server.server_address[1]
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://127.0.0.1:{port}{default_frontend_path()}"
 
     if ui_lifecycle_enabled:
         ui_thread = threading.Thread(

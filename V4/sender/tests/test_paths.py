@@ -29,8 +29,15 @@ class PathsTests(unittest.TestCase):
         os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
         try:
             self.assertTrue(paths.index_html_path().endswith("index-primus.html"))
+            self.assertTrue(paths.frontend_index_path("primus").endswith("index-primus.html"))
+            self.assertTrue(paths.frontend_index_path("radius").endswith("index.html"))
+            self.assertEqual(paths.default_frontend_path(), "/primus")
         finally:
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_default_frontend_path_radius(self):
+        os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+        self.assertEqual(paths.default_frontend_path(), "/radius")
 
     def test_web_dir(self):
         self.assertTrue(os.path.isdir(paths.web_dir()))

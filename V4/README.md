@@ -61,7 +61,7 @@ Override with `RADIUSV4_DATA_DIR`, `PRIMUSV3_DATA_DIR`, or `* _USE_APP_DATA=1`.
 
 **RadiusCentral** (`--product radius`): Audio, Audio Cues, Cue Map, Net Log, Firmware, Settings
 
-Each app serves its own `index-*.html` and `app-*.js` — no cross-product UI is loaded.
+Each app serves its own frontend at `/primus` or `/radius` on the **same unified server** — shared `/css/` and `/js/` assets, separate Alpine SPAs.
 
 Shared: **Firmware** (product-specific profiles), **Settings** (network)
 

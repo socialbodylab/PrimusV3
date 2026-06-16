@@ -86,11 +86,31 @@ def web_dir():
     return resource_path("web")
 
 
+FRONTEND_INDEX_FILES = {
+    "primus": "index-primus.html",
+    "radius": "index.html",
+}
+
+
+def frontend_index_path(frontend):
+    """Absolute path to a product frontend entry HTML file."""
+    filename = FRONTEND_INDEX_FILES.get(str(frontend or "").strip().lower())
+    if not filename:
+        return None
+    return resource_path("web", filename)
+
+
+def default_frontend_path():
+    """Default browser URL path for the active packaged/source product."""
+    return "/primus" if is_primus_product() else "/radius"
+
+
 def index_html_path():
-    if is_primus_product():
-        primus_index = resource_path("web", "index-primus.html")
-        if os.path.isfile(primus_index):
-            return primus_index
+    """Default index HTML for the active product (legacy helper)."""
+    frontend = "primus" if is_primus_product() else "radius"
+    path = frontend_index_path(frontend)
+    if path and os.path.isfile(path):
+        return path
     return resource_path("web", "index.html")
 
 

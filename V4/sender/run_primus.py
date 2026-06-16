@@ -27,7 +27,7 @@ from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
 from osc_control import OscControlServer
-from paths import ensure_runtime_data, is_bundled, log_path
+from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path
 from server import create_server
 
 
@@ -653,7 +653,7 @@ def main():
         ui_lifecycle_enabled=ui_lifecycle_enabled,
         osc_service=osc_service)
     port = server.server_address[1]
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://127.0.0.1:{port}{default_frontend_path()}"
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
     anim.start()

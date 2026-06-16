@@ -43,15 +43,24 @@ The sender resolves the correct script from `firmware.FIRMWARE_PROFILES` (`V4/se
 
 ## Product split (implemented)
 
-| Concern | Primus | Radius |
-|---------|--------|--------|
+One **HTTP server** (`server.py`) exposes the full Primus + Radius JSON API. Static UI is served from separate HTML entry points:
+
+| URL | Frontend |
+|-----|----------|
+| `/primus` | Look Designer + Cue Controller (`index-primus.html`) |
+| `/radius` | Audio production UI (`index.html`) |
+| `/` | Redirects to the default frontend for the active product (`PRIMUSV3_SENDER_PRODUCT` or app bundle name) |
+
+Packaged apps open their default path (`/primus` or `/radius`) on launch. Both frontends are always available on the same server process when running from source.
+
+| Concern | Primus backend | Radius backend |
+|---------|----------------|----------------|
 | Entry | `run_primus.py` via `run.py --product primus` | `run_radius.py` (default) |
 | State | `state.py` → `ControllerState`, ArtDmx loop | `radius_state.py` → `RadiusState` |
-| HTTP | `server_primus.py` (clips, looks, mixer, cues, OSC) | `server_radius.py` (audio, cue map, netlog) |
-| UI | `index-primus.html`, `app-primus.js` | `index.html`, `app-radius.js` |
+| UI path | `/primus` | `/radius` |
 | App data | `PrimusV3/V4/sender/` + clips/looks/cues | `RadiusV3/V4/sender/` + audio |
 
-`server.py` is a thin facade that delegates to the product-specific handler module.
+Product-specific routes return `503` when that backend is not running (e.g. clip APIs on a Radius-only launch).
 
 ## Future unification (optional)
 
@@ -72,13 +81,13 @@ Frontends are **static Alpine.js SPAs** served from `V4/sender/web/`. No build s
 └──────────┴──────────────────────────────┘
                     │
                     ▼
-            V4/sender/server.py  (facade)
+            V4/sender/server.py  (unified API + static frontends)
                     │
         ┌───────────┴───────────┐
         ▼                       ▼
-  server_primus.py       server_radius.py
-  state.py               radius_state.py
-  ArtDmx / clips         audio / FTP / cues
+  ControllerState          RadiusState
+  (Primus runtime)         (Radius runtime)
+  ArtDmx / clips           audio / FTP / cues
         │                       │
         └───────────┬───────────┘
                     ▼
