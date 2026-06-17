@@ -15,7 +15,8 @@ macOS release built from the V4 unified sender (`--product primus`).
 - `PrimusCentral.app` Developer ID signed, notarized, and stapled
 - `PrimusCentral-0.82-macOS-arm64.dmg` signed, notarized, stapled, and verified with `hdiutil verify`
 
-## Assets
+## SHA-256
 
-- `PrimusCentral-0.82-macOS-arm64.dmg`
-- `PrimusCentral-0.82-macOS-arm64.dmg.sha256`
+```text
+eda395da1185b8efdcddbd95a6cadbec61f7563932385ed1b9f0bf7498a4cfef  PrimusCentral-0.82-macOS-arm64.dmg
+```
