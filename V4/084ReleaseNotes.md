@@ -22,5 +22,5 @@ macOS release built from the V4 unified sender (`--product primus`).
 ## SHA-256
 
 ```text
-TBD
+dbd4512349fe9757ea7a7a649ea3fd2c3b7dae12c9acdf5d119efa17a0778c3c  PrimusCentral-0.84-macOS-arm64.dmg
 ```
