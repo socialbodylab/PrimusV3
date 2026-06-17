@@ -99,7 +99,7 @@ document.addEventListener("alpine:init", () => {
                 const data = await api("GET", "/api/cues");
                 this.applyCueState(data);
                 const now = Date.now();
-                if (now - this._lastOscPoll > 2000) {
+                if (now - this._lastOscPoll > 500) {
                     this._lastOscPoll = now;
                     await this.fetchOscStatus(false);
                 }
@@ -198,6 +198,29 @@ document.addEventListener("alpine:init", () => {
                 return last.time + ' ' + last.address + cue;
             }
             return last.time + ' ' + (last.address || 'Packet') + ' failed: ' + (last.error || 'unsupported command');
+        },
+
+        formatOscArgs(args) {
+            if (!Array.isArray(args) || !args.length) return '';
+            return args.map((arg) => {
+                if (arg === null || arg === undefined) return ' null';
+                if (typeof arg === 'string') return ' ' + JSON.stringify(arg);
+                return ' ' + String(arg);
+            }).join('');
+        },
+
+        oscHistorySummary(entry) {
+            if (!entry) return '';
+            const args = this.formatOscArgs(entry.args);
+            if (entry.ok) {
+                const cue = entry.cue_name ? (' -> ' + entry.cue_name) : '';
+                return (entry.address || '(packet)') + args + cue;
+            }
+            return (entry.address || 'Packet') + args + ' — ' + (entry.error || 'failed');
+        },
+
+        oscHistoryRows() {
+            return this.oscStatus?.history || [];
         },
 
         cueExternalAddress(cue) {

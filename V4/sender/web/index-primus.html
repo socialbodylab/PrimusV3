@@ -936,7 +936,25 @@
             </div>
             <div class="osc-detail-row">
                 <span class="osc-endpoint" x-text="oscEndpointLabel()"></span>
+                <span x-show="oscStatus?.packets_received" x-text="(oscStatus?.packets_received || 0) + ' packet' + ((oscStatus?.packets_received || 0) === 1 ? '' : 's') + ' received'"></span>
                 <span x-text="oscLastMessage()"></span>
+            </div>
+            <div class="osc-error-banner" x-show="oscStatus?.last_error && !oscStatus?.running" x-text="oscStatus.last_error"></div>
+            <div class="osc-history-panel">
+                <div class="osc-history-header">
+                    <span>Incoming OSC log</span>
+                    <span class="text-muted" x-text="oscHistoryRows().length ? (oscHistoryRows().length + ' shown') : 'waiting for packets'"></span>
+                </div>
+                <div class="osc-history-list">
+                    <template x-for="(entry, idx) in oscHistoryRows()" :key="'osc-log-' + idx + '-' + (entry.time || '') + '-' + (entry.address || '')">
+                        <div class="osc-history-row" :class="entry.ok ? 'osc-history-ok' : 'osc-history-error'">
+                            <span class="osc-history-time" x-text="entry.time || ''"></span>
+                            <span class="osc-history-remote" x-text="entry.remote || 'unknown'"></span>
+                            <span class="osc-history-message" x-text="oscHistorySummary(entry)"></span>
+                        </div>
+                    </template>
+                    <div class="osc-history-empty" x-show="!oscHistoryRows().length">No OSC messages received yet. Send a test packet to this Mac's LAN IP on the port above.</div>
+                </div>
             </div>
             <p class="text-sm text-muted" style="margin-top: 8px;">Listens on all network interfaces automatically. Send to <code>127.0.0.1</code> locally or this Mac's LAN IP from other machines.</p>
             <div class="osc-example-strip" x-show="cues.length > 0">

@@ -1060,6 +1060,7 @@ class ControllerState:
                 }
             config_ok, config_error = self._send_output_config(dev)
             if not config_ok:
+                dev["transport_error"] = config_error or "output configuration failed"
                 return {
                     "ok": False,
                     "error": config_error or "output configuration failed",

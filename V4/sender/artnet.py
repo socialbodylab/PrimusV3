@@ -103,6 +103,7 @@ class ArtNetSender:
         self.connected = False
         self.sequence = 1
         self.last_error = None
+        self._prefer_unbound_send = False
         self._io_lock = threading.Lock()
 
     def set_source_ip(self, source_ip):
@@ -110,6 +111,7 @@ class ArtNetSender:
         if self.source_ip == source_ip:
             return
         self.source_ip = source_ip
+        self._prefer_unbound_send = False
         if self.connected:
             self.disconnect()
 
@@ -126,14 +128,7 @@ class ArtNetSender:
 
     @staticmethod
     def _route_retryable(error):
-        error_number = getattr(error, "errno", None)
-        return error_number in (
-            errno.EHOSTUNREACH,
-            errno.ENETUNREACH,
-            errno.EHOSTDOWN,
-            64,
-            65,
-        )
+        return _udp_route_retryable(error)
 
     def connect(self):
         with self._io_lock:
@@ -180,7 +175,7 @@ class ArtNetSender:
             if not self.connected:
                 return False
             pkt = self._build_packet(universe, rgb_data)
-            bind_attempts = [True, False] if self.source_ip else [False]
+            bind_attempts = self._send_bind_attempts()
             for bind_source in bind_attempts:
                 if bind_source and not self.source_ip:
                     continue
@@ -192,9 +187,15 @@ class ArtNetSender:
                 except OSError as exc:
                     self.last_error = str(exc) or "UDP send failed"
                     if bind_source and self.source_ip and self._route_retryable(exc):
+                        self._prefer_unbound_send = True
                         continue
                     return False
             return False
+
+    def _send_bind_attempts(self):
+        if self._prefer_unbound_send or not self.source_ip:
+            return [False]
+        return [True, False]
 
     def advance_sequence(self):
         self.sequence = (self.sequence % 255) + 1
@@ -203,7 +204,7 @@ class ArtNetSender:
         with self._io_lock:
             if not self.connected:
                 return False
-            bind_attempts = [True, False] if self.source_ip else [False]
+            bind_attempts = self._send_bind_attempts()
             for bind_source in bind_attempts:
                 if bind_source and not self.source_ip:
                     continue
@@ -218,6 +219,7 @@ class ArtNetSender:
                 except OSError as exc:
                     self.last_error = str(exc) or "UDP send failed"
                     if bind_source and self.source_ip and self._route_retryable(exc):
+                        self._prefer_unbound_send = True
                         continue
                     return False
             return False
@@ -844,18 +846,43 @@ def parse_node_outputs(long_name, universes, output_types, node_report="", type_
 #  ART-NET NAMING — ArtAddress (opcode 0x6000)
 # ======================================================================
 
+def _udp_route_retryable(error):
+    error_number = getattr(error, "errno", None)
+    return error_number in (
+        errno.EHOSTUNREACH,
+        errno.ENETUNREACH,
+        errno.EHOSTDOWN,
+        64,
+        65,
+    )
+
+
 def _send_udp_packet(ip, packet, source_ip=None):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        if source_ip:
+    bind_attempts = [True, False] if source_ip else [False]
+    last_error = None
+    for bind_source in bind_attempts:
+        if bind_source and not source_ip:
+            continue
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            if bind_source and source_ip:
+                try:
+                    sock.bind((source_ip, 0))
+                except OSError:
+                    continue
             try:
-                sock.bind((source_ip, 0))
-            except OSError:
-                # Fall back to the OS default route if the preferred source is unavailable.
-                pass
-        sock.sendto(bytes(packet), (ip, ARTNET_PORT))
-    finally:
-        sock.close()
+                sock.sendto(bytes(packet), (ip, ARTNET_PORT))
+                return
+            except OSError as exc:
+                last_error = exc
+                if bind_source and source_ip and _udp_route_retryable(exc):
+                    continue
+                raise
+        finally:
+            sock.close()
+    if last_error:
+        raise last_error
+    raise OSError("UDP send failed")
 
 
 def build_output_config_packet(output_types, type_to_id_map):

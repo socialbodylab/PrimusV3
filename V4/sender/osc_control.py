@@ -28,7 +28,7 @@ DEFAULT_OSC_SETTINGS = {
     "port": 53001,
 }
 MAX_PACKET_BYTES = 65535
-MAX_HISTORY = 20
+MAX_HISTORY = 50
 
 
 class OscParseError(ValueError):
@@ -346,6 +346,7 @@ class OscControlServer:
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._history = deque(maxlen=MAX_HISTORY)
+        self._packets_received = 0
         self._running = False
         self._last_error = ""
         self._bound = {"host": "", "port": 0}
@@ -428,6 +429,8 @@ class OscControlServer:
             self._running = False
 
     def _handle_packet(self, data, remote):
+        with self._lock:
+            self._packets_received += 1
         remote_label = f"{remote[0]}:{remote[1]}" if remote else ""
         try:
             messages = parse_osc_packet(data, remote=remote_label)
@@ -471,12 +474,14 @@ class OscControlServer:
             last_error = self._last_error
             bound = dict(self._bound)
             history = list(self._history)
+            packets_received = self._packets_received
         return {
             "settings": normalize_settings(self.settings),
             "enabled": bool(self.settings.get("enabled")),
             "running": running,
             "last_error": last_error,
             "bound": bound,
+            "packets_received": packets_received,
             "history": history,
             "examples": osc_examples(),
             "cue_triggers": self.cue_list.external_triggers(),
