@@ -206,7 +206,47 @@ def candidate_ports(requested_port=DEFAULT_HTTP_PORT):
     return ports
 
 
+def _pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (ProcessLookupError, ValueError, TypeError, OSError):
+        return False
+
+
+def _remove_registry_file(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def clear_stale_registry(host="127.0.0.1"):
+    """Drop registry files when the recorded server is no longer reachable."""
+    for path in registry_read_paths():
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            _remove_registry_file(path)
+            continue
+        if not isinstance(payload, dict):
+            _remove_registry_file(path)
+            continue
+        try:
+            port = int(payload.get("port"))
+        except (TypeError, ValueError):
+            port = None
+        pid = payload.get("pid")
+        if port and probe_central_server(host, port):
+            continue
+        if pid and _pid_alive(pid):
+            continue
+        _remove_registry_file(path)
+
+
 def find_running_central_server(requested_port=DEFAULT_HTTP_PORT, host="127.0.0.1"):
+    clear_stale_registry(host=host)
     registry = read_registry()
     registry_port = None
     if registry:
@@ -222,6 +262,30 @@ def find_running_central_server(requested_port=DEFAULT_HTTP_PORT, host="127.0.0.
         if runtime:
             return port, runtime
     return None
+
+
+def reserve_ui_session(host, port, session_id=None):
+    """Keep Central alive while an attach-mode browser window is opening."""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return False
+    if port <= 0:
+        return False
+    session_id = str(session_id or f"attach-{os.getpid()}").strip() or f"attach-{os.getpid()}"
+    url = f"http://{host}:{port}/api/ui/heartbeat"
+    payload = json.dumps({"session_id": session_id}).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=1.0):
+            return True
+    except (OSError, urllib.error.URLError, ValueError):
+        return False
 
 
 def try_attach_before_start(
@@ -245,7 +309,10 @@ def try_attach_before_start(
     if no_browser:
         print("  Browser: not opened (--no-browser)")
     else:
-        print(f"  Browser: {open_browser(url)}")
+        if runtime.get("ui_lifecycle"):
+            reserve_ui_session(host, actual_port)
+        browser_result = open_browser(url, attach=True)
+        print(f"  Browser: {browser_result}")
     print()
     return True
 

@@ -4,6 +4,7 @@ import struct
 import sys
 import time
 import unittest
+from unittest import mock
 
 SENDER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SENDER_DIR not in sys.path:
@@ -16,6 +17,8 @@ from osc_control import (
     build_osc_message,
     command_from_message,
     execute_message,
+    load_settings,
+    normalize_settings,
     pad_osc_string,
     parse_osc_packet,
 )
@@ -75,6 +78,33 @@ class FakeControllerState:
 
     def set_playback_source(self, source):
         self.source = source
+
+
+class OscSettingsTests(unittest.TestCase):
+    def test_default_bind_host_is_all_interfaces(self):
+        settings = normalize_settings(None)
+        self.assertEqual(settings["host"], "0.0.0.0")
+
+    def test_load_settings_migrates_legacy_loopback_host(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "state.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "osc_control": {
+                        "enabled": True,
+                        "host": "127.0.0.1",
+                        "port": 53001,
+                    }
+                }, handle)
+            with mock.patch("osc_control._state_file", return_value=path):
+                settings = load_settings()
+            self.assertEqual(settings["host"], "0.0.0.0")
+            with open(path, encoding="utf-8") as handle:
+                saved = json.load(handle)
+            self.assertEqual(saved["osc_control"]["host"], "0.0.0.0")
 
 
 class OscParserTests(unittest.TestCase):
@@ -161,6 +191,33 @@ class OscCommandTests(unittest.TestCase):
                 time.sleep(0.01)
             self.assertEqual(cues.go_calls, 1)
             self.assertEqual(state.source, ControllerState.SOURCE_CONTROLLER)
+        finally:
+            service.stop()
+
+    def test_udp_listener_on_all_interfaces_accepts_localhost(self):
+        cues = FakeCueList()
+        state = FakeControllerState()
+        service = OscControlServer(cues, state, settings={
+            "enabled": True,
+            "host": "0.0.0.0",
+            "port": 0,
+        })
+        service.start()
+        try:
+            deadline = time.monotonic() + 1.0
+            status = service.status()
+            while not status["running"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+                status = service.status()
+            self.assertTrue(status["running"], status)
+            self.assertEqual(status["bound"]["host"], "0.0.0.0")
+            port = status["bound"]["port"]
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.sendto(build_osc_message("/primus/cue/go"), ("127.0.0.1", port))
+            deadline = time.monotonic() + 1.0
+            while cues.go_calls == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(cues.go_calls, 1)
         finally:
             service.stop()
 

@@ -112,6 +112,19 @@ document.addEventListener("alpine:init", () => {
             this.networkPolling = setInterval(() => this.fetchNetworkStatus(), 15000);
             await Alpine.store("conn").syncNetwork();
             this.polling = setInterval(() => this.fetchState(), 1000);
+            this.startRuntimeLifecycle();
+        },
+
+        async startRuntimeLifecycle() {
+            try {
+                if (!this.runtime) {
+                    this.runtime = await api("GET", "/api/runtime");
+                    this.product = this.runtime?.product || "primus";
+                }
+            } catch (e) {
+                return;
+            }
+            this._lifecycleHeartbeat = window.PrimusUiLifecycle?.install(api, this.runtime) || null;
         },
 
         async fetchState() {

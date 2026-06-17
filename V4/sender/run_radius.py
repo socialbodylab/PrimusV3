@@ -32,6 +32,7 @@ from central_launcher import (
     unregister_central_server,
 )
 from server import create_server
+from ui_lifecycle import monitor as ui_lifecycle_monitor
 
 
 DEFAULT_HTTP_PORT = 8080
@@ -94,6 +95,7 @@ def _kill_existing():
         "V4/sender/run_radius.py",
         "PrimusCentral",
         "RadiusCentral",
+        "DeviceManager",
     }
     try:
         out = subprocess.check_output(
@@ -288,13 +290,16 @@ def _remove_dedicated_browser_profiles(profile_root):
         pass
 
 
-def _launch_dedicated_browser(url):
+def _launch_dedicated_browser(url, cleanup_stale=True):
     candidates = _chromium_browser_candidates()
     if not candidates:
         return None
 
     profile_root = _browser_profile_root()
-    _cleanup_dedicated_browser_profiles(profile_root)
+    if cleanup_stale:
+        _cleanup_dedicated_browser_profiles(profile_root)
+    else:
+        os.makedirs(profile_root, exist_ok=True)
     profile_dir = _new_browser_profile_dir()
     os.makedirs(profile_dir, exist_ok=True)
     for label, executable in candidates:
@@ -331,8 +336,8 @@ def _launch_dedicated_browser(url):
     return None
 
 
-def _open_browser(url):
-    dedicated_result = _launch_dedicated_browser(url)
+def _open_browser(url, attach=False):
+    dedicated_result = _launch_dedicated_browser(url, cleanup_stale=not attach)
     if dedicated_result:
         return dedicated_result
     webbrowser.open_new(url)
@@ -355,31 +360,7 @@ def _create_server_with_fallback(host, port, state, ui_lifecycle_enabled):
 
 
 def _ui_lifecycle_monitor(server):
-    while getattr(server, "ui_lifecycle_enabled", False):
-        now = time.monotonic()
-        close_requested_at = getattr(server, "ui_close_requested_at", None)
-        last_heartbeat = getattr(server, "ui_last_heartbeat", None)
-        if (close_requested_at is not None
-                and (last_heartbeat is None or last_heartbeat < close_requested_at)
-                and now - close_requested_at >= UI_CLOSE_GRACE_SECONDS):
-            print("UI window closed; shutting down RadiusCentral.")
-            server.ui_lifecycle_enabled = False
-            server.shutdown()
-            return
-
-        if last_heartbeat is None:
-            baseline = getattr(server, "ui_lifecycle_started_at", now)
-            timeout = UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS
-        else:
-            baseline = last_heartbeat
-            timeout = UI_HEARTBEAT_TIMEOUT_SECONDS
-        if now - baseline >= timeout:
-            print("UI heartbeat stopped; shutting down RadiusCentral.")
-            server.ui_lifecycle_enabled = False
-            server.shutdown()
-            return
-
-        time.sleep(0.25)
+    ui_lifecycle_monitor(server, app_name="RadiusCentral")
 
 
 def main():

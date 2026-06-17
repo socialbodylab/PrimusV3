@@ -235,6 +235,10 @@ def looks_dir():
     return data_path("looks")
 
 
+def cue_boards_dir():
+    return data_path("cue_boards")
+
+
 def cues_file():
     return data_path("cues.json")
 
@@ -284,6 +288,7 @@ def ensure_runtime_data():
     if is_primus_product():
         os.makedirs(clips_dir(), exist_ok=True)
         os.makedirs(looks_dir(), exist_ok=True)
+        os.makedirs(cue_boards_dir(), exist_ok=True)
         if uses_app_data_dir():
             os.makedirs(logs_dir(), exist_ok=True)
             _copy_missing_dir(resource_path("clips"), clips_dir())

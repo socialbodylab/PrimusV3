@@ -16,6 +16,8 @@ import audio_cues as _audio_cues_mod
 import netlog
 
 import clips
+from cue_boards import delete_cue_board, list_cue_boards, load_cue_board, save_cue_board
+from controller import normalize_cue
 from firmware import FirmwareRequestError, firmware_jobs
 import mixer
 import sharing
@@ -40,6 +42,7 @@ from network_settings import (
 from paths import web_dir, frontend_index_path, default_frontend_path, sender_product
 from radius_state import RadiusState
 from state import OUTPUT_TYPES, ControllerState
+from ui_lifecycle import close_session, init_server, touch_session
 
 
 _WEB_DIR = web_dir()
@@ -239,6 +242,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/cues":
             self._json_response(self.cue_list.get_json())
             return
+        if path == "/api/cue_boards":
+            self._json_response({"boards": list_cue_boards()})
+            return
+        if path.startswith("/api/cue_boards/"):
+            board_id = path.split("/api/cue_boards/")[1]
+            if not _safe_id(board_id):
+                self._json_error(400, "invalid id")
+                return
+            board = load_cue_board(board_id)
+            if board is None:
+                self._json_error(404, "cue board not found")
+                return
+            self._json_response(board)
+            return
         if path == "/api/integrations/osc":
             service = self._osc_service()
             if service is None:
@@ -326,14 +343,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
 
         if path == "/api/ui/heartbeat":
-            if getattr(self.server, "ui_lifecycle_enabled", False):
-                self.server.ui_last_heartbeat = time.monotonic()
-                self.server.ui_close_requested_at = None
+            touch_session(self.server, data.get("session_id"))
             self._ok()
 
         elif path == "/api/ui/closed":
-            if getattr(self.server, "ui_lifecycle_enabled", False):
-                self.server.ui_close_requested_at = time.monotonic()
+            close_session(self.server, data.get("session_id"))
             self._ok()
 
         elif path == "/api/update":
@@ -570,6 +584,78 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/cues":
             self.cue_list.set_cues(data.get("cues", []))
             self._json_response(self.cue_list.get_json())
+
+        elif path.startswith("/api/cue_boards/") and path.endswith("/load"):
+            board_id = path[len("/api/cue_boards/"):-len("/load")]
+            if not _safe_id(board_id):
+                self._json_error(400, "invalid id")
+                return
+            board = load_cue_board(board_id)
+            if board is None:
+                self._json_error(404, "cue board not found")
+                return
+            self.cue_list.set_cues(board.get("cues", []))
+            response = self.cue_list.get_json()
+            response["board"] = {
+                "id": board.get("id"),
+                "name": board.get("name", ""),
+            }
+            self._json_response(response)
+
+        elif path == "/api/cue_boards":
+            try:
+                cues = data.get("cues")
+                if cues is None:
+                    with self.cue_list.lock:
+                        cues = list(self.cue_list.cues)
+                else:
+                    cues = [
+                        normalize_cue(cue, index + 1)
+                        for index, cue in enumerate(cues or [])
+                    ]
+                board = save_cue_board(data.get("name"), cues, board_id=data.get("id"))
+            except ValueError as exc:
+                self._json_error(400, str(exc))
+                return
+            self._json_response({"board": {
+                "id": board.get("id"),
+                "name": board.get("name", ""),
+                "cue_count": len(board.get("cues") or []),
+                "created": board.get("created", ""),
+                "modified": board.get("modified", ""),
+            }})
+
+        elif path.startswith("/api/cue_boards/"):
+            board_id = path.split("/api/cue_boards/")[1]
+            if not _safe_id(board_id):
+                self._json_error(400, "invalid id")
+                return
+            board = load_cue_board(board_id)
+            if board is None:
+                self._json_error(404, "cue board not found")
+                return
+            try:
+                name = data.get("name", board.get("name"))
+                cues = data.get("cues")
+                if cues is None:
+                    with self.cue_list.lock:
+                        cues = list(self.cue_list.cues)
+                else:
+                    cues = [
+                        normalize_cue(cue, index + 1)
+                        for index, cue in enumerate(cues or [])
+                    ]
+                board = save_cue_board(name, cues, board_id=board_id)
+            except ValueError as exc:
+                self._json_error(400, str(exc))
+                return
+            self._json_response({"board": {
+                "id": board.get("id"),
+                "name": board.get("name", ""),
+                "cue_count": len(board.get("cues") or []),
+                "created": board.get("created", ""),
+                "modified": board.get("modified", ""),
+            }})
 
         elif path == "/api/cues/go":
             groups = self.controller_state.get_device_groups()
@@ -963,6 +1049,15 @@ class Handler(BaseHTTPRequestHandler):
             self.cue_list.deactivate_look(look_id)
             mixer.delete_look(look_id)
             self._ok()
+        elif path.startswith("/api/cue_boards/"):
+            board_id = path.split("/api/cue_boards/")[1]
+            if not _safe_id(board_id):
+                self._respond(400, "application/json", b'{"error":"invalid id"}')
+                return
+            if delete_cue_board(board_id):
+                self._ok()
+            else:
+                self._json_error(404, "cue board not found")
         elif path.startswith("/api/device_groups/"):
             gid = path.split("/api/device_groups/")[1]
             if not _safe_id(gid):
@@ -1285,7 +1380,6 @@ def create_server(host, port, state, cue_list=None, ui_lifecycle_enabled=False, 
     server.cue_list = cue_list
     server.osc_service = osc_service
     server.ui_lifecycle_enabled = bool(ui_lifecycle_enabled)
-    server.ui_lifecycle_started_at = time.monotonic()
-    server.ui_last_heartbeat = None
-    server.ui_close_requested_at = None
+    if ui_lifecycle_enabled:
+        init_server(server)
     return server

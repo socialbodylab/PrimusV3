@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSC Cue Sender</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="cue-controller-panel">
+        <header class="cue-controller-header">
+            <div>
+                <h1 class="cue-controller-title">OSC Cue Sender</h1>
+                <div class="cue-controller-subtitle">
+                    <span>Target: <span id="targetLabel" class="osc-endpoint">127.0.0.1:53001</span></span>
+                    <span id="styleLabel">Primus addresses</span>
+                    <span id="boardLabel">Unsaved board</span>
+                </div>
+            </div>
+            <div class="btn-group">
+                <button type="button" class="btn btn-sm" id="loadBoardBtn">Load Board</button>
+                <button type="button" class="btn btn-sm btn-primary" id="saveBoardBtn">Save Board</button>
+                <button type="button" class="btn btn-sm" id="addCueBtn">Add Cue</button>
+                <label class="btn btn-sm">
+                    Import cues.json
+                    <input type="file" id="importFile" accept=".json,application/json" class="hidden">
+                </label>
+            </div>
+        </header>
+
+        <section class="section-block">
+            <div class="section-header mb-4">
+                <h2 class="section-title">OSC Target</h2>
+                <span id="saveStatus" class="osc-status-pill osc-status-off">Ready</span>
+            </div>
+            <div class="config-grid">
+                <div class="form-group target-address-field">
+                    <label class="form-label" for="targetAddress">Target address (IP or IP:port)</label>
+                    <input class="form-input" id="targetAddress" type="text" placeholder="192.168.1.50:53001" spellcheck="false">
+                    <p class="form-hint">Sends use this address immediately — no need to click Save Target. On the remote PrimusCentral, set OSC host to <code>0.0.0.0</code> in External Control.</p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="targetHost">Target IP</label>
+                    <input class="form-input" id="targetHost" type="text" value="127.0.0.1" spellcheck="false">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="targetPort">Port</label>
+                    <input class="form-input" id="targetPort" type="number" min="1" max="65535" value="53001">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Message Style</label>
+                    <div class="style-toggle" id="styleToggle">
+                        <button type="button" data-style="primus" class="active">Primus</button>
+                        <button type="button" data-style="qlab">QLab</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="button" class="btn btn-primary" id="saveConfigBtn">Save Target</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-block">
+            <div class="section-header mb-4">
+                <h2 class="section-title">PrimusCentral Sync</h2>
+                <span id="syncStatus" class="osc-status-pill osc-status-off">Not synced</span>
+            </div>
+            <div class="config-grid">
+                <div class="form-group" style="grid-column: span 2;">
+                    <label class="form-label" for="centralUrl">Central HTTP URL</label>
+                    <input class="form-input" id="centralUrl" type="text" value="http://127.0.0.1:8080" spellcheck="false">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="button" class="btn btn-primary" id="syncCuesBtn">Sync Cues</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-block">
+            <div class="section-header mb-4">
+                <h2 class="section-title">Transport</h2>
+            </div>
+            <div class="transport-row">
+                <button type="button" class="btn btn-go" id="goBtn">GO</button>
+                <button type="button" class="btn btn-stop" id="stopBtn">STOP</button>
+                <button type="button" class="btn btn-danger" id="blackoutBtn">BLACKOUT</button>
+                <div class="form-group fade-field">
+                    <label class="form-label" for="fadeTime">Fade (s)</label>
+                    <input class="form-input" id="fadeTime" type="number" min="0" step="0.1" value="0">
+                </div>
+            </div>
+        </section>
+
+        <section class="section-block">
+            <div class="section-header mb-4">
+                <h2 class="section-title">Debug Send</h2>
+                <span id="debugStatus" class="osc-status-pill osc-status-off">Ready</span>
+            </div>
+            <p class="form-hint" style="margin-bottom: 12px;">Send a raw OSC address and optional args without creating a cue.</p>
+            <div class="debug-send-row">
+                <div class="form-group debug-address-field">
+                    <label class="form-label" for="debugAddress">OSC address</label>
+                    <input class="form-input" id="debugAddress" type="text" placeholder="/primus/cue/goto" spellcheck="false">
+                </div>
+                <div class="form-group debug-args-field">
+                    <label class="form-label" for="debugArgs">Args (optional)</label>
+                    <input class="form-input" id="debugArgs" type="text" placeholder='1 or ["Blackout"]' spellcheck="false">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="button" class="btn btn-primary" id="debugSendBtn">Send Message</button>
+                </div>
+            </div>
+            <div id="debugExamples" class="debug-examples"></div>
+        </section>
+
+        <div class="cue-board-header">
+            <h2 class="section-title">Cue Board</h2>
+            <span id="cueCount" class="cue-controller-subtitle">0 cues</span>
+        </div>
+        <div id="cueGrid" class="cue-card-grid"></div>
+        <div id="cueEmpty" class="cue-empty-state hidden">No cues yet. Add cues manually, import a cues.json file, or sync from PrimusCentral.</div>
+
+        <section class="section-block" style="margin-top: 16px;">
+            <div class="section-header mb-4">
+                <h2 class="section-title">Send Log</h2>
+            </div>
+            <div id="historyList" class="history-list"></div>
+        </section>
+    </div>
+
+    <div id="boardModal" class="modal-backdrop hidden">
+        <div class="modal" role="dialog" aria-modal="true">
+            <h3 id="boardModalTitle" class="section-title">Save Cue Board</h3>
+            <div id="boardSavePanel">
+                <div class="form-group" style="margin-top: 12px;">
+                    <label class="form-label" for="boardName">Board Name</label>
+                    <input class="form-input" id="boardName" type="text" placeholder="Opening Night">
+                </div>
+                <p id="boardSaveHint" class="text-sm text-muted" style="margin-top: 8px; color: var(--text-secondary);"></p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-sm" id="cancelBoardBtn">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="confirmBoardBtn">Save Board</button>
+                </div>
+            </div>
+            <div id="boardLoadPanel" class="hidden">
+                <div id="boardList" class="history-list" style="margin-top: 12px; max-height: 280px;"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-sm" id="cancelBoardLoadBtn">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal-backdrop hidden">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+            <h3 id="editModalTitle" class="section-title">Edit Cue</h3>
+            <div class="form-group" style="margin-top: 12px;">
+                <label class="form-label" for="editNumber">Cue Number</label>
+                <input class="form-input" id="editNumber" type="number" min="1">
+            </div>
+            <div class="form-group" style="margin-top: 12px;">
+                <label class="form-label" for="editName">Cue Name</label>
+                <input class="form-input" id="editName" type="text">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-sm btn-danger hidden" id="deleteCueBtn">Delete</button>
+                <button type="button" class="btn btn-sm" id="cancelEditBtn">Cancel</button>
+                <button type="button" class="btn btn-sm btn-primary" id="saveCueBtn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

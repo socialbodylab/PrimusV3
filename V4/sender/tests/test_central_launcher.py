@@ -67,8 +67,8 @@ class CentralLauncherTests(unittest.TestCase):
         mock_find.return_value = (8080, {"product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
         opened = []
 
-        def _open(url):
-            opened.append(url)
+        def _open(url, attach=False):
+            opened.append((url, attach))
             return "opened"
 
         attached = central_launcher.try_attach_before_start(
@@ -79,7 +79,7 @@ class CentralLauncherTests(unittest.TestCase):
             launcher_name="Device Manager",
         )
         self.assertTrue(attached)
-        self.assertEqual(opened, ["http://127.0.0.1:8080/devices"])
+        self.assertEqual(opened, [("http://127.0.0.1:8080/devices", True)])
 
 
 if __name__ == "__main__":

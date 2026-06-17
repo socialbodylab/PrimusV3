@@ -37,14 +37,12 @@ from central_launcher import (
     unregister_central_server,
 )
 from server import create_server
+from ui_lifecycle import monitor as ui_lifecycle_monitor
 
 
 DEFAULT_HTTP_PORT = 8080
 DEDICATED_BROWSER_PROFILE_ROOT = "primusv4-browser-profiles"
 DEDICATED_BROWSER_PID_FILE = "browser.pid"
-UI_CLOSE_GRACE_SECONDS = 2.0
-UI_HEARTBEAT_TIMEOUT_SECONDS = 45.0
-UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
 _MACOS_ACTIVITY_TOKEN = None
 
 
@@ -114,6 +112,7 @@ def _kill_existing():
         "V4/sender/run_radius.py",
         "PrimusCentral",
         "RadiusCentral",
+        "DeviceManager",
     }
     try:
         out = subprocess.check_output(
@@ -185,54 +184,6 @@ def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabl
         return create_server(host, 0, state, cue_list,
                              ui_lifecycle_enabled=ui_lifecycle_enabled,
                              osc_service=osc_service)
-
-
-def _ui_lifecycle_monitor(server):
-    while getattr(server, "ui_lifecycle_enabled", False):
-        now = time.monotonic()
-        close_requested_at = getattr(server, "ui_close_requested_at", None)
-        last_heartbeat = getattr(server, "ui_last_heartbeat", None)
-        if (close_requested_at is not None
-                and (last_heartbeat is None or last_heartbeat < close_requested_at)
-                and now - close_requested_at >= UI_CLOSE_GRACE_SECONDS):
-            print("UI window closed; shutting down PrimusCentral.")
-            # #region agent log
-            _debug_log("run.py:_ui_lifecycle_monitor", "shutdown after window close", {
-                "close_requested_at": close_requested_at,
-                "last_heartbeat": last_heartbeat,
-            }, "H5")
-            # #endregion
-            server.ui_lifecycle_enabled = False
-            server.shutdown()
-            return
-
-        if last_heartbeat is None:
-            baseline = getattr(server, "ui_lifecycle_started_at", now)
-            timeout = UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS
-        else:
-            baseline = last_heartbeat
-            timeout = UI_HEARTBEAT_TIMEOUT_SECONDS
-        if now - baseline >= timeout:
-            live_output = _ui_has_live_output(server)
-            # #region agent log
-            _debug_log("run.py:_ui_lifecycle_monitor", "heartbeat timeout evaluated", {
-                "elapsed": round(now - baseline, 2),
-                "timeout": timeout,
-                "live_output": live_output,
-                "last_heartbeat": last_heartbeat,
-            }, "H5")
-            # #endregion
-            if live_output:
-                if last_heartbeat is not None:
-                    server.ui_last_heartbeat = now
-                time.sleep(0.25)
-                continue
-            print("UI heartbeat stopped; shutting down PrimusCentral.")
-            server.ui_lifecycle_enabled = False
-            server.shutdown()
-            return
-
-        time.sleep(0.25)
 
 
 def _browser_profile_root():
@@ -395,13 +346,16 @@ def _remove_dedicated_browser_profiles(profile_root):
         pass
 
 
-def _launch_dedicated_browser(url):
+def _launch_dedicated_browser(url, cleanup_stale=True):
     candidates = _chromium_browser_candidates()
     if not candidates:
         return None
 
     profile_root = _browser_profile_root()
-    _cleanup_dedicated_browser_profiles(profile_root)
+    if cleanup_stale:
+        _cleanup_dedicated_browser_profiles(profile_root)
+    else:
+        os.makedirs(profile_root, exist_ok=True)
     profile_dir = _new_browser_profile_dir()
     os.makedirs(profile_dir, exist_ok=True)
     for label, executable in candidates:
@@ -438,8 +392,8 @@ def _launch_dedicated_browser(url):
     return None
 
 
-def _open_browser(url):
-    dedicated_result = _launch_dedicated_browser(url)
+def _open_browser(url, attach=False):
+    dedicated_result = _launch_dedicated_browser(url, cleanup_stale=not attach)
     if dedicated_result:
         return dedicated_result
     webbrowser.open_new(url)
@@ -742,7 +696,13 @@ def main():
 
     if ui_lifecycle_enabled:
         ui_thread = threading.Thread(
-            target=_ui_lifecycle_monitor, args=(server,), daemon=True)
+            target=ui_lifecycle_monitor,
+            args=(server,),
+            kwargs={
+                "app_name": _launcher_display_name(),
+                "live_output_fn": _ui_has_live_output,
+            },
+            daemon=True)
         ui_thread.start()
 
     print(_launcher_display_name())

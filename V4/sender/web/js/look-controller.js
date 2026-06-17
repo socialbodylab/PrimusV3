@@ -22,10 +22,17 @@ document.addEventListener("alpine:init", () => {
         oscStatus: null,
         oscConfig: {
             enabled: true,
-            host: '127.0.0.1',
+            host: '0.0.0.0',
             port: 53001,
         },
         oscSaving: false,
+
+        activeCueBoard: null,
+        cueBoardModal: false,
+        cueBoardMode: 'load',
+        savedCueBoards: [],
+        cueBoardName: '',
+        cueBoardSaving: false,
 
         cueModal: false,
         cueEditIndex: -1,
@@ -135,7 +142,7 @@ document.addEventListener("alpine:init", () => {
             const settings = data?.settings || {};
             this.oscConfig = {
                 enabled: settings.enabled ?? data?.enabled ?? true,
-                host: settings.host || '127.0.0.1',
+                host: settings.host || '0.0.0.0',
                 port: settings.port || 53001,
             };
         },
@@ -172,8 +179,11 @@ document.addEventListener("alpine:init", () => {
         oscEndpointLabel() {
             const bound = this.oscStatus?.bound || {};
             const settings = this.oscStatus?.settings || this.oscConfig;
-            const host = bound.host || settings.host || '127.0.0.1';
+            const host = bound.host || settings.host || '0.0.0.0';
             const port = bound.port || settings.port || 53001;
+            if (host === '0.0.0.0') {
+                return '0.0.0.0:' + port + ' (all interfaces)';
+            }
             return host + ':' + port;
         },
 
@@ -605,6 +615,85 @@ document.addEventListener("alpine:init", () => {
 
         async saveCues() {
             await api("POST", "/api/cues", { cues: this.cues.map(cue => this.serializeCue(this.normalizeCue(cue))) });
+        },
+
+        async fetchCueBoards() {
+            const data = await api("GET", "/api/cue_boards");
+            this.savedCueBoards = data.boards || [];
+        },
+
+        openSaveCueBoard() {
+            this.cueBoardMode = 'save';
+            this.cueBoardName = this.activeCueBoard?.name || '';
+            this.cueBoardModal = true;
+        },
+
+        async openLoadCueBoard() {
+            this.cueBoardMode = 'load';
+            this.cueBoardModal = true;
+            try {
+                await this.fetchCueBoards();
+            } catch (e) {
+                Alpine.store("app").showApiError('Could not load cue boards', e);
+            }
+        },
+
+        closeCueBoardModal() {
+            this.cueBoardModal = false;
+            this.cueBoardName = '';
+        },
+
+        async saveCueBoard() {
+            const name = String(this.cueBoardName || '').trim();
+            if (!name) return;
+            this.cueBoardSaving = true;
+            try {
+                const payload = {
+                    name,
+                    cues: this.cues.map(cue => this.serializeCue(this.normalizeCue(cue))),
+                };
+                if (this.activeCueBoard?.id) {
+                    payload.id = this.activeCueBoard.id;
+                }
+                const data = await api("POST", "/api/cue_boards", payload);
+                this.activeCueBoard = data.board;
+                this.closeCueBoardModal();
+            } catch (e) {
+                Alpine.store("app").showApiError('Cue board save failed', e);
+            } finally {
+                this.cueBoardSaving = false;
+            }
+        },
+
+        async loadCueBoard(boardId) {
+            try {
+                const data = await api("POST", `/api/cue_boards/${boardId}/load`, {});
+                this.applyCueState(data);
+                this.activeCueBoard = data.board || null;
+                this.closeCueBoardModal();
+            } catch (e) {
+                Alpine.store("app").showApiError('Cue board load failed', e);
+            }
+        },
+
+        async deleteCueBoard(boardId) {
+            if (!confirm('Delete this saved cue board?')) return;
+            try {
+                await api("DELETE", `/api/cue_boards/${boardId}`);
+                if (this.activeCueBoard?.id === boardId) {
+                    this.activeCueBoard = null;
+                }
+                await this.fetchCueBoards();
+            } catch (e) {
+                Alpine.store("app").showApiError('Cue board delete failed', e);
+            }
+        },
+
+        cueBoardSubtitle() {
+            if (this.activeCueBoard?.name) {
+                return `Loaded board: ${this.activeCueBoard.name}`;
+            }
+            return 'Unsaved board';
         },
 
         isActive(idx) { return this.playing && idx === this.currentIndex; },

@@ -22,7 +22,7 @@ from state import ControllerState
 STATE_KEY = "osc_control"
 DEFAULT_OSC_SETTINGS = {
     "enabled": True,
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 53001,
 }
 MAX_PACKET_BYTES = 65535
@@ -87,7 +87,11 @@ def normalize_settings(settings=None):
 
 
 def load_settings():
-    return normalize_settings(_read_state().get(STATE_KEY))
+    stored = _read_state().get(STATE_KEY)
+    settings = normalize_settings(stored)
+    if isinstance(stored, dict) and str(stored.get("host") or "").strip() == "127.0.0.1":
+        settings = save_settings({**settings, "host": "0.0.0.0"})
+    return settings
 
 
 def save_settings(settings):

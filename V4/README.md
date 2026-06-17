@@ -33,6 +33,8 @@ python3 -m unittest discover -s V4/sender/tests
 ```
 V4/
   sender/           Python backend + web UI
+  tools/
+    osc_cue_sender/  OSC cue test sender (PrimusCentral external control)
   Arduino/
     primusV3_receiver/   Primus LED firmware (profiles v1, v2, v3)
     upload.sh            Primus compile/upload script
@@ -45,6 +47,15 @@ V4/
 ```
 
 **Firmware canonical location:** `V4/Arduino/` holds both Primus and Radius receiver source. The V3_6 tree retains copies for the current PrimusCentral release line; new firmware changes should land here.
+
+## OSC Cue Sender
+
+Standalone utility for testing PrimusCentral OSC cue triggers. See [`tools/osc_cue_sender/README.md`](tools/osc_cue_sender/README.md).
+
+```bash
+python3 V4/tools/osc_cue_sender/run.py
+python3 V4/tools/build_app.py --target macos
+```
 
 ## App data
 
