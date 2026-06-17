@@ -2,6 +2,7 @@
 artnet.py — Art-Net transport, discovery, naming, output config, and FPS telemetry.
 """
 
+import errno
 import re
 import socket
 import struct
@@ -112,7 +113,7 @@ class ArtNetSender:
         if self.connected:
             self.disconnect()
 
-    def _open_socket_unlocked(self):
+    def _open_socket_unlocked(self, bind_source=True):
         if self.sock:
             try:
                 self.sock.close()
@@ -120,12 +121,32 @@ class ArtNetSender:
                 pass
             self.sock = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        if self.source_ip:
+        if bind_source and self.source_ip:
             self.sock.bind((self.source_ip, 0))
+
+    @staticmethod
+    def _route_retryable(error):
+        error_number = getattr(error, "errno", None)
+        return error_number in (
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.EHOSTDOWN,
+            64,
+            65,
+        )
 
     def connect(self):
         with self._io_lock:
-            self._open_socket_unlocked()
+            for bind_source in (True, False):
+                if bind_source and not self.source_ip:
+                    continue
+                try:
+                    self._open_socket_unlocked(bind_source=bind_source)
+                    break
+                except OSError:
+                    if bind_source and self.source_ip:
+                        continue
+                    raise
             self.connected = True
             self.last_error = None
 
@@ -158,27 +179,22 @@ class ArtNetSender:
         with self._io_lock:
             if not self.connected:
                 return False
-            if not self.sock:
-                try:
-                    self._open_socket_unlocked()
-                except OSError as exc:
-                    self.last_error = str(exc) or "UDP socket open failed"
-                    return False
             pkt = self._build_packet(universe, rgb_data)
-            for attempt in (0, 1):
+            bind_attempts = [True, False] if self.source_ip else [False]
+            for bind_source in bind_attempts:
+                if bind_source and not self.source_ip:
+                    continue
                 try:
+                    self._open_socket_unlocked(bind_source=bind_source)
                     self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
                     self.last_error = None
                     return True
                 except OSError as exc:
                     self.last_error = str(exc) or "UDP send failed"
-                    if attempt == 0:
-                        try:
-                            self._open_socket_unlocked()
-                            continue
-                        except OSError:
-                            pass
+                    if bind_source and self.source_ip and self._route_retryable(exc):
+                        continue
                     return False
+            return False
 
     def advance_sequence(self):
         self.sequence = (self.sequence % 255) + 1
@@ -187,30 +203,24 @@ class ArtNetSender:
         with self._io_lock:
             if not self.connected:
                 return False
-            if not self.sock:
+            bind_attempts = [True, False] if self.source_ip else [False]
+            for bind_source in bind_attempts:
+                if bind_source and not self.source_ip:
+                    continue
                 try:
-                    self._open_socket_unlocked()
-                except OSError as exc:
-                    self.last_error = str(exc) or "UDP socket open failed"
-                    return False
-            for universe, pixel_count in outputs_info:
-                pkt = self._build_packet(universe, bytes(pixel_count * 3))
-                for attempt in (0, 1):
-                    try:
+                    self._open_socket_unlocked(bind_source=bind_source)
+                    for universe, pixel_count in outputs_info:
+                        pkt = self._build_packet(universe, bytes(pixel_count * 3))
                         self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
-                        break
-                    except OSError as exc:
-                        self.last_error = str(exc) or "UDP send failed"
-                        if attempt == 0:
-                            try:
-                                self._open_socket_unlocked()
-                                continue
-                            except OSError:
-                                pass
-                        return False
-            self.sequence = (self.sequence % 255) + 1
-            self.last_error = None
-            return True
+                    self.sequence = (self.sequence % 255) + 1
+                    self.last_error = None
+                    return True
+                except OSError as exc:
+                    self.last_error = str(exc) or "UDP send failed"
+                    if bind_source and self.source_ip and self._route_retryable(exc):
+                        continue
+                    return False
+            return False
 
 
 # ======================================================================

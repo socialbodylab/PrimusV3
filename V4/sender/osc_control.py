@@ -6,6 +6,7 @@ library.
 """
 
 import copy
+import errno
 import json
 import os
 import socket
@@ -20,9 +21,10 @@ from state import ControllerState
 
 
 STATE_KEY = "osc_control"
+OSC_LISTEN_HOST = "0.0.0.0"
 DEFAULT_OSC_SETTINGS = {
     "enabled": True,
-    "host": "0.0.0.0",
+    "host": OSC_LISTEN_HOST,
     "port": 53001,
 }
 MAX_PACKET_BYTES = 65535
@@ -71,27 +73,29 @@ def _write_state(data):
         json.dump(data, f)
 
 
+def normalize_bind_host(host=None):
+    """OSC always listens on all interfaces for local and LAN traffic."""
+    return OSC_LISTEN_HOST
+
+
 def normalize_settings(settings=None):
     out = copy.deepcopy(DEFAULT_OSC_SETTINGS)
     if not isinstance(settings, dict):
         return out
     out["enabled"] = bool(settings.get("enabled", out["enabled"]))
-    host = str(settings.get("host") or out["host"]).strip()
-    out["host"] = host or DEFAULT_OSC_SETTINGS["host"]
+    out["host"] = OSC_LISTEN_HOST
     try:
         port = int(settings.get("port", out["port"]))
     except (TypeError, ValueError):
         port = out["port"]
-    out["port"] = max(0, min(65535, port))
+    if port < 1 or port > 65535:
+        port = DEFAULT_OSC_SETTINGS["port"]
+    out["port"] = port
     return out
 
 
 def load_settings():
-    stored = _read_state().get(STATE_KEY)
-    settings = normalize_settings(stored)
-    if isinstance(stored, dict) and str(stored.get("host") or "").strip() == "127.0.0.1":
-        settings = save_settings({**settings, "host": "0.0.0.0"})
-    return settings
+    return normalize_settings(_read_state().get(STATE_KEY))
 
 
 def save_settings(settings):
@@ -382,13 +386,20 @@ class OscControlServer:
 
     def _run(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(0.25)
+        bind_host = OSC_LISTEN_HOST
+        bind_port = int(self.settings["port"])
         try:
-            sock.bind((self.settings["host"], self.settings["port"]))
+            sock.bind((bind_host, bind_port))
         except OSError as exc:
             with self._lock:
                 self._running = False
-                self._last_error = str(exc)
+                error_number = getattr(exc, "errno", None)
+                if error_number is not None:
+                    self._last_error = f"{exc} (errno {error_number})"
+                else:
+                    self._last_error = str(exc)
                 self._bound = {"host": "", "port": 0}
             try:
                 sock.close()

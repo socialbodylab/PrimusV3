@@ -33,7 +33,7 @@ OSC listening is **built into PrimusCentral** — you do not start a second Cent
    python3 V4/sender/run.py --product primus --no-browser --port 8080
    ```
 
-2. In Cue Controller → External Control, confirm OSC is enabled. For **local** testing on one Mac, `127.0.0.1:53001` is fine. For **remote** machines on the LAN, set OSC host to `0.0.0.0` (or the machine's LAN IP) so UDP from another computer is accepted.
+2. In Cue Controller → External Control, confirm OSC is enabled on port `53001`. PrimusCentral listens on **all interfaces** automatically — no host setting required.
 
 3. Optional — start **OSC Cue Sender** (separate test UI on HTTP 8105; sends OSC *to* PrimusCentral, not a second sender):
 

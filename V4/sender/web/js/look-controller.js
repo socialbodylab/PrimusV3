@@ -22,7 +22,6 @@ document.addEventListener("alpine:init", () => {
         oscStatus: null,
         oscConfig: {
             enabled: true,
-            host: '0.0.0.0',
             port: 53001,
         },
         oscSaving: false,
@@ -58,13 +57,13 @@ document.addEventListener("alpine:init", () => {
         async init() {
             await this.loadLooks();
             await this.refresh();
-            await this.fetchOscStatus();
+            await this.fetchOscStatus(true);
             this._looksChangedHandler = () => this.loadLooks();
             this._modeChangedHandler = async (event) => {
                 if (event?.detail?.mode === "controller") {
                     await this.loadLooks();
                     await this.refresh();
-                    await this.fetchOscStatus();
+                    await this.fetchOscStatus(true);
                     await this.prepareControllerMode();
                 } else {
                     this.controllerPrepared = false;
@@ -102,7 +101,7 @@ document.addEventListener("alpine:init", () => {
                 const now = Date.now();
                 if (now - this._lastOscPoll > 2000) {
                     this._lastOscPoll = now;
-                    await this.fetchOscStatus();
+                    await this.fetchOscStatus(false);
                 }
             } catch (e) {}
         },
@@ -128,34 +127,41 @@ document.addEventListener("alpine:init", () => {
             this.looks = await api("GET", "/api/looks");
         },
 
-        async fetchOscStatus() {
+        applyOscStatus(data) {
+            this.oscStatus = data || null;
+        },
+
+        syncOscConfigFromSettings(data) {
+            const payload = data || this.oscStatus || {};
+            const settings = payload.settings || {};
+            this.oscConfig = {
+                enabled: settings.enabled ?? payload.enabled ?? true,
+                port: settings.port || 53001,
+            };
+        },
+
+        async fetchOscStatus(syncForm = false) {
             try {
                 const data = await api("GET", "/api/integrations/osc");
                 this.applyOscStatus(data);
+                if (syncForm) {
+                    this.syncOscConfigFromSettings(data);
+                }
             } catch (e) {
                 this.oscStatus = { enabled: false, running: false, last_error: 'OSC status unavailable', history: [] };
             }
         },
 
-        applyOscStatus(data) {
-            this.oscStatus = data || null;
-            const settings = data?.settings || {};
-            this.oscConfig = {
-                enabled: settings.enabled ?? data?.enabled ?? true,
-                host: settings.host || '0.0.0.0',
-                port: settings.port || 53001,
-            };
-        },
-
         async saveOscConfig() {
             this.oscSaving = true;
             try {
+                const port = Number(this.oscConfig.port);
                 const data = await api("POST", "/api/integrations/osc", {
                     enabled: !!this.oscConfig.enabled,
-                    host: this.oscConfig.host,
-                    port: Number(this.oscConfig.port) || 0,
+                    port: Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 53001,
                 });
                 this.applyOscStatus(data);
+                this.syncOscConfigFromSettings(data);
             } catch (e) {
                 Alpine.store("app").showApiError('OSC settings failed', e);
             } finally {
@@ -179,12 +185,8 @@ document.addEventListener("alpine:init", () => {
         oscEndpointLabel() {
             const bound = this.oscStatus?.bound || {};
             const settings = this.oscStatus?.settings || this.oscConfig;
-            const host = bound.host || settings.host || '0.0.0.0';
             const port = bound.port || settings.port || 53001;
-            if (host === '0.0.0.0') {
-                return '0.0.0.0:' + port + ' (all interfaces)';
-            }
-            return host + ':' + port;
+            return 'All interfaces:' + port + ' (local + LAN)';
         },
 
         oscLastMessage() {

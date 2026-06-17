@@ -18,9 +18,12 @@ from osc_control import (
     command_from_message,
     execute_message,
     load_settings,
+    normalize_bind_host,
     normalize_settings,
+    OSC_LISTEN_HOST,
     pad_osc_string,
     parse_osc_packet,
+    save_settings,
 )
 from state import ControllerState
 
@@ -84,8 +87,18 @@ class OscSettingsTests(unittest.TestCase):
     def test_default_bind_host_is_all_interfaces(self):
         settings = normalize_settings(None)
         self.assertEqual(settings["host"], "0.0.0.0")
+        self.assertEqual(settings["port"], 53001)
 
-    def test_load_settings_migrates_legacy_loopback_host(self):
+    def test_normalize_bind_host_is_fixed(self):
+        self.assertEqual(normalize_bind_host(""), OSC_LISTEN_HOST)
+        self.assertEqual(normalize_bind_host("127.0.0.1"), OSC_LISTEN_HOST)
+        self.assertEqual(normalize_bind_host("192.168.1.50"), OSC_LISTEN_HOST)
+
+    def test_invalid_port_defaults_to_53001(self):
+        settings = normalize_settings({"port": 0})
+        self.assertEqual(settings["port"], 53001)
+
+    def test_saved_host_is_always_all_interfaces(self):
         import json
         import tempfile
 
@@ -95,16 +108,13 @@ class OscSettingsTests(unittest.TestCase):
                 json.dump({
                     "osc_control": {
                         "enabled": True,
-                        "host": "127.0.0.1",
+                        "host": "192.168.1.50",
                         "port": 53001,
                     }
                 }, handle)
             with mock.patch("osc_control._state_file", return_value=path):
                 settings = load_settings()
-            self.assertEqual(settings["host"], "0.0.0.0")
-            with open(path, encoding="utf-8") as handle:
-                saved = json.load(handle)
-            self.assertEqual(saved["osc_control"]["host"], "0.0.0.0")
+            self.assertEqual(settings["host"], OSC_LISTEN_HOST)
 
 
 class OscParserTests(unittest.TestCase):

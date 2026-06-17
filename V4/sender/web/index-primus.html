@@ -928,13 +928,9 @@
                     <input type="checkbox" x-model="oscConfig.enabled">
                     <span>OSC</span>
                 </label>
-                <div class="form-group">
-                    <label class="form-label">Host</label>
-                    <input class="form-input" type="text" x-model="oscConfig.host" placeholder="0.0.0.0" autocomplete="off" spellcheck="false">
-                </div>
                 <div class="form-group osc-port-field">
                     <label class="form-label">Port</label>
-                    <input class="form-input" type="number" min="0" max="65535" x-model.number="oscConfig.port">
+                    <input class="form-input" type="number" min="1" max="65535" x-model.number="oscConfig.port">
                 </div>
                 <button class="btn btn-sm" @click="saveOscConfig()" :disabled="oscSaving" x-text="oscSaving ? 'Saving...' : 'Apply'"></button>
             </div>
@@ -942,7 +938,7 @@
                 <span class="osc-endpoint" x-text="oscEndpointLabel()"></span>
                 <span x-text="oscLastMessage()"></span>
             </div>
-            <p class="text-sm text-muted" style="margin-top: 8px;">Use <code>0.0.0.0</code> to accept OSC from this Mac and other machines on the network. Send to this computer's LAN IP or <code>127.0.0.1</code>.</p>
+            <p class="text-sm text-muted" style="margin-top: 8px;">Listens on all network interfaces automatically. Send to <code>127.0.0.1</code> locally or this Mac's LAN IP from other machines.</p>
             <div class="osc-example-strip" x-show="cues.length > 0">
                 <template x-for="cue in cues.slice(0, 4)" :key="'osc-' + cue.number">
                     <span class="cue-assignment-pill">
