@@ -49,8 +49,13 @@ WINDOWS_ICON_SOURCE = APP_ICON_SOURCE
 WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 WINDOWS_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
 WINDOWS_INSTALLER_APP_ID = "{{E8573E10-0D2C-4C6E-91C8-D1F5927A9328}"
-DEFAULT_APP_VERSION = "0.85"
+DEFAULT_APP_VERSION = "0.86"
 DEFAULT_MACOS_ENTITLEMENTS = Path(__file__).resolve().parent / "macos" / "PrimusCentral.entitlements"
+
+
+def _write_sender_version(sender_dir, version):
+    version_path = sender_dir / "version.py"
+    version_path.write_text(f'APP_VERSION = "{version}"\n', encoding="utf-8")
 
 
 def _platform_default():
@@ -340,6 +345,25 @@ def _verify_windows_signature(output_path, signtool_path=None):
 
 def _post_sign_macos_app(app_path, identity, entitlements_file=None):
     _require_tool("codesign")
+    app_path = Path(app_path)
+    entitlements_args = []
+    if entitlements_file:
+        entitlements_args = ["--entitlements", str(entitlements_file)]
+    macos_dir = app_path / "Contents" / "MacOS"
+    if macos_dir.is_dir():
+        for executable in sorted(macos_dir.iterdir()):
+            if executable.is_file():
+                _run([
+                    "codesign",
+                    "--force",
+                    "--options",
+                    "runtime",
+                    "--timestamp",
+                    *entitlements_args,
+                    "--sign",
+                    identity,
+                    str(executable),
+                ])
     cmd = [
         "codesign",
         "--force",
@@ -348,10 +372,11 @@ def _post_sign_macos_app(app_path, identity, entitlements_file=None):
         "--options",
         "runtime",
         "--timestamp",
+        *entitlements_args,
+        "--sign",
+        identity,
+        str(app_path),
     ]
-    if entitlements_file:
-        cmd.extend(["--entitlements", str(entitlements_file)])
-    cmd.extend(["--sign", identity, str(app_path)])
     _run(cmd)
     _run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)])
 
@@ -644,6 +669,8 @@ def main(argv=None):
     if importlib.util.find_spec("PyInstaller") is None:
         print("PyInstaller is not installed. Install build tools with: python -m pip install -r V4/requirements-build.txt")
         return 1
+
+    _write_sender_version(sender_dir, args.app_version)
 
     try:
         icon_path = args.icon

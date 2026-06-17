@@ -39,7 +39,7 @@ from network_settings import (
     set_dhcp,
     set_preferred_interface,
 )
-from paths import web_dir, frontend_index_path, default_frontend_path, sender_product
+from paths import web_dir, frontend_index_path, default_frontend_path, sender_product, app_version
 from radius_state import RadiusState
 from state import OUTPUT_TYPES, ControllerState
 from ui_lifecycle import close_session, init_server, touch_session
@@ -151,6 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/runtime":
             self._json_response({
                 "product": sender_product(),
+                "app_version": app_version(),
                 "ui_lifecycle": bool(getattr(self.server, "ui_lifecycle_enabled", False)),
                 "frontends": {
                     "primus": "/primus",

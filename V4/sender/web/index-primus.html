@@ -18,7 +18,7 @@
 
 <!-- ==================== NAVBAR ==================== -->
 <nav class="navbar">
-    <div class="navbar-brand">Primus Central</div>
+    <div class="navbar-brand" x-data x-text="$store.app.brandLabel"></div>
     <div class="navbar-tabs navbar-tabs-primary">
         <template x-data x-for="m in ['mixer', 'controller']">
             <div class="navbar-tab"
@@ -938,14 +938,35 @@
                 <span class="osc-endpoint" x-text="oscEndpointLabel()"></span>
                 <span class="osc-packet-stats" x-text="oscPacketStatsLabel()"></span>
             </div>
-            <div class="osc-target-strip" x-show="oscListenAddresses().length">
-                <span class="osc-target-label">Send LAN OSC to</span>
-                <template x-for="(address, idx) in oscListenAddresses()" :key="'osc-target-' + idx + '-' + address">
-                    <code class="osc-target-address" x-text="address"></code>
-                </template>
+            <div class="osc-bind-row">
+                <span class="osc-bind-label">Active sockets</span>
+                <span class="osc-bind-value" x-text="oscBindSocketLabel()"></span>
             </div>
             <div class="osc-debug-hint" x-show="oscLanDebugHint()" x-text="oscLanDebugHint()"></div>
             <div class="osc-error-banner" x-show="oscStatus?.last_error && !oscStatus?.running" x-text="oscStatus.last_error"></div>
+
+            <div class="osc-history-panel osc-network-log-panel">
+                <div class="osc-history-header">
+                    <span>Network log</span>
+                    <span class="text-muted" x-text="oscNetworkLogRows().length ? (oscNetworkLogRows().length + ' events') : 'waiting for activity'"></span>
+                </div>
+                <div class="osc-history-columns osc-network-columns">
+                    <span>Time</span>
+                    <span>Event</span>
+                    <span>Details</span>
+                </div>
+                <div class="osc-history-list osc-network-log-list">
+                    <template x-for="(entry, idx) in oscNetworkLogRows()" :key="'osc-net-' + idx + '-' + (entry.time || '') + '-' + (entry.message || '')">
+                        <div class="osc-history-row osc-network-row" :class="entry.error ? 'osc-history-error' : ''">
+                            <span class="osc-history-time" x-text="entry.time || ''"></span>
+                            <span class="osc-history-message" x-text="entry.message || ''"></span>
+                            <span class="osc-history-result" x-text="oscNetworkLogDetail(entry)"></span>
+                        </div>
+                    </template>
+                    <div class="osc-history-empty" x-show="!oscNetworkLogRows().length">Bind attempts and packet receipts are logged here. Send a remote OSC packet and watch for "packet received" with scope lan.</div>
+                </div>
+            </div>
+
             <div class="osc-history-panel osc-history-panel-large">
                 <div class="osc-history-header">
                     <span>Incoming OSC log</span>
@@ -969,7 +990,7 @@
                     <div class="osc-history-empty" x-show="!oscHistoryRows().length">No OSC messages received yet. Send a test packet to one of the LAN addresses above (not only 127.0.0.1) when testing from another device.</div>
                 </div>
             </div>
-            <p class="text-sm text-muted" style="margin-top: 8px;">Listens on all network interfaces automatically. Send to <code>127.0.0.1</code> locally or this Mac's LAN IP from other machines.</p>
+            <p class="text-sm text-muted osc-help-copy">OSC listens automatically on all interfaces. Only enable/disable and port are configurable.</p>
             <div class="osc-example-strip" x-show="cues.length > 0">
                 <template x-for="cue in cues.slice(0, 4)" :key="'osc-' + cue.number">
                     <span class="cue-assignment-pill">

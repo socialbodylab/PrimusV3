@@ -306,3 +306,14 @@ def ensure_runtime_data():
             _audio_cues_mod._ensure_audio_dirs()
         except Exception:
             pass
+
+
+def app_version():
+    env = os.environ.get("PRIMUSV3_APP_VERSION", "").strip()
+    if env:
+        return env
+    try:
+        from version import APP_VERSION
+        return str(APP_VERSION).strip() or "dev"
+    except ImportError:
+        return "dev"

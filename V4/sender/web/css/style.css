@@ -2736,6 +2736,43 @@ input[type="color"] {
     margin-top: 12px;
 }
 
+.osc-bind-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+.osc-bind-label {
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+
+.osc-bind-value {
+    color: var(--text-primary);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    line-height: 1.45;
+}
+
+.osc-help-copy {
+    margin-top: 8px;
+}
+
+.osc-network-log-panel {
+    margin-top: 12px;
+}
+
+.osc-network-log-panel .osc-network-log-list {
+    min-height: 220px;
+    max-height: min(40vh, 360px);
+}
+
+.osc-network-columns,
+.osc-network-row {
+    grid-template-columns: 92px minmax(120px, 0.9fr) minmax(220px, 2fr);
+}
+
 .osc-history-panel-large .osc-history-list {
     min-height: 280px;
     max-height: min(48vh, 480px);

@@ -186,15 +186,33 @@ document.addEventListener("alpine:init", () => {
             const bound = this.oscStatus?.bound || {};
             const settings = this.oscStatus?.settings || this.oscConfig;
             const port = bound.port || settings.port || 53001;
-            return 'Listening on 0.0.0.0:' + port;
+            const socketCount = (this.oscStatus?.bind_sockets || []).length;
+            const socketLabel = socketCount ? ` on ${socketCount} socket${socketCount === 1 ? '' : 's'}` : '';
+            return `UDP port ${port}${socketLabel} (automatic, all interfaces)`;
         },
 
-        oscListenAddresses() {
-            const addresses = this.oscStatus?.listen_addresses || [];
-            if (addresses.length) return addresses;
-            const port = this.oscStatus?.bound?.port || this.oscConfig.port || 53001;
-            const targets = this.oscStatus?.listen_targets || [];
-            return targets.map((target) => `${target.ip}:${port}`);
+        oscBindSocketLabel() {
+            const sockets = this.oscStatus?.bind_sockets || [];
+            if (!sockets.length) return 'No active UDP sockets';
+            return sockets.map((entry) => `${entry.label || 'socket'} ${entry.ip}:${entry.port}`).join(' · ');
+        },
+
+        oscNetworkLogRows() {
+            return this.oscStatus?.network_log || [];
+        },
+
+        oscNetworkLogDetail(entry) {
+            if (!entry) return '';
+            const parts = [];
+            if (entry.remote) parts.push(`from ${entry.remote}`);
+            if (entry.local) parts.push(`on ${entry.local}`);
+            if (entry.label) parts.push(`via ${entry.label}`);
+            if (entry.bytes !== undefined) parts.push(`${entry.bytes} bytes`);
+            if (entry.scope) parts.push(entry.scope);
+            if (entry.error) parts.push(entry.error);
+            if (entry.sockets !== undefined) parts.push(`${entry.sockets} sockets`);
+            if (entry.port !== undefined && !entry.local) parts.push(`port ${entry.port}`);
+            return parts.join(' · ') || entry.message || '';
         },
 
         oscPacketStatsLabel() {
@@ -209,11 +227,9 @@ document.addEventListener("alpine:init", () => {
             const local = this.oscStatus?.packets_local || 0;
             const remote = this.oscStatus?.packets_remote || 0;
             if (!local || remote > 0) return '';
-            const addresses = this.oscListenAddresses();
-            if (!addresses.length) {
-                return 'Only local OSC packets received so far. From another device, send to this Mac\'s LAN IP (not 127.0.0.1). If LAN packets still do not appear, allow incoming network connections for PrimusCentral in macOS Firewall.';
-            }
-            return `Only local OSC packets received so far. From another device, send to ${addresses.join(' or ')}. If LAN packets still do not appear, allow incoming network connections for PrimusCentral in macOS Firewall.`;
+            const addresses = this.oscStatus?.listen_addresses || [];
+            const targetText = addresses.length ? addresses.join(' or ') : 'this Mac\'s LAN IP';
+            return `Only local OSC packets received so far. Remote senders should target ${targetText}. If LAN packets still do not appear, allow incoming network connections for PrimusCentral in macOS Firewall and confirm the UDP port is not used by another app.`;
         },
 
         oscHistorySource(entry) {

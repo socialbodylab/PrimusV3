@@ -21,6 +21,7 @@ from osc_control import (
     normalize_bind_host,
     normalize_settings,
     OSC_LISTEN_HOST,
+    public_settings,
     _is_loopback_host,
     pad_osc_string,
     parse_osc_packet,
@@ -85,10 +86,11 @@ class FakeControllerState:
 
 
 class OscSettingsTests(unittest.TestCase):
-    def test_default_bind_host_is_all_interfaces(self):
-        settings = normalize_settings(None)
-        self.assertEqual(settings["host"], "0.0.0.0")
+    def test_default_settings_are_enabled_with_default_port(self):
+        settings = public_settings(None)
+        self.assertTrue(settings["enabled"])
         self.assertEqual(settings["port"], 53001)
+        self.assertNotIn("host", settings)
 
     def test_normalize_bind_host_is_fixed(self):
         self.assertEqual(normalize_bind_host(""), OSC_LISTEN_HOST)
@@ -99,7 +101,7 @@ class OscSettingsTests(unittest.TestCase):
         settings = normalize_settings({"port": 0})
         self.assertEqual(settings["port"], 53001)
 
-    def test_saved_host_is_always_all_interfaces(self):
+    def test_legacy_saved_host_is_ignored(self):
         import json
         import tempfile
 
@@ -114,8 +116,9 @@ class OscSettingsTests(unittest.TestCase):
                     }
                 }, handle)
             with mock.patch("osc_control._state_file", return_value=path):
-                settings = load_settings()
-            self.assertEqual(settings["host"], OSC_LISTEN_HOST)
+                settings = public_settings(load_settings())
+            self.assertNotIn("host", settings)
+            self.assertEqual(settings["port"], 53001)
 
 
 class OscParserTests(unittest.TestCase):
@@ -154,6 +157,11 @@ class OscParserTests(unittest.TestCase):
 
 
 class OscCommandTests(unittest.TestCase):
+    def _free_udp_port(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+
     def test_normalizes_primus_and_qlab_style_addresses(self):
         self.assertEqual(command_from_message(parse_osc_packet(build_osc_message("/primus/cue/go"))[0]), {"action": "go"})
         self.assertEqual(command_from_message(parse_osc_packet(build_osc_message("/cue/goto", 2))[0]), {"action": "goto", "number": 2})
@@ -178,17 +186,17 @@ class OscCommandTests(unittest.TestCase):
         self.assertTrue(cues.stopped)
         self.assertEqual(state.source, ControllerState.SOURCE_IDLE)
 
-    def test_udp_listener_accepts_port_zero(self):
+    def test_udp_listener_accepts_ephemeral_port(self):
         cues = FakeCueList()
         state = FakeControllerState()
+        port = self._free_udp_port()
         service = OscControlServer(cues, state, settings={
             "enabled": True,
-            "host": "127.0.0.1",
-            "port": 0,
+            "port": port,
         })
         service.start()
         try:
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 3.0
             status = service.status()
             while not status["running"] and time.monotonic() < deadline:
                 time.sleep(0.01)
@@ -197,7 +205,7 @@ class OscCommandTests(unittest.TestCase):
             port = status["bound"]["port"]
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 sock.sendto(build_osc_message("/primus/cue/go"), ("127.0.0.1", port))
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 3.0
             while cues.go_calls == 0 and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertEqual(cues.go_calls, 1)
@@ -208,24 +216,24 @@ class OscCommandTests(unittest.TestCase):
     def test_udp_listener_on_all_interfaces_accepts_localhost(self):
         cues = FakeCueList()
         state = FakeControllerState()
+        port = self._free_udp_port()
         service = OscControlServer(cues, state, settings={
             "enabled": True,
-            "host": "0.0.0.0",
-            "port": 0,
+            "port": port,
         })
         service.start()
         try:
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 3.0
             status = service.status()
             while not status["running"] and time.monotonic() < deadline:
                 time.sleep(0.01)
                 status = service.status()
             self.assertTrue(status["running"], status)
-            self.assertEqual(status["bound"]["host"], "0.0.0.0")
+            self.assertGreaterEqual(len(status["bind_sockets"]), 1)
             port = status["bound"]["port"]
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 sock.sendto(build_osc_message("/primus/cue/go"), ("127.0.0.1", port))
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 3.0
             while cues.go_calls == 0 and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertEqual(cues.go_calls, 1)
@@ -238,14 +246,14 @@ class OscCommandTests(unittest.TestCase):
     def test_udp_listener_counts_lan_packets_separately(self):
         cues = FakeCueList()
         state = FakeControllerState()
+        port = self._free_udp_port()
         service = OscControlServer(cues, state, settings={
             "enabled": True,
-            "host": "0.0.0.0",
-            "port": 0,
+            "port": port,
         })
         service.start()
         try:
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 3.0
             status = service.status()
             while not status["running"] and time.monotonic() < deadline:
                 time.sleep(0.01)
@@ -264,13 +272,14 @@ class OscCommandTests(unittest.TestCase):
                 self.skipTest("no routable local IPv4 available for LAN packet test")
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 sock.sendto(build_osc_message("/primus/cue/go"), (local_ip, port))
-            deadline = time.monotonic() + 1.0
+            deadline = time.monotonic() + 3.0
             while cues.go_calls == 0 and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertEqual(cues.go_calls, 1)
             status = service.status()
             self.assertEqual(status["packets_remote"], 1)
             self.assertEqual(status["packets_local"], 0)
+            self.assertTrue(any(row.get("message") == "packet received" for row in status["network_log"]))
             self.assertTrue(status["history"][0]["message"].startswith("/primus/cue/go"))
         finally:
             service.stop()

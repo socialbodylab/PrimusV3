@@ -9,6 +9,7 @@ import copy
 import errno
 import json
 import os
+import select
 import socket
 import struct
 import threading
@@ -24,11 +25,11 @@ STATE_KEY = "osc_control"
 OSC_LISTEN_HOST = "0.0.0.0"
 DEFAULT_OSC_SETTINGS = {
     "enabled": True,
-    "host": OSC_LISTEN_HOST,
     "port": 53001,
 }
 MAX_PACKET_BYTES = 65535
 MAX_HISTORY = 100
+MAX_NETWORK_LOG = 150
 
 
 class OscParseError(ValueError):
@@ -78,12 +79,19 @@ def normalize_bind_host(host=None):
     return OSC_LISTEN_HOST
 
 
+def public_settings(settings=None):
+    normalized = normalize_settings(settings)
+    return {
+        "enabled": bool(normalized.get("enabled")),
+        "port": int(normalized.get("port", DEFAULT_OSC_SETTINGS["port"])),
+    }
+
+
 def normalize_settings(settings=None):
     out = copy.deepcopy(DEFAULT_OSC_SETTINGS)
     if not isinstance(settings, dict):
         return out
     out["enabled"] = bool(settings.get("enabled", out["enabled"]))
-    out["host"] = OSC_LISTEN_HOST
     try:
         port = int(settings.get("port", out["port"]))
     except (TypeError, ValueError):
@@ -387,6 +395,71 @@ def _listen_target_strings(port):
     return [f"{target['ip']}:{port}" for target in _listen_targets()]
 
 
+def _make_udp_socket():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except OSError:
+            pass
+    sock.setblocking(False)
+    return sock
+
+
+def _listen_bind_candidates():
+    candidates = [("0.0.0.0", "all interfaces")]
+    seen = {"0.0.0.0"}
+    for target in _listen_targets():
+        ip = target.get("ip")
+        if ip and ip not in seen:
+            seen.add(ip)
+            candidates.append((ip, target.get("label") or ip))
+    if "127.0.0.1" not in seen:
+        candidates.append(("127.0.0.1", "loopback"))
+    return candidates
+
+
+def _open_listen_sockets(port):
+    sockets = []
+    bind_log = []
+    bound_port = None
+    for ip, label in _listen_bind_candidates():
+        sock = _make_udp_socket()
+        try:
+            use_port = int(bound_port if bound_port is not None else port)
+            sock.bind((ip, use_port))
+            bound_ip, actual_port = sock.getsockname()[:2]
+            if bound_port is None:
+                bound_port = actual_port
+            sockets.append({
+                "sock": sock,
+                "ip": bound_ip,
+                "port": actual_port,
+                "label": label,
+            })
+            bind_log.append({
+                "ok": True,
+                "ip": bound_ip,
+                "port": actual_port,
+                "label": label,
+            })
+        except OSError as exc:
+            try:
+                sock.close()
+            except OSError:
+                pass
+            bind_log.append({
+                "ok": False,
+                "ip": ip,
+                "port": int(bound_port if bound_port is not None else port),
+                "label": label,
+                "error": str(exc),
+                "errno": getattr(exc, "errno", None),
+            })
+    return sockets, bind_log
+
+
 def osc_examples():
     return [
         {"address": "/primus/cue/go", "description": "Advance to the next cue"},
@@ -404,16 +477,18 @@ class OscControlServer:
         self.controller_state = controller_state
         self.settings = normalize_settings(settings or load_settings())
         self._thread = None
-        self._sock = None
+        self._listen_sockets = []
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._history = deque(maxlen=MAX_HISTORY)
+        self._network_log = deque(maxlen=MAX_NETWORK_LOG)
         self._packets_received = 0
         self._packets_local = 0
         self._packets_remote = 0
         self._running = False
         self._last_error = ""
         self._bound = {"host": "", "port": 0}
+        self._bind_sockets = []
 
     def start(self):
         self.stop()
@@ -423,6 +498,7 @@ class OscControlServer:
                 self._running = False
                 self._last_error = ""
                 self._bound = {"host": "", "port": 0}
+                self._bind_sockets = []
             return
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="PrimusOSC", daemon=True)
@@ -430,82 +506,146 @@ class OscControlServer:
 
     def stop(self):
         self._stop_event.set()
-        sock = self._sock
-        if sock is not None:
-            try:
-                sock.close()
-            except OSError:
-                pass
+        sockets = list(self._listen_sockets)
+        self._listen_sockets = []
+        for entry in sockets:
+            sock = entry.get("sock")
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=1.0)
         self._thread = None
-        self._sock = None
         with self._lock:
             self._running = False
 
     def update(self, data):
-        self.settings = save_settings({**self.settings, **(data or {})})
+        payload = {}
+        if isinstance(data, dict):
+            if "enabled" in data:
+                payload["enabled"] = data.get("enabled")
+            if "port" in data:
+                payload["port"] = data.get("port")
+        self.settings = save_settings({**self.settings, **payload})
         self.start()
         return self.status()
 
+    def _network_event(self, message, **fields):
+        row = {
+            "time": _timestamp_label(),
+            "message": str(message or ""),
+            **fields,
+        }
+        with self._lock:
+            self._network_log.appendleft(row)
+
     def _run(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, "SO_REUSEPORT"):
-            try:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            except OSError:
-                pass
-        sock.settimeout(0.25)
-        bind_host = OSC_LISTEN_HOST
         bind_port = int(self.settings["port"])
-        try:
-            sock.bind((bind_host, bind_port))
-        except OSError as exc:
+        self._network_event("starting OSC listener", port=bind_port)
+        sockets, bind_log = _open_listen_sockets(bind_port)
+        for entry in bind_log:
+            if entry.get("ok"):
+                self._network_event(
+                    "bind ok",
+                    ip=entry.get("ip"),
+                    port=entry.get("port"),
+                    label=entry.get("label"),
+                )
+            else:
+                self._network_event(
+                    "bind failed",
+                    ip=entry.get("ip"),
+                    port=entry.get("port"),
+                    label=entry.get("label"),
+                    error=entry.get("error"),
+                    errno=entry.get("errno"),
+                )
+        if not sockets:
             with self._lock:
                 self._running = False
-                error_number = getattr(exc, "errno", None)
-                if error_number is not None:
-                    self._last_error = f"{exc} (errno {error_number})"
-                else:
-                    self._last_error = str(exc)
+                self._last_error = f"OSC could not bind UDP port {bind_port} on any interface"
                 self._bound = {"host": "", "port": 0}
-            try:
-                sock.close()
-            except OSError:
-                pass
+                self._bind_sockets = []
             return
-        self._sock = sock
-        host, port = sock.getsockname()[:2]
+        self._listen_sockets = sockets
+        primary = sockets[0]
+        bind_summary = [
+            {
+                "ip": entry.get("ip"),
+                "port": entry.get("port"),
+                "label": entry.get("label"),
+            }
+            for entry in sockets
+        ]
         with self._lock:
             self._running = True
             self._last_error = ""
-            self._bound = {"host": host, "port": port}
+            self._bound = {"host": primary["ip"], "port": primary["port"]}
+            self._bind_sockets = bind_summary
+        self._network_event(
+            "listener ready",
+            port=bind_port,
+            sockets=len(sockets),
+        )
+        poll_sockets = [entry["sock"] for entry in sockets]
         while not self._stop_event.is_set():
             try:
-                data, remote = sock.recvfrom(MAX_PACKET_BYTES)
-            except socket.timeout:
-                continue
-            except OSError:
+                readable, _, _ = select.select(poll_sockets, [], [], 0.25)
+            except OSError as exc:
+                self._network_event("select failed", error=str(exc))
                 break
-            self._handle_packet(data, remote)
-        try:
-            sock.close()
-        except OSError:
-            pass
+            for entry in sockets:
+                sock = entry["sock"]
+                if sock not in readable:
+                    continue
+                try:
+                    data, remote = sock.recvfrom(MAX_PACKET_BYTES)
+                except BlockingIOError:
+                    continue
+                except OSError as exc:
+                    self._network_event(
+                        "recv failed",
+                        label=entry.get("label"),
+                        ip=entry.get("ip"),
+                        error=str(exc),
+                    )
+                    continue
+                self._handle_packet(data, remote, entry)
+        for entry in sockets:
+            sock = entry.get("sock")
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+        self._listen_sockets = []
         with self._lock:
             self._running = False
+            self._bind_sockets = []
+        self._network_event("listener stopped", port=bind_port)
 
-    def _handle_packet(self, data, remote):
+    def _handle_packet(self, data, remote, listen_entry=None):
         remote_label = _remote_label(remote)
         is_local = _is_loopback_host(remote[0] if remote else "")
+        listen_label = (listen_entry or {}).get("label") or ""
+        listen_ip = (listen_entry or {}).get("ip") or ""
         with self._lock:
             self._packets_received += 1
             if is_local:
                 self._packets_local += 1
             else:
                 self._packets_remote += 1
+        self._network_event(
+            "packet received",
+            remote=remote_label,
+            local=listen_ip,
+            label=listen_label,
+            bytes=len(data or b""),
+            scope="local" if is_local else "lan",
+        )
         try:
             messages = parse_osc_packet(data, remote=remote_label)
         except OscParseError as exc:
@@ -559,21 +699,25 @@ class OscControlServer:
             last_error = self._last_error
             bound = dict(self._bound)
             history = list(self._history)
+            network_log = list(self._network_log)
+            bind_sockets = list(self._bind_sockets)
             packets_received = self._packets_received
             packets_local = self._packets_local
             packets_remote = self._packets_remote
         port = bound.get("port") or self.settings.get("port") or DEFAULT_OSC_SETTINGS["port"]
         return {
-            "settings": normalize_settings(self.settings),
+            "settings": public_settings(self.settings),
             "enabled": bool(self.settings.get("enabled")),
             "running": running,
             "last_error": last_error,
             "bound": bound,
+            "bind_sockets": bind_sockets,
             "packets_received": packets_received,
             "packets_local": packets_local,
             "packets_remote": packets_remote,
             "listen_targets": _listen_targets(),
             "listen_addresses": _listen_target_strings(port),
+            "network_log": network_log,
             "history": history,
             "examples": osc_examples(),
             "cue_triggers": self.cue_list.external_triggers(),

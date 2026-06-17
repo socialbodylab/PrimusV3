@@ -103,6 +103,11 @@ document.addEventListener("alpine:init", () => {
         uiProfileKey: initialUiProfileKey(),
         product: "primus",
 
+        get brandLabel() {
+            const version = this.runtime?.app_version;
+            return version ? `PrimusCentral v${version}` : "PrimusCentral";
+        },
+
         get uiProfile() {
             return PRIMUS_UI_PROFILES[this.uiProfileKey] || PRIMUS_UI_PROFILES.workshop;
         },
@@ -259,6 +264,9 @@ document.addEventListener("alpine:init", () => {
                 if (!this.runtime) {
                     this.runtime = await api("GET", "/api/runtime");
                     this.product = this.runtime?.product || "primus";
+                    if (this.runtime?.app_version) {
+                        document.title = `PrimusCentral v${this.runtime.app_version}`;
+                    }
                 }
             } catch (e) {
                 return;
