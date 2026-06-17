@@ -49,7 +49,8 @@ WINDOWS_ICON_SOURCE = APP_ICON_SOURCE
 WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 WINDOWS_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
 WINDOWS_INSTALLER_APP_ID = "{{E8573E10-0D2C-4C6E-91C8-D1F5927A9328}"
-DEFAULT_APP_VERSION = "0.84"
+DEFAULT_APP_VERSION = "0.85"
+DEFAULT_MACOS_ENTITLEMENTS = Path(__file__).resolve().parent / "macos" / "PrimusCentral.entitlements"
 
 
 def _platform_default():
@@ -667,7 +668,11 @@ def main(argv=None):
         if args.target == "macos" and args.windowed and args.sign_identity:
             print()
             print(f"Signing: {output_path}")
-            _post_sign_macos_app(output_path, args.sign_identity, args.entitlements_file)
+            entitlements_file = args.entitlements_file
+            if entitlements_file is None and DEFAULT_MACOS_ENTITLEMENTS.exists():
+                entitlements_file = DEFAULT_MACOS_ENTITLEMENTS
+                print(f"Using entitlements: {entitlements_file}")
+            _post_sign_macos_app(output_path, args.sign_identity, entitlements_file)
         if args.target == "windows" and args.windows_sign_metadata:
             print()
             print(f"Signing: {output_path}")

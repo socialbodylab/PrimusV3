@@ -21,6 +21,7 @@ from osc_control import (
     normalize_bind_host,
     normalize_settings,
     OSC_LISTEN_HOST,
+    _is_loopback_host,
     pad_osc_string,
     parse_osc_packet,
     save_settings,
@@ -228,6 +229,49 @@ class OscCommandTests(unittest.TestCase):
             while cues.go_calls == 0 and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertEqual(cues.go_calls, 1)
+            status = service.status()
+            self.assertEqual(status["packets_local"], 1)
+            self.assertEqual(status["packets_remote"], 0)
+        finally:
+            service.stop()
+
+    def test_udp_listener_counts_lan_packets_separately(self):
+        cues = FakeCueList()
+        state = FakeControllerState()
+        service = OscControlServer(cues, state, settings={
+            "enabled": True,
+            "host": "0.0.0.0",
+            "port": 0,
+        })
+        service.start()
+        try:
+            deadline = time.monotonic() + 1.0
+            status = service.status()
+            while not status["running"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+                status = service.status()
+            port = status["bound"]["port"]
+            local_ip = None
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                probe.connect(("8.8.8.8", 80))
+                local_ip = probe.getsockname()[0]
+            except OSError:
+                pass
+            finally:
+                probe.close()
+            if not local_ip or _is_loopback_host(local_ip):
+                self.skipTest("no routable local IPv4 available for LAN packet test")
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.sendto(build_osc_message("/primus/cue/go"), (local_ip, port))
+            deadline = time.monotonic() + 1.0
+            while cues.go_calls == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(cues.go_calls, 1)
+            status = service.status()
+            self.assertEqual(status["packets_remote"], 1)
+            self.assertEqual(status["packets_local"], 0)
+            self.assertTrue(status["history"][0]["message"].startswith("/primus/cue/go"))
         finally:
             service.stop()
 

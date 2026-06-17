@@ -936,24 +936,37 @@
             </div>
             <div class="osc-detail-row">
                 <span class="osc-endpoint" x-text="oscEndpointLabel()"></span>
-                <span x-show="oscStatus?.packets_received" x-text="(oscStatus?.packets_received || 0) + ' packet' + ((oscStatus?.packets_received || 0) === 1 ? '' : 's') + ' received'"></span>
-                <span x-text="oscLastMessage()"></span>
+                <span class="osc-packet-stats" x-text="oscPacketStatsLabel()"></span>
             </div>
+            <div class="osc-target-strip" x-show="oscListenAddresses().length">
+                <span class="osc-target-label">Send LAN OSC to</span>
+                <template x-for="(address, idx) in oscListenAddresses()" :key="'osc-target-' + idx + '-' + address">
+                    <code class="osc-target-address" x-text="address"></code>
+                </template>
+            </div>
+            <div class="osc-debug-hint" x-show="oscLanDebugHint()" x-text="oscLanDebugHint()"></div>
             <div class="osc-error-banner" x-show="oscStatus?.last_error && !oscStatus?.running" x-text="oscStatus.last_error"></div>
-            <div class="osc-history-panel">
+            <div class="osc-history-panel osc-history-panel-large">
                 <div class="osc-history-header">
                     <span>Incoming OSC log</span>
-                    <span class="text-muted" x-text="oscHistoryRows().length ? (oscHistoryRows().length + ' shown') : 'waiting for packets'"></span>
+                    <span class="text-muted" x-text="oscHistoryRows().length ? (oscHistoryRows().length + ' entries') : 'waiting for packets'"></span>
+                </div>
+                <div class="osc-history-columns">
+                    <span>Time</span>
+                    <span>Source</span>
+                    <span>Message</span>
+                    <span>Result</span>
                 </div>
                 <div class="osc-history-list">
-                    <template x-for="(entry, idx) in oscHistoryRows()" :key="'osc-log-' + idx + '-' + (entry.time || '') + '-' + (entry.address || '')">
+                    <template x-for="(entry, idx) in oscHistoryRows()" :key="'osc-log-' + idx + '-' + (entry.time || '') + '-' + (entry.remote || '') + '-' + (entry.message || '')">
                         <div class="osc-history-row" :class="entry.ok ? 'osc-history-ok' : 'osc-history-error'">
                             <span class="osc-history-time" x-text="entry.time || ''"></span>
-                            <span class="osc-history-remote" x-text="entry.remote || 'unknown'"></span>
-                            <span class="osc-history-message" x-text="oscHistorySummary(entry)"></span>
+                            <span class="osc-history-remote" x-text="oscHistorySource(entry)"></span>
+                            <span class="osc-history-message" x-text="entry.message || oscHistorySummary(entry)"></span>
+                            <span class="osc-history-result" x-text="oscHistoryResult(entry)"></span>
                         </div>
                     </template>
-                    <div class="osc-history-empty" x-show="!oscHistoryRows().length">No OSC messages received yet. Send a test packet to this Mac's LAN IP on the port above.</div>
+                    <div class="osc-history-empty" x-show="!oscHistoryRows().length">No OSC messages received yet. Send a test packet to one of the LAN addresses above (not only 127.0.0.1) when testing from another device.</div>
                 </div>
             </div>
             <p class="text-sm text-muted" style="margin-top: 8px;">Listens on all network interfaces automatically. Send to <code>127.0.0.1</code> locally or this Mac's LAN IP from other machines.</p>

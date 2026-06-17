@@ -28,7 +28,7 @@ DEFAULT_OSC_SETTINGS = {
     "port": 53001,
 }
 MAX_PACKET_BYTES = 65535
-MAX_HISTORY = 50
+MAX_HISTORY = 100
 
 
 class OscParseError(ValueError):
@@ -325,6 +325,68 @@ def execute_message(message, cue_list, controller_state):
     return execute_command(command, cue_list, controller_state)
 
 
+def _timestamp_label():
+    now = time.time()
+    return time.strftime("%H:%M:%S", time.localtime(now)) + f".{int((now % 1) * 1000):03d}"
+
+
+def _is_loopback_host(host):
+    text = str(host or "").strip().lower()
+    if not text:
+        return False
+    if text == "::1":
+        return True
+    if text.startswith("127."):
+        return True
+    return False
+
+
+def _remote_label(remote):
+    if not remote:
+        return ""
+    return f"{remote[0]}:{remote[1]}"
+
+
+def _packet_preview(data, limit=48):
+    packet = bytes(data or b"")
+    if not packet:
+        return "<empty>"
+    shown = packet[:limit]
+    hex_text = shown.hex()
+    if len(packet) > limit:
+        hex_text += "…"
+    return f"{len(packet)} bytes {hex_text}"
+
+
+def _listen_targets():
+    try:
+        from network_settings import get_network_status
+    except ImportError:
+        return []
+    status = get_network_status()
+    targets = []
+    seen = set()
+    for interface in status.get("interfaces", []):
+        if not interface.get("connected"):
+            continue
+        ip = interface.get("ipv4") or interface.get("source_ip")
+        if not ip or ip in seen:
+            continue
+        seen.add(ip)
+        label = interface.get("service") or interface.get("device") or interface.get("type") or "interface"
+        targets.append({
+            "ip": ip,
+            "label": str(label),
+            "type": interface.get("type") or "",
+        })
+    return targets
+
+
+def _listen_target_strings(port):
+    port = int(port or DEFAULT_OSC_SETTINGS["port"])
+    return [f"{target['ip']}:{port}" for target in _listen_targets()]
+
+
 def osc_examples():
     return [
         {"address": "/primus/cue/go", "description": "Advance to the next cue"},
@@ -347,6 +409,8 @@ class OscControlServer:
         self._lock = threading.Lock()
         self._history = deque(maxlen=MAX_HISTORY)
         self._packets_received = 0
+        self._packets_local = 0
+        self._packets_remote = 0
         self._running = False
         self._last_error = ""
         self._bound = {"host": "", "port": 0}
@@ -388,6 +452,11 @@ class OscControlServer:
     def _run(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
         sock.settimeout(0.25)
         bind_host = OSC_LISTEN_HOST
         bind_port = int(self.settings["port"])
@@ -429,13 +498,25 @@ class OscControlServer:
             self._running = False
 
     def _handle_packet(self, data, remote):
+        remote_label = _remote_label(remote)
+        is_local = _is_loopback_host(remote[0] if remote else "")
         with self._lock:
             self._packets_received += 1
-        remote_label = f"{remote[0]}:{remote[1]}" if remote else ""
+            if is_local:
+                self._packets_local += 1
+            else:
+                self._packets_remote += 1
         try:
             messages = parse_osc_packet(data, remote=remote_label)
         except OscParseError as exc:
-            self._record({"ok": False, "remote": remote_label, "address": "", "error": str(exc)})
+            self._record({
+                "ok": False,
+                "remote": remote_label,
+                "local": is_local,
+                "address": "",
+                "message": _packet_preview(data),
+                "error": str(exc),
+            })
             return
         for message in messages:
             try:
@@ -447,8 +528,10 @@ class OscControlServer:
             entry = {
                 "ok": bool(result.get("ok")),
                 "remote": remote_label,
+                "local": is_local,
                 "address": message.address,
                 "args": _safe_args(message.args),
+                "message": _format_message_label(message.address, message.args),
                 "action": result.get("action"),
                 "error": result.get("error", ""),
             }
@@ -460,12 +543,14 @@ class OscControlServer:
 
     def _record(self, entry):
         row = {
-            "time": time.strftime("%H:%M:%S"),
+            "time": _timestamp_label(),
             **entry,
         }
+        if not row.get("message"):
+            row["message"] = _format_message_label(row.get("address"), row.get("args"))
         with self._lock:
             self._history.appendleft(row)
-            if row.get("error"):
+            if row.get("error") and not row.get("ok"):
                 self._last_error = row.get("error")
 
     def status(self):
@@ -475,6 +560,9 @@ class OscControlServer:
             bound = dict(self._bound)
             history = list(self._history)
             packets_received = self._packets_received
+            packets_local = self._packets_local
+            packets_remote = self._packets_remote
+        port = bound.get("port") or self.settings.get("port") or DEFAULT_OSC_SETTINGS["port"]
         return {
             "settings": normalize_settings(self.settings),
             "enabled": bool(self.settings.get("enabled")),
@@ -482,10 +570,28 @@ class OscControlServer:
             "last_error": last_error,
             "bound": bound,
             "packets_received": packets_received,
+            "packets_local": packets_local,
+            "packets_remote": packets_remote,
+            "listen_targets": _listen_targets(),
+            "listen_addresses": _listen_target_strings(port),
             "history": history,
             "examples": osc_examples(),
             "cue_triggers": self.cue_list.external_triggers(),
         }
+
+
+def _format_message_label(address, args):
+    text = str(address or "(packet)")
+    safe_args = _safe_args(args)
+    if safe_args:
+        rendered = []
+        for arg in safe_args:
+            if isinstance(arg, str):
+                rendered.append(json.dumps(arg))
+            else:
+                rendered.append(str(arg))
+        text += " " + " ".join(rendered)
+    return text
 
 
 def _safe_args(args):

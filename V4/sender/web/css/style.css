@@ -2659,6 +2659,44 @@ input[type="color"] {
     font-size: 12px;
 }
 
+.osc-packet-stats {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    color: var(--text-primary);
+}
+
+.osc-target-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.osc-target-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.osc-target-address {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.osc-debug-hint {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--warning, #c9a227);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--warning, #c9a227) 10%, transparent);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
 .osc-endpoint {
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
     color: var(--text-primary);
@@ -2694,19 +2732,53 @@ input[type="color"] {
     text-transform: uppercase;
 }
 
+.osc-history-panel-large {
+    margin-top: 12px;
+}
+
+.osc-history-panel-large .osc-history-list {
+    min-height: 280px;
+    max-height: min(48vh, 480px);
+}
+
+.osc-history-columns,
+.osc-history-row {
+    display: grid;
+    grid-template-columns: 92px minmax(120px, 0.9fr) minmax(180px, 2fr) minmax(110px, 0.8fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.osc-history-columns {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: var(--bg-tertiary);
+}
+
 .osc-history-list {
     max-height: 180px;
     overflow-y: auto;
 }
 
 .osc-history-row {
-    display: grid;
-    grid-template-columns: 58px minmax(90px, 120px) 1fr;
-    gap: 8px;
-    padding: 7px 10px;
+    padding: 9px 12px;
     border-bottom: 1px solid var(--border);
     font-size: 12px;
-    line-height: 1.35;
+    line-height: 1.4;
+}
+
+.osc-history-result {
+    color: var(--text-secondary);
+    word-break: break-word;
+}
+
+.osc-history-error .osc-history-result {
+    color: var(--danger);
 }
 
 .osc-history-row:last-child {

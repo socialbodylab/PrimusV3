@@ -99,7 +99,7 @@ document.addEventListener("alpine:init", () => {
                 const data = await api("GET", "/api/cues");
                 this.applyCueState(data);
                 const now = Date.now();
-                if (now - this._lastOscPoll > 500) {
+                if (now - this._lastOscPoll > 250) {
                     this._lastOscPoll = now;
                     await this.fetchOscStatus(false);
                 }
@@ -186,18 +186,48 @@ document.addEventListener("alpine:init", () => {
             const bound = this.oscStatus?.bound || {};
             const settings = this.oscStatus?.settings || this.oscConfig;
             const port = bound.port || settings.port || 53001;
-            return 'All interfaces:' + port + ' (local + LAN)';
+            return 'Listening on 0.0.0.0:' + port;
         },
 
-        oscLastMessage() {
-            const history = this.oscStatus?.history || [];
-            if (!history.length) return 'No OSC messages received yet';
-            const last = history[0];
-            if (last.ok) {
-                const cue = last.cue_name ? (' -> ' + last.cue_name) : '';
-                return last.time + ' ' + last.address + cue;
+        oscListenAddresses() {
+            const addresses = this.oscStatus?.listen_addresses || [];
+            if (addresses.length) return addresses;
+            const port = this.oscStatus?.bound?.port || this.oscConfig.port || 53001;
+            const targets = this.oscStatus?.listen_targets || [];
+            return targets.map((target) => `${target.ip}:${port}`);
+        },
+
+        oscPacketStatsLabel() {
+            const total = this.oscStatus?.packets_received || 0;
+            const local = this.oscStatus?.packets_local || 0;
+            const remote = this.oscStatus?.packets_remote || 0;
+            if (!total) return 'No packets received yet';
+            return `${total} total (${local} local, ${remote} LAN)`;
+        },
+
+        oscLanDebugHint() {
+            const local = this.oscStatus?.packets_local || 0;
+            const remote = this.oscStatus?.packets_remote || 0;
+            if (!local || remote > 0) return '';
+            const addresses = this.oscListenAddresses();
+            if (!addresses.length) {
+                return 'Only local OSC packets received so far. From another device, send to this Mac\'s LAN IP (not 127.0.0.1). If LAN packets still do not appear, allow incoming network connections for PrimusCentral in macOS Firewall.';
             }
-            return last.time + ' ' + (last.address || 'Packet') + ' failed: ' + (last.error || 'unsupported command');
+            return `Only local OSC packets received so far. From another device, send to ${addresses.join(' or ')}. If LAN packets still do not appear, allow incoming network connections for PrimusCentral in macOS Firewall.`;
+        },
+
+        oscHistorySource(entry) {
+            if (!entry) return 'unknown';
+            if (entry.local) return 'local ' + (entry.remote || '');
+            return entry.remote || 'unknown';
+        },
+
+        oscHistoryResult(entry) {
+            if (!entry) return '';
+            if (entry.ok) {
+                return entry.cue_name ? ('OK -> ' + entry.cue_name) : 'OK';
+            }
+            return entry.error || 'failed';
         },
 
         formatOscArgs(args) {
