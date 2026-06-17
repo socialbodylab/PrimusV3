@@ -22,5 +22,5 @@ macOS release built from the V4 unified sender (`--product primus`).
 ## SHA-256
 
 ```text
-(checksum added after DMG build)
+190d28231a2d6dae98208c4b71581fe483739bbb53e0fbdaad3aef021fc16f94  PrimusCentral-0.83-macOS-arm64.dmg
 ```
