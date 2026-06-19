@@ -250,6 +250,18 @@ def _write_windows_installer_script(args, app_path, readme_path, build_dir, dist
     script_path = installer_dir / f"{args.name}.iss"
     installer_base_name = _windows_installer_base_name(args)
     setup_icon = icon_path if icon_path is not None else app_path
+    installed_icon_name = f"{args.name}.ico"
+    installed_icon_path = (
+        f"{{app}}\\{_inno_escape(installed_icon_name)}"
+        if icon_path is not None
+        else f"{{app}}\\{_inno_escape(app_path.name)}"
+    )
+    icon_file_entry = ""
+    if icon_path is not None:
+        icon_file_entry = (
+            f'Source: "{_inno_escape(icon_path)}"; DestDir: "{{app}}"; '
+            f'DestName: "{_inno_escape(installed_icon_name)}"; Flags: ignoreversion\n'
+        )
 
     script = rf"""[Setup]
 AppId={WINDOWS_INSTALLER_APP_ID}
@@ -269,18 +281,19 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={{app}}\{_inno_escape(app_path.name)}
+UninstallDisplayIcon={installed_icon_path}
 
 [Files]
 Source: "{_inno_escape(app_path)}"; DestDir: "{{app}}"; Flags: ignoreversion
 Source: "{_inno_escape(readme_path)}"; DestDir: "{{app}}"; Flags: ignoreversion
+{icon_file_entry}
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Icons]
-Name: "{{group}}\{_inno_escape(args.name)}"; Filename: "{{app}}\{_inno_escape(app_path.name)}"
-Name: "{{userdesktop}}\{_inno_escape(args.name)}"; Filename: "{{app}}\{_inno_escape(app_path.name)}"; Tasks: desktopicon
+Name: "{{autoprograms}}\{_inno_escape(args.name)}"; Filename: "{{app}}\{_inno_escape(app_path.name)}"; IconFilename: "{installed_icon_path}"
+Name: "{{userdesktop}}\{_inno_escape(args.name)}"; Filename: "{{app}}\{_inno_escape(app_path.name)}"; IconFilename: "{installed_icon_path}"; Tasks: desktopicon
 
 [Run]
 Filename: "{{app}}\{_inno_escape(app_path.name)}"; Description: "Launch {_inno_escape(args.name)}"; Flags: nowait postinstall skipifsilent

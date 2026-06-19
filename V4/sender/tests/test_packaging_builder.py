@@ -110,6 +110,10 @@ class PackagingBuilderTests(unittest.TestCase):
         self.assertIn("DefaultDirName={localappdata}\\Programs\\PrimusCentral", script)
         self.assertIn(f'Source: "{app_path}"; DestDir: "{{app}}"', script)
         self.assertIn(f'Source: "{readme_path}"; DestDir: "{{app}}"', script)
+        self.assertIn(f'Source: "{icon_path}"; DestDir: "{{app}}"; DestName: "PrimusCentral.ico"', script)
+        self.assertIn("UninstallDisplayIcon={app}\\PrimusCentral.ico", script)
+        self.assertIn('Name: "{autoprograms}\\PrimusCentral"', script)
+        self.assertIn('IconFilename: "{app}\\PrimusCentral.ico"', script)
 
     def test_windows_artifact_signing_uses_signtool_dlib_and_metadata(self):
         calls = []
