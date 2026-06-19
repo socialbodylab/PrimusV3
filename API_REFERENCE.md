@@ -297,9 +297,9 @@ Each Look has two output slots matching the current V3.6 receiver profile contra
 
 ---
 
-## 8. HTTP Control API (V3.6 Sender)
+## 8. HTTP Control API (V4 PrimusCentral Sender)
 
-The V3.6 sender (`V3_6/sender/run.py`) serves a web UI and exposes a JSON API. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
+The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a web UI and exposes a JSON API. The historical V3.6 source tree (`V3_6/sender/run.py`) exposes the same Primus endpoints for comparison. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
 
 ### GET Endpoints
 
@@ -353,11 +353,13 @@ The v0.65 packaged app keeps live output responsive with a `caffeinate -dimsu -w
 
 ### Packaged Sender Build And Release Touchpoints
 
-The API surface above is the same in source and packaged runs. The release build path for the packaged sender is:
+The API surface above is the same in source and packaged runs. The release build path for the packaged PrimusCentral sender is:
 
 ```bash
-python3 V3_6/build_sender_app.py \
+python3 V4/build_sender_app.py \
   --target macos \
+  --product primus \
+  --name PrimusCentral \
   --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
   --notary-profile "PrimusCentral Notary" \
   --notary-timeout 1h
@@ -365,7 +367,7 @@ python3 V3_6/build_sender_app.py \
 
 Build-time overrides are `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime/storage overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`. The macOS timing assertion override is `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1`.
 
-The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V3_6/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V3_6/PACKAGING.md](V3_6/PACKAGING.md).
+The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V4/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V4/PACKAGING.md](V4/PACKAGING.md).
 
 ### POST Endpoints — Device Management
 

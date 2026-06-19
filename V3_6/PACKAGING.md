@@ -1,5 +1,7 @@
 # Packaging V3.6 Sender
 
+> **Current PrimusCentral releases:** Build from [`../V4/PACKAGING.md`](../V4/PACKAGING.md) with `python3 V4/build_sender_app.py --product primus`. This document covers the legacy V3.6 builder only.
+
 The V3.6 sender can be packaged as a one-click macOS app or Windows executable because it is pure Python, serves its own static web UI, and has no runtime dependencies outside the Python standard library.
 
 For the current Windows 11 build handoff, validation checklist, and known platform gaps, see [WINDOWS_BUILD.md](WINDOWS_BUILD.md).

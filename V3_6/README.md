@@ -1,5 +1,7 @@
 # Primus V3.6
 
+> **PrimusCentral shipping track:** New sender development, packaged apps (v0.81+), and PrimusCentral releases use [`../V4/`](../V4/) with `python3 V4/sender/run.py --product primus` and `python3 V4/build_sender_app.py --product primus`. This tree remains the V3.6 protocol/source reference and can still be run from source for comparison.
+
 V3.6 is the compatibility track for running V1, V2, and V3.1 Primus receiver hardware from the current Primus web sender and Art-Net protocol.
 
 The important design choice is that V1 and V2 hardware are not supported through their old runtime protocols. They must be reflashed with V3.6 firmware. After reflashing, every supported board generation speaks the same V3.6 Art-Net, discovery, output-config, IP-config, rename, hello, and FPS telemetry contracts.
@@ -111,7 +113,7 @@ Upload to one or more explicit serial ports:
 
 Use `--ports` to list likely ESP32 serial devices before uploading. Upload commands compile automatically before flashing, so `--compile` is only needed for a verify-only pass. Use `-ssid` and `-pw` to override the firmware's default WiFi credentials for one build without editing source files. Use `--auto` when exactly one ESP32-like device is connected; the script refuses to guess when none or multiple candidates are found. Use `--all` only when every detected ESP32-like candidate should receive the selected profile.
 
-Run the sender:
+Run the sender (historical V3.6 source tree — use [`../V4/`](../V4/) for current PrimusCentral work):
 
 ```sh
 .venv/bin/python V3_6/sender/run.py
@@ -132,7 +134,19 @@ python3 -m unittest discover -s V3_6/sender/tests
 
 The v0.65 release is the baseline for packaged macOS FPS behavior. The bug it fixed only reproduced when `PrimusCentral.app` was launched as a real app bundle through Finder or LaunchServices. Do not use `V3_6/dist/macos/PrimusCentral.app/Contents/MacOS/PrimusCentral` as the primary packaged-performance test path; direct binary execution bypasses the app-bundle scheduler behavior.
 
-Build, sign, notarize, staple, and verify the app with:
+Build, sign, notarize, staple, and verify the app with the **V4** builder (current shipping track):
+
+```sh
+python3 V4/build_sender_app.py \
+	--target macos \
+	--product primus \
+	--name PrimusCentral \
+	--sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+	--notary-profile "PrimusCentral Notary" \
+	--notary-timeout 1h
+```
+
+The release app is written to `V4/dist/macos/PrimusCentral.app`. The legacy V3.6 builder below remains for reference only:
 
 ```sh
 python3 V3_6/build_sender_app.py \
