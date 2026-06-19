@@ -32,6 +32,7 @@ class MixerTimelineWrappingTests(unittest.TestCase):
             "playback": playback,
             "total_duration": 2.0,
             "speed": 1.0,
+            "brightness": 1.0,
         }
 
     def solid_clip_cache(self):
@@ -41,6 +42,7 @@ class MixerTimelineWrappingTests(unittest.TestCase):
                 "duration": 1.0,
                 "playback": "loop",
                 "speed": 1.0,
+                "brightness": 1.0,
                 "start_color": [12, 34, 56],
                 "end_color": [0, 0, 0],
             }

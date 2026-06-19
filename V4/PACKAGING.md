@@ -56,6 +56,126 @@ python3 V4/build_sender_app.py \
 
 Environment overrides: `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`.
 
+## Windows PrimusCentral 0.86
+
+Build Windows releases on Windows. The current PrimusCentral release target is
+the V4 unified sender with the Primus product selected:
+
+```powershell
+py -m pip install -r V4\requirements-build.txt
+py V4\build_sender_app.py --target windows --product primus
+```
+
+Output:
+
+```text
+V4\dist\windows\PrimusCentral.exe
+```
+
+For release distribution, publish a signed installer and a portable ZIP. Do not
+upload the raw executable as a GitHub release asset.
+
+Expected 0.86 assets:
+
+```text
+PrimusCentral-0.86-Windows-x64-Setup.exe
+PrimusCentral-0.86-Windows-x64-Setup.exe.sha256
+PrimusCentral-0.86-Windows-x64.zip
+PrimusCentral-0.86-Windows-x64.zip.sha256
+```
+
+The installer includes `README-Windows.txt`, generated from the tracked
+`V4/PrimusCentral-Windows-README.txt` template. The installer remains
+user-local under `%LOCALAPPDATA%\Programs\PrimusCentral` and does not create
+firewall rules.
+
+### Azure Artifact Signing
+
+Install the required signing and installer tools on the Windows release machine:
+
+```powershell
+winget install -e --id Microsoft.AzureCLI
+winget install -e --id Microsoft.Azure.ArtifactSigningClientTools
+winget install -e --id JRSoftware.InnoSetup
+```
+
+SignTool also needs Windows SDK build tools and .NET 8. Sign in with an account
+that has the **Artifact Signing Certificate Profile Signer** role:
+
+```powershell
+az login
+az account set --subscription "<subscription name or id>"
+```
+
+Create ignored local metadata such as
+`V4\build\windows\signing\metadata.json`:
+
+```json
+{
+  "Endpoint": "https://eus.codesigning.azure.net",
+  "CodeSigningAccountName": "<Artifact Signing account name>",
+  "CertificateProfileName": "<Certificate profile name>",
+  "CorrelationId": "PrimusCentral-0.86"
+}
+```
+
+Build, sign, verify, and create the installer:
+
+```powershell
+py V4\build_sender_app.py --target windows --product primus --windows-installer `
+  --windows-sign-metadata V4\build\windows\signing\metadata.json `
+  --windows-sign-dlib "C:\Path\To\Azure.CodeSigning.Dlib.dll"
+```
+
+Equivalent environment variables:
+
+```powershell
+$env:PRIMUSV3_WINDOWS_SIGN_METADATA = "V4\build\windows\signing\metadata.json"
+$env:PRIMUSV3_ARTIFACT_SIGNING_DLIB = "C:\Path\To\Azure.CodeSigning.Dlib.dll"
+$env:PRIMUSV3_SIGNTOOL = "C:\Path\To\signtool.exe"
+py V4\build_sender_app.py --target windows --product primus --windows-installer
+```
+
+Manual signature checks:
+
+```powershell
+signtool verify /pa /v V4\dist\windows\PrimusCentral.exe
+signtool verify /pa /v V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe
+Get-AuthenticodeSignature V4\dist\windows\PrimusCentral.exe, V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe | Format-List
+```
+
+### ZIP And Checksums
+
+Generate ZIPs and checksums only after signing, because signing mutates the
+binary files:
+
+```powershell
+Remove-Item V4\build\windows\release-staging -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64 | Out-Null
+Copy-Item V4\dist\windows\PrimusCentral.exe V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64\PrimusCentral.exe
+Copy-Item V4\dist\windows\README-Windows.txt V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64\README-Windows.txt
+Compress-Archive -Path V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64 -DestinationPath V4\dist\windows\PrimusCentral-0.86-Windows-x64.zip -Force
+Get-FileHash V4\dist\windows\PrimusCentral-0.86-Windows-x64.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  PrimusCentral-0.86-Windows-x64.zip" } | Set-Content V4\dist\windows\PrimusCentral-0.86-Windows-x64.zip.sha256 -Encoding ASCII
+Get-FileHash V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  PrimusCentral-0.86-Windows-x64-Setup.exe" } | Set-Content V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe.sha256 -Encoding ASCII
+```
+
+### Windows Network Validation
+
+PrimusCentral 0.86 removed the OSC host setting. The listener opens sockets on
+all interfaces, active LAN IPs, and loopback; the Cue Controller shows active
+sockets and a network log. Windows users may still need to allow Defender
+Firewall on the private/show network when the packaged app first uses UDP.
+
+Validate these paths before publishing:
+
+- Local browser UI opens on `127.0.0.1` and does not require a firewall rule.
+- Art-Net discovery/output works on UDP `6454`.
+- Receiver FPS telemetry appears on UDP `6455`.
+- External OSC cue input works from another computer on UDP `53001` by sending
+  to one of the LAN addresses shown in Cue Controller.
+- Cue Controller network log shows active sockets and packet receipts for the
+  OSC test.
+
 ## Legacy V3_6 PrimusCentral
 
 `V3_6/build_sender_app.py` still produces the prior release-line app for comparison. **New PrimusCentral builds should use V4** with `--product primus`.

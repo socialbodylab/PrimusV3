@@ -120,8 +120,9 @@ class ServerAudioRouteTests(unittest.TestCase):
         args = mock_upload.call_args[0]
         self.assertEqual(args[1], "/cues.json")
 
+    @patch.object(server.Handler, "_sync_artnet_source", return_value=None)
     @patch.object(RadiusState, "hello_device", return_value=True)
-    def test_hello_device(self, mock_hello):
+    def test_hello_device(self, mock_hello, _mock_sync):
         status, _ = _http(
             "POST",
             f"{self.base}/api/hello_device",

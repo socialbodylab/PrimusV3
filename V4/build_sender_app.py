@@ -49,6 +49,7 @@ WINDOWS_ICON_SOURCE = APP_ICON_SOURCE
 WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 WINDOWS_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
 WINDOWS_INSTALLER_APP_ID = "{{E8573E10-0D2C-4C6E-91C8-D1F5927A9328}"
+WINDOWS_README_SOURCE = Path("PrimusCentral-Windows-README.txt")
 DEFAULT_APP_VERSION = "0.86"
 DEFAULT_MACOS_ENTITLEMENTS = Path(__file__).resolve().parent / "macos" / "PrimusCentral.entitlements"
 
@@ -221,6 +222,16 @@ def _find_inno_setup_compiler(inno_setup_compiler=None):
         if candidate.exists():
             return candidate
     raise RuntimeError("Inno Setup Compiler was not found. Install Inno Setup 6 or pass --windows-installer-tool.")
+
+
+def _prepare_windows_readme(v4_dir, dist_dir):
+    source = v4_dir / WINDOWS_README_SOURCE
+    if not source.exists():
+        raise RuntimeError(f"Windows README source not found: {source}")
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    output = dist_dir / "README-Windows.txt"
+    shutil.copyfile(source, output)
+    return output
 
 
 def _inno_escape(value):
@@ -678,6 +689,8 @@ def main(argv=None):
             icon_path = _prepare_macos_icon(v35_dir, build_dir, args.name)
         if icon_path is None and args.target == "windows":
             icon_path = _prepare_windows_icon(v35_dir, build_dir, args.name)
+        if args.target == "windows" and args.windows_installer:
+            windows_readme_path = _prepare_windows_readme(v35_dir, dist_dir)
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"Could not prepare app icon: {exc}")
         return 1

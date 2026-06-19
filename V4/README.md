@@ -99,7 +99,13 @@ python3 V4/build_sender_app.py --target macos --product radius --name RadiusCent
 python3 V4/build_sender_app.py --target macos --product primus --name PrimusCentral
 ```
 
-Output: `V4/dist/macos/PrimusCentral.app` or `RadiusCentral.app`  
+Windows release build:
+
+```powershell
+py V4\build_sender_app.py --target windows --product primus --windows-installer
+```
+
+Output: `V4/dist/macos/PrimusCentral.app`, `RadiusCentral.app`, or `V4\dist\windows\PrimusCentral.exe`
 Bundle IDs: `com.socialbodylab.PrimusCentral` / `com.socialbodylab.RadiusCentral`
 
 See [PACKAGING.md](PACKAGING.md) for signing and release details.
