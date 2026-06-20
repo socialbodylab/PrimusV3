@@ -14,6 +14,7 @@ V3_1/sender/.primus_state.json
 V3_5/sender/.primus_state.json
 V3_6/sender/.primus_state.json
 sender/.primus_state.json
+V3_6/sender/audio_cues.json
 
 # Packaging outputs
 V3_5/build/

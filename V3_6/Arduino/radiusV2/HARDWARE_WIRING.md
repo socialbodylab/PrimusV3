@@ -1,21 +1,133 @@
 # PrimusV3 Hardware Wiring — Radius V2
 
-Wiring guide for the Radius V2 audio node: ESP32-S3 Reverse TFT Feather + Music Maker FeatherWing.
+Wiring guide for the Radius V2 audio node. Two variants share the same Feather + Music Maker core.
+
+- **Variant A — Headphone / Line-Out:** uses the Music Maker headphone jack directly for headphones or powered speakers
+- **Variant B — Amplifier:** adds a MAX9744 Class D amp and passive speakers via TS sockets
 
 ---
 
 ## Boards
 
-| Board                        | Adafruit Product                               | Role                                     |
-|------------------------------|------------------------------------------------|------------------------------------------|
-| ESP32-S3 Reverse TFT Feather | [#5691](https://www.adafruit.com/product/5691) | Main controller (WiFi, Art-Net, display) |
-| Music Maker FeatherWing      | [#3357](https://www.adafruit.com/product/3357) | VS1053 codec + microSD card (stacks on Feather) |
+| Board                        | Adafruit Product                               | Role                                              | Variant |
+|------------------------------|------------------------------------------------|---------------------------------------------------|---------|
+| ESP32-S3 Reverse TFT Feather | [#5691](https://www.adafruit.com/product/5691) | Main controller (WiFi, Art-Net, display)          | A, B    |
+| Music Maker FeatherWing      | [#3357](https://www.adafruit.com/product/3357) | VS1053 codec + microSD (stacks on Feather)        | A, B    |
+| FeatherWing Doubler          | [#2890](https://www.adafruit.com/product/2890) | Side-by-side board mounting                       | B       |
+| MAX9744 20W Stereo Amplifier | [#1752](https://www.adafruit.com/product/1752) | Class D stereo amp, I2C volume control            | B       |
+| Speaker 3 in 4 Ω 3 W        | [#1314](https://www.adafruit.com/product/1314) | Passive speaker, 4 Ω, bare wire leads             | B       |
+
+---
+
+## System Wiring Overview
+
+---
+
+### Variant B — Amplifier Build
+
+Feather + Music Maker mounted side-by-side on the Doubler. MAX9744 is off-board, connected by short wires. Each speaker channel uses its own mono TS socket.
+
+```
+    ┌──────────────────────────────────────────────────────────────┐
+    │  FeatherWing Doubler  (#2890)                                │
+    │                                                              │
+    │  ┌───────────────────────────┬──────────────────────────┐   │
+    │  │  Slot A                   │  Slot B                  │   │
+    │  │  ESP32-S3 Reverse TFT     │  Music Maker FeatherWing │   │
+    │  │  Feather  #5691           │  #3357                   │   │
+    │  └───────────────────────────┴──────────────┬───────────┘   │
+    │      │ SDA  GPIO3                           │ 3.5mm out     │
+    │      │ SCL  GPIO4                           │               │
+    │      │ 3V                                   │               │
+    │      │ GND                                  │               │
+    └──────┼──────────────────────────────────────┼───────────────┘
+           │                                      │
+           │  4 × I2C wires                       │  3.5mm stereo cable
+           │                                      │
+           ▼                                      ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  MAX9744  #1752  —  20W Class D Stereo Amplifier             │
+    │                                                              │
+    │    ← SDA   ← SCL   ← Vi2c (3 V)   ← GND                    │
+    │    ← 3.5mm audio in                                          │
+    │    → Left+   → Left−                                         │
+    │    → Right+  → Right−                                        │
+    │    ← 5 V DC  ≥ 2 A   2.1mm barrel  centre +                 │
+    └───────────┬──────────────────────────┬───────────────────────┘
+                │ Left channel             │ Right channel
+                ▼                          ▼
+    ┌──────────────────────┐   ┌──────────────────────┐
+    │  TS socket  (mono)   │   │  TS socket  (mono)   │
+    │  Tip   = Left+       │   │  Tip   = Right+      │
+    │  Sleeve= Left−  *    │   │  Sleeve= Right−  *   │
+    └─────────┬────────────┘   └─────────┬────────────┘
+              ↓ speaker wire             ↓ speaker wire
+    ┌──────────────────────────────────────────────────────────────┐
+    │  Speaker(s)  #1314  —  3 in · 4 Ω · 3 W · bare wire leads  │
+    └──────────────────────────────────────────────────────────────┘
+
+    * Sleeve carries Left−/Right− (BTL driven output), NOT system ground.
+      Do not connect sleeve to chassis or audio ground anywhere on the cable.
+```
+
+**Power:** Use 5 V for the #1314 speaker (rated 3 W); higher voltages exceed its power rating. The MAX9744 delivers approximately 2–3 W into 4 Ω at 5 V. Keep volume at or below 80 %.
+
+**TS socket rule:** Each BTL channel requires its own mono TS socket. Do not use a single stereo TRS socket for both channels — the shared TRS sleeve would short Left− to Right−, bridging two BTL half-outputs and potentially damaging the amp.
+
+### Connection Summary — Variant B
+
+| From | Signal | To |
+|---|---|---|
+| Music Maker 3.5mm jack | Stereo audio out | MAX9744 3.5mm input |
+| Feather SDA  (GPIO3) | I²C data | MAX9744 pin 4 — SDA |
+| Feather SCL  (GPIO4) | I²C clock | MAX9744 pin 5 — SCL |
+| Feather 3V | Logic reference | MAX9744 pin 6 — Vi2c |
+| Feather GND | Ground | MAX9744 pin 13 — GND |
+| MAX9744 Left+  terminal | Speaker + | TS socket tip (left) |
+| MAX9744 Left−  terminal | Speaker − | TS socket sleeve (left, NOT ground) |
+| MAX9744 Right+ terminal | Speaker + | TS socket tip (right) |
+| MAX9744 Right− terminal | Speaker − | TS socket sleeve (right, NOT ground) |
+| 5 V DC supply  (≥ 2 A) | Amplifier power | MAX9744 barrel jack |
+
+---
+
+### Variant A — Headphone / Line-Out Build
+
+No amplifier. Feather stacks directly on the Music Maker — no Doubler required. The VS1053 headphone jack drives headphones directly or feeds a line-level input (powered speaker, mixer, audio interface).
+
+```
+    ┌──────────────────────────────────────────────────────────────┐
+    │  ESP32-S3 Reverse TFT Feather  (#5691)                      │
+    │  +  Music Maker FeatherWing  (#3357)  (stacked)             │
+    │                                                              │
+    │  VS1053  →  [3.5mm headphone jack]                          │
+    └────────────────────────────────────┬─────────────────────────┘
+                                         │  3.5mm TRS cable or short wire
+                                         ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │  Panel-mount 3.5mm TRS socket                               │
+    │  Tip = Left  ·  Ring = Right  ·  Sleeve = GND              │
+    └──────────────────────────────────────────────────────────────┘
+    Plug in stereo headphones or run a cable to a powered speaker or line input.
+    Standard TRS wiring is correct here — VS1053 output is single-ended, not BTL.
+```
+
+### Connection Summary — Variant A
+
+| From | Signal | To |
+|---|---|---|
+| Music Maker 3.5mm jack | Stereo audio out | Panel-mount TRS socket or headphone plug |
+| Socket Tip | Left channel | Headphone / line L |
+| Socket Ring | Right channel | Headphone / line R |
+| Socket Sleeve | Ground | Headphone / line GND |
 
 ---
 
 ## Adafruit ESP32-S3 Reverse TFT Feather (#5691)
 
 **Form factor:** Standard Feather (12-pin side + 16-pin side). TFT display faces the back/bottom of the board.
+
+> **L/R orientation note:** This diagram labels the VBAT/D-pins/SCL/SDA row as **L** (12 pins) and the RST/3V/GND/A-pins row as **R** (16 pins). Adafruit's official SVG uses the opposite convention (their "Right" = the VBAT/12-pin side). GPIO numbers are identical regardless of label convention.
 
 ```
      Adafruit ESP32-S3 Reverse TFT Feather (#5691)
@@ -117,7 +229,7 @@ The Music Maker's 4 control pins land on different GPIOs depending on which Feat
 | VS1053 DCS  | D10           | 10   | L7              |
 | VS1053 DREQ | D9            | 9    | L8              |
 | SD CS       | D5            | 5    | L10             |
-| MOSI        | MOSI          | 35   | L12             |
+| MOSI        | MOSI          | 35   | R12             |
 | MISO        | MISO          | 37   | R13             |
 | SCK         | SCK           | 36   | R11             |
 
@@ -156,6 +268,199 @@ _musicMaker.setVolume(vs1053vol, vs1053vol);  // left, right
 
 ---
 
+---
+
+## Adafruit 20W Stereo Amplifier — MAX9744 (#1752)
+
+The MAX9744 is a Class D stereo amplifier that takes the line-level stereo output from the Music Maker FeatherWing headphone jack and drives 4–8Ω speakers at up to 20W per channel (with 12V supply). Volume is controlled digitally over I2C from the ESP32-S3.
+
+**Signal chain:** Music Maker FeatherWing 3.5mm out → MAX9744 3.5mm in → BTL speaker terminals → speakers (4–8Ω)
+
+---
+
+### Board Jumper Configuration (I2C / digital mode)
+
+The MAX9744 ships in I2C (digital) mode by default. Keep it in this mode for firmware volume control:
+
+- **Analog, AD1, AD2 jumpers: leave OPEN** — closing any of these switches to analog potentiometer mode and disables I2C
+- **Do not install the potentiometer** — the Pot Vol pads are only used in analog mode
+
+To change the I2C address from the default 0x4B, close **one** of the address jumpers:
+
+| AD1 | AD2 | I2C Address |
+|-----|-----|-------------|
+| Open | Open | 0x4B (default) |
+| Closed | Open | 0x4A |
+| Open | Closed | 0x49 |
+
+---
+
+### Audio Input
+
+Two options — use whichever is easier to wire:
+
+**Option A — 3.5mm cable (simplest)**
+
+Connect a 3.5mm stereo male-to-male cable from the Music Maker FeatherWing headphone jack to the MAX9744 input jack.
+
+**Option B — Terminal block wiring**
+
+Solder in the 3-pin audio input terminal block on the MAX9744 and wire from the Music Maker line-level breakout pads:
+
+| Music Maker Pad | MAX9744 Terminal | Signal |
+|-----------------|------------------|--------|
+| Left            | LIN              | Left channel |
+| Right           | RIN              | Right channel |
+| Ground          | AGND             | Analog ground |
+
+The Music Maker Left/Right/Ground pads are on the headphone-out version (#3357), located next to the 3.5mm headphone jack. These are AC-coupled line-level outputs.
+
+---
+
+### I2C Wiring — MAX9744 → ESP32-S3 Feather
+
+Solder or wire to the MAX9744 breakout header row (bottom edge of the board). The Music Maker uses SPI only, so I2C pins SDA/SCL are free.
+
+| MAX9744 Pin | ESP32-S3 Feather Label | GPIO | Notes |
+|-------------|------------------------|------|-------|
+| SDA         | SDA                    | 3    | I2C data |
+| SCL         | SCL                    | 4    | I2C clock |
+| Vi2c        | 3V                     | —    | I2C logic reference — **required**, connect to 3.3V |
+| GND         | GND                    | —    | Common ground |
+
+The SDA/SCL pins are also available on the STEMMA QT connector on the ESP32-S3 Feather.
+
+---
+
+### Speaker Outputs
+
+Solder in the two 2-pin blue speaker terminal blocks on the MAX9744. Connect 4–8Ω speakers to the Left and Right BTL output pairs, either directly or via panel-mount TS sockets.
+
+The outputs are Bridge-Tied-Load (BTL): **do not connect the outputs to another amplifier** and do not bridge the two channels together.
+
+**Using TS sockets (detachable speakers):** Wire each BTL channel to its own panel-mount 3.5mm mono TS socket — Tip to channel+, Sleeve to channel−. The sleeve carries the driven BTL negative output; it must not be connected to chassis or audio ground anywhere on the cable. Use one TS socket per channel. Do not use a stereo TRS socket to carry both channels — the shared TRS sleeve would short Left− to Right−.
+
+---
+
+### Power
+
+The MAX9744 is powered separately from the Feather stack — the Feather 3V/5V rails cannot supply amplifier current. Connect a supply to the MAX9744 DC barrel jack (2.1mm, center-positive) or the power terminal block.
+
+| Supply Voltage | Power per channel (4Ω) | Power per channel (8Ω) |
+|----------------|------------------------|------------------------|
+| 5V             | 3.6W                   | 1.8W                   |
+| 8V             | ~8W                    | ~5W                    |
+| 12V            | 17W                    | 10W                    |
+| 14V            | 22W                    | 13W                    |
+
+For full 20W output, use a 12–14V supply rated for at least 2A per channel. The Feather VBUS (5V USB) is only suitable for low-volume use with small speakers.
+
+---
+
+### Pin Definitions in `config.h`
+
+```cpp
+// MAX9744 I2C volume control — ESP32-S3 Reverse TFT Feather
+#define MAX9744_I2C_ADDR  0x4B  // Default (AD1 and AD2 open)
+// SDA = GPIO3 (Feather SDA), SCL = GPIO4 (Feather SCL) — Wire library defaults
+```
+
+### Volume Control
+
+The MAX9744 accepts a single I2C byte (0–63) for 64-step volume control. 0 = minimum, 63 = maximum (29.5 dB gain). Wire the call after `Wire.begin()`:
+
+```cpp
+bool setAmplifierVolume(uint8_t v) {
+    if (v > 63) v = 63;
+    Wire.beginTransmission(MAX9744_I2C_ADDR);
+    Wire.write(v);
+    return Wire.endTransmission() == 0;
+}
+```
+
+To map the firmware 0–100 UI range to the MAX9744 0–63 scale:
+
+```cpp
+uint8_t ampVol = (uint8_t)(volume * 63 / 100);
+setAmplifierVolume(ampVol);
+```
+
+This can be called at any time without interrupting playback. The VS1053 and MAX9744 volume controls are independent — use either or both.
+
+---
+
+### Doubler Build — Connecting MAX9744 Volume Control
+
+The FeatherWing Doubler (#2890) places the ESP32-S3 Feather and Music Maker FeatherWing side-by-side. All pins are cross-connected between the two Feather slots. Every header pin also has a duplicate through-hole next to it — solder the 4 short wires to those holes rather than to the header pins themselves, so the boards seat cleanly.
+
+The MAX9744 is not a FeatherWing and does not plug into the doubler. It lives off-board, connected by 4 short hookup wires (~10–15 cm) running from the doubler's breakout holes to the MAX9744 I2C breakout header on the bottom edge of that board.
+
+#### MAX9744 board layout
+
+```
+     Adafruit MAX9744 20W Stereo Amplifier (#1752) — top view
+     ┌──────────────────[2.1mm DC Barrel  5–14V]──────────────────┐
+     │                                              ○  cap pad    │
+     │  Pot.Vol ○ ○ ○   [Analog]○  [AD1]○  [AD2]○               │
+     │            solder jumpers — leave ALL open for I2C mode    │
+     │                                             Left+  ──○    │
+ ════╪═[3.5mm audio in]════════[MAX9744]═══════════Left-  ──○    │
+     │                                             Right+ ──○    │
+     │                                             Right- ──○    │
+     ├────────────────────────────────────────────────────────────┤
+     │   1    2    3    4    5    6    7    8  ···  13   14       │
+     │   ○    ○    ○    ○    ○    ○    ○    ○       ○    ○       │
+     │  RIN  LIN  AGND  SDA  SCL Vi2c SHDN MUTE … GND  VDD      │
+     │                  ↑    ↑    ↑              ↑               │
+     │                  └────┴────┴── I2C ───────┘               │
+     └────────────────────────────────────────────────────────────┘
+     Speaker terminals are BTL — 4–8 Ω speakers only, never another amplifier.
+     AD1, AD2, and Analog jumpers must remain OPEN (factory default = I2C mode).
+```
+
+Pin 4 (SDA), pin 5 (SCL), pin 6 (Vi2c), and pin 13 (GND) are the four connections needed for I2C volume control. The remaining breakout pins (SHDN, MUTE, SYNC, AD1, AD2, VDD) are not connected for this build.
+
+#### FeatherWing Doubler — tap points
+
+The doubler places both Feather slots with their USB/RST ends at the same edge (top). The 12-pin rows (VBAT → SDA) run along the outer long edges; the 16-pin rows (RST → TXD0) face inward toward the proto area.
+
+```
+     Adafruit FeatherWing Doubler (#2890) — tap points for MAX9744
+
+     ← USB / RST end (top of both slots) ──────────────────────────
+     
+     Outer left edge — 12-pin    Inner left edge — 16-pin
+     (Slot A: ESP32-S3 Feather)  (Slot A: ESP32-S3 Feather)
+     ─────────────────────────   ──────────────────────────────────
+     VBAT   L1  ○                RST   R1  ○
+       EN   L2  ○                 3V   R2  ○ ◄── tap here → MAX9744 Vi2c
+     VBUS   L3  ○                 3V   R3  ○
+      D13   L4  ○                GND   R4  ○ ◄── tap here → MAX9744 GND
+      D12   L5  ○                 A0   R5  ○
+      D11   L6  ○                 A1   R6  ○
+      D10   L7  ○                 A2   R7  ○  ┐
+       D9   L8  ○                 A3   R8  ○  │  [proto holes area]
+       D6   L9  ○                 A4   R9  ○  │
+       D5   L10 ○                 A5   R10 ○  ┘
+      SCL   L11 ○ ◄── tap here → MAX9744 SCL
+      SDA   L12 ○ ◄── tap here → MAX9744 SDA
+```
+
+The duplicate through-holes for each pin are in the rows alongside the headers. R2 (3V) and R4 (GND) sit near the USB end of the inner row; L11 (SCL) and L12 (SDA) sit at the far end of the outer row. All four are on the same side (Slot A / left half of the doubler).
+
+#### 4-wire connection table
+
+| Doubler position | Signal | MAX9744 pin |
+|-----------------|--------|-------------|
+| L12 outer (SDA) | I2C data | 4 — SDA |
+| L11 outer (SCL) | I2C clock | 5 — SCL |
+| R2 inner (3V) | Logic reference | 6 — Vi2c |
+| R4 inner (GND) | Ground | 13 — GND |
+
+Solder to the duplicate through-holes beside the header on the doubler — not to the header pins themselves.
+
+---
+
 ## References
 
 | Source | URL / Path |
@@ -163,6 +468,7 @@ _musicMaker.setVolume(vs1053vol, vs1053vol);  // left, right
 | Music Maker FeatherWing overview | https://learn.adafruit.com/adafruit-music-maker-featherwing |
 | Music Maker FeatherWing pinouts | https://learn.adafruit.com/adafruit-music-maker-featherwing/pinouts |
 | VS1053B datasheet | https://www.vlsi.fi/fileadmin/datasheets/vs1053.pdf |
+| MAX9744 20W amplifier guide | https://learn.adafruit.com/adafruit-20w-stereo-audio-amplifier-class-d-max9744 |
 | ESP32-S3 Reverse TFT Feather pinout | https://learn.adafruit.com/esp32-s3-reverse-tft-feather/pinouts |
 | ESP32-S3 Reverse TFT Feather Fritzing part (physical layout) | https://github.com/adafruit/Fritzing-Library/blob/master/parts/Adafruit%20ESP32-S3%20Reverse%20TFT%20Feather.fzpz |
 | ESP32-S3 Reverse TFT Feather official pinout SVG | https://github.com/adafruit/Adafruit-ESP32-S3-Reverse-TFT-Feather-PCB/blob/main/Adafruit_ESP32-S3_Reverse_TFT_Feather_Pinout.svg |
@@ -263,7 +569,7 @@ Position counting:
 
 ## Adafruit PCM5102 Stereo I2S DAC (#6250)
 
-**Status:** Researched but not tested in firmware. Line-level output — requires powered speakers or amplifier.
+**Status:** Researched but not tested in firmware. Line-level output — requires powered speakers or amplifier. The active amplifier path for this project uses the Music Maker + MAX9744; the PCM5102 is kept here as an alternative I2S DAC option if the VS1053 path is ever replaced.
 
 **Form factor:** Small breakout board (32.5 × 20.3 mm) with 3.5mm stereo jack and solder pads. Cannot drive headphones directly (minimum 1 kΩ load).
 

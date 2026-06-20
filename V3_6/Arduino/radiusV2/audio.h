@@ -160,14 +160,17 @@ void audioBootTest() {
   if (!root) { Serial.println("[Boot] Failed to open SD root"); return; }
   while (true) {
     File entry = root.openNextFile();
-    if (!entry) { Serial.println("[Boot] No files found on SD"); break; }
+    if (!entry) { Serial.println("[Boot] No WAV files found on SD"); break; }
     if (!entry.isDirectory()) {
-      strncpy(filename, entry.name(), 32);
-      entry.close();
-      root.close();
-      Serial.print("[Boot] Playing: "); Serial.println(filename);
-      audioPlay(filename, 80);
-      return;
+      const char* ext = strrchr(entry.name(), '.');
+      if (ext && strcasecmp(ext, ".wav") == 0) {
+        strncpy(filename, entry.name(), 32);
+        entry.close();
+        root.close();
+        Serial.print("[Boot] Playing: "); Serial.println(filename);
+        audioPlay(filename, 60, 2);
+        return;
+      }
     }
     entry.close();
   }

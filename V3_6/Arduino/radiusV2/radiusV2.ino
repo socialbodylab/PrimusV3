@@ -466,6 +466,7 @@ void handleD1Press() {
       break;
     case 4:  // SD screen — retry init
       audioSdInit();
+      if (audioSdIsReady() && !ftpIsRunning()) ftpStart();
       displaySdStatus(audioSdIsReady(), sdFileCount());
       break;
     default:
@@ -515,9 +516,12 @@ void setup() {
   cuesLoad();
   audioBootTest();
 
-  // FTP — start immediately at boot; always available
+  // If SD is missing, show the SD error screen immediately so it's obvious
+  if (!audioSdIsReady()) displaySdStatus(false, 0);
+
+  // FTP — only start if SD is ready (nothing to serve without it)
   ftpInit();
-  ftpStart();
+  if (audioSdIsReady()) ftpStart();
 
   lastFpsTime = millis();
 

@@ -15,9 +15,15 @@
 #include <Arduino.h>
 
 // =====================================================================
-//  Firmware Info
+//  Firmware Version  — edit _H / _L / _PATCH here only
 // =====================================================================
-#define FIRMWARE_VERSION "3.2.0"
+#define FIRMWARE_VERSION_H     3
+#define FIRMWARE_VERSION_L     6
+#define FIRMWARE_VERSION_PATCH 0
+
+#define _FW_STR_HELPER(x) #x
+#define _FW_STR(x)        _FW_STR_HELPER(x)
+#define FIRMWARE_VERSION  _FW_STR(FIRMWARE_VERSION_H) "." _FW_STR(FIRMWARE_VERSION_L) "." _FW_STR(FIRMWARE_VERSION_PATCH)
 
 // =====================================================================
 //  Target Board Selection  (compile-time switch)
@@ -100,8 +106,6 @@
 #else
   #define DEVICE_LONG_NAME "Radius V2"
 #endif
-#define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 2
 #define OEM_CODE           0xFFFF
 #define ESTA_CODE          0x0000
 
