@@ -2,9 +2,8 @@
  * buttons.h — PrimusV3 Button Handler
  * ===========================================
  * D0 (active-LOW):  Cycle TFT info screens
- * D1 (active-HIGH): Context action — audio test on screen 2, FTP toggle on screen 3
- *
- * D2 / brightness cycling has been removed — brightness is locked to 255.
+ * D1 (active-HIGH): Context action — varies by screen
+ * D2 (active-HIGH): Context action — varies by screen (ESP32-S3 only)
  */
 
 #ifndef BUTTONS_H
@@ -15,14 +14,15 @@
 // =====================================================================
 //  State
 // =====================================================================
-static bool lastBtnState[2] = { false, false };
-static const uint8_t btnPins[2] = { BTN_D0, BTN_D1 };
+static bool lastBtnState[3] = { false, false, false };
+static const uint8_t btnPins[3] = { BTN_D0, BTN_D1, BTN_D2 };
 
 // =====================================================================
 //  Actions — set by button presses, consumed by main loop
 // =====================================================================
 volatile bool btnScreenCycle = false;   // D0 pressed
 volatile bool btnD1          = false;   // D1 pressed — context action
+volatile bool btnD2          = false;   // D2 pressed — context action
 
 // =====================================================================
 //  Init
@@ -30,6 +30,7 @@ volatile bool btnD1          = false;   // D1 pressed — context action
 void buttonsInit() {
   pinMode(BTN_D0, INPUT_PULLUP);     // D0: active-LOW
   pinMode(BTN_D1, INPUT_PULLDOWN);   // D1: active-HIGH
+  pinMode(BTN_D2, INPUT_PULLDOWN);   // D2: active-HIGH
 }
 
 // =====================================================================
@@ -37,7 +38,7 @@ void buttonsInit() {
 // =====================================================================
 static bool readButton(uint8_t index) {
   bool raw = digitalRead(btnPins[index]);
-  // D0 is active-LOW → invert; D1 is active-HIGH → use as-is
+  // D0 is active-LOW → invert; D1/D2 are active-HIGH → use as-is
   return (index == 0) ? !raw : raw;
 }
 
@@ -45,11 +46,12 @@ static bool readButton(uint8_t index) {
 //  Poll — call once per loop iteration
 // =====================================================================
 void buttonsPoll() {
-  for (uint8_t i = 0; i < 2; i++) {
+  for (uint8_t i = 0; i < 3; i++) {
     bool pressed = readButton(i);
     if (pressed && !lastBtnState[i]) {
-      if (i == 0) btnScreenCycle = true;
-      else        btnD1          = true;
+      if      (i == 0) btnScreenCycle = true;
+      else if (i == 1) btnD1          = true;
+      else             btnD2          = true;
     }
     lastBtnState[i] = pressed;
   }

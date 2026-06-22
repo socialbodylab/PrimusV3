@@ -25,6 +25,7 @@ ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
 ARTNET_OPCODE_IP_CONFIG     = 0x8200  # V3.x LED nodes
 ARTNET_OPCODE_AUDIO_CMD     = 0x8300  # V3.2 Radius audio nodes
 ARTNET_OPCODE_FTP_CMD       = 0x8301  # V3.2 Radius audio nodes
+ARTNET_OPCODE_AUDIO_STATUS  = 0x8302  # V3.2 Radius: unsolicited playback status
 
 # Audio command values for send_audio_cmd()
 AUDIO_CMD_STOP      = 0
@@ -148,6 +149,7 @@ class FpsListener:
     def __init__(self):
         self.lock = threading.Lock()
         self.data = {}
+        self.audio_status = {}
         self.running = True
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -170,19 +172,34 @@ class FpsListener:
                 raw, addr = self._sock.recvfrom(64)
             except socket.timeout:
                 continue
-            if len(raw) < 7 or raw[:3] != FPS_MAGIC:
-                continue
-            fps = (raw[3] << 8) | raw[4]
-            pkt = (raw[5] << 8) | raw[6]
-            with self.lock:
-                self.data[addr[0]] = {
-                    "fps": fps, "pkt_rate": pkt, "ts": time.monotonic()
-                }
+            if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
+                fps = (raw[3] << 8) | raw[4]
+                pkt = (raw[5] << 8) | raw[6]
+                with self.lock:
+                    self.data[addr[0]] = {
+                        "fps": fps, "pkt_rate": pkt, "ts": time.monotonic()
+                    }
+            elif len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
+                opcode = struct.unpack("<H", raw[8:10])[0]
+                if opcode == ARTNET_OPCODE_AUDIO_STATUS:
+                    status = raw[12]
+                    filename = raw[13:45].split(b'\x00')[0].decode("ascii", errors="replace") if len(raw) > 13 else ""
+                    with self.lock:
+                        self.audio_status[addr[0]] = {
+                            "status": status, "filename": filename, "ts": time.monotonic()
+                        }
 
     def get(self, ip):
         with self.lock:
             entry = self.data.get(ip)
             if entry and (time.monotonic() - entry["ts"]) < 5.0:
+                return dict(entry)
+        return None
+
+    def get_audio_status(self, ip):
+        with self.lock:
+            entry = self.audio_status.get(ip)
+            if entry and (time.monotonic() - entry["ts"]) < 30.0:
                 return dict(entry)
         return None
 

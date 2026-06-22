@@ -83,6 +83,10 @@ unsigned long packetCount  = 0;
 // ── Screen cycling ───────────────────────────────────────────────────
 uint8_t infoScreenIndex = 0;
 
+// ── SD screen file selection ─────────────────────────────────────────
+char     sdSelectedFile[33] = {0};
+uint16_t sdCachedFileCount  = 0;
+
 // =====================================================================
 //  NVS helpers
 // =====================================================================
@@ -329,7 +333,10 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   }
 
   if (infoScreenIndex == 2)
-    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+    displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
+
+  // Report status back to sender for UI update
+  sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
 }
 
 // =====================================================================
@@ -425,6 +432,65 @@ void sendFpsTelemetry(uint16_t pktRate) {
 }
 
 // =====================================================================
+//  SD screen file navigation
+// =====================================================================
+
+void sdScreenLoadFile(bool advance) {
+  if (!audioSdIsReady()) return;
+
+  char firstFile[33] = {0};
+  char afterFile[33] = {0};
+  bool seenCurrent   = false;
+
+  File root = SD.open("/");
+  if (!root) return;
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) break;
+    if (!entry.isDirectory()) {
+      const char* ext = strrchr(entry.name(), '.');
+      if (ext && strcasecmp(ext, ".wav") == 0) {
+        const char* n = entry.name();
+        if (firstFile[0] == '\0') strncpy(firstFile, n, 32);
+        if (advance && seenCurrent && afterFile[0] == '\0') strncpy(afterFile, n, 32);
+        if (strcasecmp(n, sdSelectedFile) == 0) seenCurrent = true;
+      }
+    }
+    entry.close();
+  }
+  root.close();
+
+  if (!advance || sdSelectedFile[0] == '\0') {
+    strncpy(sdSelectedFile, firstFile, 32);
+  } else if (afterFile[0] != '\0') {
+    strncpy(sdSelectedFile, afterFile, 32);
+  } else {
+    strncpy(sdSelectedFile, firstFile, 32);  // wrap around
+  }
+  sdSelectedFile[32] = '\0';
+}
+
+// =====================================================================
+//  ArtAudioStatus — unsolicited playback status to sender (opcode 0x8302)
+// =====================================================================
+
+void sendAudioStatus(uint8_t status, const char* filename) {
+  if (!senderKnown || !wifiConnected) return;
+  uint8_t buf[46];
+  memset(buf, 0, sizeof(buf));
+  memcpy(buf, ARTNET_MAGIC, 8);
+  buf[8]  = ARTNET_OPCODE_AUDIO_STATUS & 0xFF;
+  buf[9]  = (ARTNET_OPCODE_AUDIO_STATUS >> 8) & 0xFF;
+  buf[10] = 0x00;
+  buf[11] = 0x0E;
+  buf[12] = status;
+  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 32);
+  udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
+  udpFps.write(buf, 46);
+  udpFps.endPacket();
+}
+
+// =====================================================================
 //  Button Handlers
 // =====================================================================
 
@@ -448,8 +514,13 @@ void handleScreenCycle() {
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
       break;
     case 4:
-      audioSdInit();
-      displaySdStatus(audioSdIsReady(), sdFileCount());
+      if (audioSdIsReady() && sdSelectedFile[0] == '\0') {
+        sdCachedFileCount = sdFileCount();
+        sdScreenLoadFile(false);
+      }
+      displaySdStatus(audioSdIsReady(), sdCachedFileCount, sdSelectedFile,
+                      audioIsPlaying() && sdSelectedFile[0] != '\0' &&
+                      strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
       break;
   }
 }
@@ -458,16 +529,49 @@ void handleD1Press() {
   switch (infoScreenIndex) {
     case 2:  // Audio screen — play test tone
       audioTestTone();
-      displayAudioStatus("TEST TONE", _audioVolume, true);
+      displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
       break;
     case 3:  // FTP screen — toggle FTP server
       if (ftpIsRunning()) ftpStop(); else ftpStart();
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
       break;
-    case 4:  // SD screen — retry init
-      audioSdInit();
-      if (audioSdIsReady() && !ftpIsRunning()) ftpStart();
-      displaySdStatus(audioSdIsReady(), sdFileCount());
+    case 4:  // SD screen — play/stop selected file (or retry init if SD missing)
+      if (!audioSdIsReady()) {
+        audioSdInit();
+        if (audioSdIsReady()) {
+          sdCachedFileCount = sdFileCount();
+          sdScreenLoadFile(false);
+          if (!ftpIsRunning()) ftpStart();
+        }
+      } else if (sdSelectedFile[0] != '\0') {
+        bool selectedPlaying = audioIsPlaying() &&
+                               strcasecmp(audioCurrentFile(), sdSelectedFile) == 0;
+        if (selectedPlaying) {
+          audioStop();
+          sendAudioStatus(0, "");
+        } else {
+          audioPlay(sdSelectedFile, _audioVolume);
+          sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
+        }
+      }
+      displaySdStatus(audioSdIsReady(), sdCachedFileCount, sdSelectedFile,
+                      audioIsPlaying() && sdSelectedFile[0] != '\0' &&
+                      strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
+      break;
+    default:
+      break;
+  }
+}
+
+void handleD2Press() {
+  switch (infoScreenIndex) {
+    case 4:  // SD screen — advance to next file
+      if (audioSdIsReady() && sdCachedFileCount > 0) {
+        sdScreenLoadFile(true);
+        displaySdStatus(audioSdIsReady(), sdCachedFileCount, sdSelectedFile,
+                        audioIsPlaying() && sdSelectedFile[0] != '\0' &&
+                        strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
+      }
       break;
     default:
       break;
@@ -538,12 +642,27 @@ void loop() {
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1          = false; handleD1Press();     }
+  if (btnD2)          { btnD2          = false; handleD2Press();     }
 
   // ── FTP update ───────────────────────────────────────────────────
   ftpUpdate();
 
   // ── Audio update ─────────────────────────────────────────────────
   audioUpdate();
+
+  // ── Detect natural end-of-file: report stopped status to sender ──
+  {
+    static bool wasAudioActive = false;
+    bool isAudioActive = (audioCurrentFile()[0] != '\0');
+    if (wasAudioActive && !isAudioActive) {
+      sendAudioStatus(0, "");
+      if (infoScreenIndex == 2)
+        displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
+      if (infoScreenIndex == 4)
+        displaySdStatus(audioSdIsReady(), sdCachedFileCount, sdSelectedFile, false);
+    }
+    wasAudioActive = isAudioActive;
+  }
 
   // ── Audio screen live refresh ─────────────────────────────────────
   static unsigned long lastAudioDisplay = 0;

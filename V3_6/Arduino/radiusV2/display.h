@@ -37,7 +37,7 @@ inline void displayError(const char*, const char*)               {}
 inline void displayAudioStatus(const char*, uint8_t, bool)       {}
 inline void displayAudioUpdate(const char*, uint8_t, bool)       {}
 inline void displayFtpStatus(bool, IPAddress, uint16_t)          {}
-inline void displaySdStatus(bool, uint16_t)                      {}
+inline void displaySdStatus(bool, uint16_t, const char* = nullptr, bool = false) {}
 inline void displayUpdateFooter(float) {}
 
 #else  // full TFT implementation below
@@ -406,8 +406,11 @@ void displayFtpStatus(bool running, IPAddress ip, uint16_t fileCount) {
 
 // =====================================================================
 //  SD Card Status Screen (screen index 4)
+//  selectedFile: currently highlighted WAV file (nullptr = none)
+//  playing:      true if selectedFile is currently playing
 // =====================================================================
-void displaySdStatus(bool ready, uint16_t fileCount) {
+void displaySdStatus(bool ready, uint16_t fileCount,
+                     const char* selectedFile = nullptr, bool playing = false) {
   currentScreen = SCREEN_SD;
   tft.fillScreen(ST77XX_BLACK);
 
@@ -419,17 +422,41 @@ void displaySdStatus(bool ready, uint16_t fileCount) {
   tft.drawFastHLine(0, 14, 240, ready ? ST77XX_GREEN : ST77XX_RED);
 
   if (ready) {
-    tft.setCursor(4, 25);
-    tft.setTextSize(2);
-    tft.setTextColor(ST77XX_GREEN);
-    tft.print("SD READY");
-
-    tft.setCursor(4, 55);
+    tft.setCursor(4, 22);
     tft.setTextSize(1);
+    tft.setTextColor(ST77XX_GREEN);
+    tft.print("SD OK");
     tft.setTextColor(0x7BEF);
-    tft.print("Files: ");
+    tft.print("  Files: ");
     tft.setTextColor(ST77XX_WHITE);
     tft.print(fileCount);
+
+    if (selectedFile && selectedFile[0] != '\0') {
+      // Filename — truncate to 14 chars at size 2 (168 px)
+      tft.setCursor(4, 36);
+      tft.setTextSize(2);
+      tft.setTextColor(playing ? ST77XX_CYAN : ST77XX_WHITE);
+      char truncName[15];
+      strncpy(truncName, selectedFile, 14);
+      truncName[14] = '\0';
+      tft.print(truncName);
+
+      // Play status
+      tft.setCursor(4, 68);
+      tft.setTextSize(1);
+      if (playing) {
+        tft.setTextColor(ST77XX_GREEN);
+        tft.print("PLAYING");
+      } else {
+        tft.setTextColor(0x7BEF);
+        tft.print("Idle");
+      }
+    } else if (fileCount == 0) {
+      tft.setCursor(4, 45);
+      tft.setTextSize(1);
+      tft.setTextColor(0x7BEF);
+      tft.print("No WAV files on SD");
+    }
   } else {
     tft.setCursor(4, 25);
     tft.setTextSize(2);
@@ -445,11 +472,20 @@ void displaySdStatus(bool ready, uint16_t fileCount) {
     tft.print("to retry");
   }
 
-  tft.drawFastHLine(0, 105, 240, 0x4208);
-  tft.setCursor(4, 110);
+  tft.drawFastHLine(0, 100, 240, 0x4208);
+  tft.setCursor(4, 106);
   tft.setTextSize(1);
   tft.setTextColor(0x7BEF);
-  tft.print("D1: Retry");
+  if (!ready) {
+    tft.print("D1: Retry");
+  } else if (selectedFile && selectedFile[0] != '\0') {
+    tft.setTextColor(playing ? ST77XX_RED : ST77XX_GREEN);
+    tft.print(playing ? "D1:Stop" : "D1:Play");
+    tft.setTextColor(0x7BEF);
+    tft.print("  D2:Next");
+  } else {
+    tft.print("D2: Next file");
+  }
 }
 
 // =====================================================================

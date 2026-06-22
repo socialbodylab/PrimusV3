@@ -71,8 +71,10 @@
 
 #if TARGET_BOARD == BOARD_FEATHER_ESP32
   #define BTN_D1  14  // GPIO14 on HUZZAH32 (GPIO1 is TX — not usable)
+  #define BTN_D2  32  // GPIO32 on HUZZAH32 — unused, no third button
 #else
-  #define BTN_D1   1  // Active-HIGH (INPUT_PULLDOWN) — D1 btn: toggle FTP
+  #define BTN_D1   1  // Active-HIGH (INPUT_PULLDOWN) — D1 btn: context action
+  #define BTN_D2   2  // Active-HIGH (INPUT_PULLDOWN) — D2 btn: context action
 #endif
 
 // =====================================================================
@@ -97,8 +99,9 @@
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000
 #define ARTNET_OPCODE_IP_CONFIG  0x8200  // Vendor: static/DHCP IP assignment
-#define ARTNET_OPCODE_AUDIO_CMD  0x8300  // Vendor: audio play/stop/loop/pause
-#define ARTNET_OPCODE_FTP_CMD    0x8301  // Vendor: FTP server control (0=stop, 1=start)
+#define ARTNET_OPCODE_AUDIO_CMD    0x8300  // Vendor: audio play/stop/loop/pause
+#define ARTNET_OPCODE_FTP_CMD      0x8301  // Vendor: FTP server control (0=stop, 1=start)
+#define ARTNET_OPCODE_AUDIO_STATUS 0x8302  // Vendor: unsolicited playback status from device
 
 #define DEVICE_SHORT_NAME  "Radius"
 #if TARGET_BOARD == BOARD_FEATHER_ESP32

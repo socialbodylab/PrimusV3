@@ -813,6 +813,7 @@ class ControllerState:
             }
             for dev in self.devices:
                 rx = self.fps_listener.get(dev["ip"]) if self.fps_listener else None
+                as_ = self.fps_listener.get_audio_status(dev["ip"]) if self.fps_listener else None
                 d = {
                     "name": dev["name"],
                     "ip": dev["ip"],
@@ -830,6 +831,8 @@ class ControllerState:
                     "transport_error": dev.get("transport_error"),
                     "receiver_fps": rx["fps"] if rx else None,
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
+                    "now_playing": as_["filename"] if as_ else "",
+                    "audio_status": "playing" if as_ and as_["status"] == 1 else "stopped",
                     "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
                     "outputs": [],
                 }

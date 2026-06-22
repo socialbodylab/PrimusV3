@@ -153,7 +153,7 @@ window.PAGE_CONFIG = {
         <template x-if="audioDevices.length === 0">
             <div class="empty-state">
                 <div>No Radius nodes detected.</div>
-                <div class="text-muted text-sm" style="margin-top:6px">Radius nodes run V3.2 firmware and identify as "Radius" during discovery.</div>
+                <div class="text-muted text-sm" style="margin-top:6px">Radius nodes run V3.6 firmware and identify as "Radius" during discovery.</div>
             </div>
         </template>
 
@@ -183,9 +183,9 @@ window.PAGE_CONFIG = {
                     </div>
                 </div>
 
-                <div class="audio-now-playing" x-show="playing[dev.di]">
-                    <span x-text="playing[dev.di]?.cmd === 'loop' ? '↺' : '▶'"></span>
-                    <span x-text="playing[dev.di]?.file"></span>
+                <div class="audio-now-playing" x-show="nowPlaying(dev.di)">
+                    <span x-text="nowPlaying(dev.di)?.cmd === 'loop' ? '↺' : '▶'"></span>
+                    <span x-text="nowPlaying(dev.di)?.file"></span>
                 </div>
 
                 <div class="audio-fm">
@@ -364,22 +364,24 @@ window.PAGE_CONFIG = {
                 <template x-if="projectFiles.length === 0">
                     <p class="text-muted text-sm">No WAV files imported yet.</p>
                 </template>
-                <template x-for="f in projectFiles" :key="f.name">
-                    <div class="cues-library-row">
-                        <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
-                            <span class="text-sm" x-text="f.name"></span>
-                            <div class="flex items-center gap-1" x-show="(f.sources || []).length > 1">
-                                <template x-for="src in (f.sources || [])" :key="src">
-                                    <span class="source-badge"
-                                          :class="src === 'local' ? 'source-local' : 'source-device'"
-                                          x-text="fileSourceLabel(src)"></span>
-                                </template>
+                <div class="cues-library-scroll">
+                    <template x-for="f in projectFiles" :key="f.name">
+                        <div class="cues-library-row">
+                            <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
+                                <span class="text-sm" x-text="f.name"></span>
+                                <div class="flex items-center gap-1" x-show="(f.sources || []).length > 1">
+                                    <template x-for="src in (f.sources || [])" :key="src">
+                                        <span class="source-badge"
+                                              :class="src === 'local' ? 'source-local' : 'source-device'"
+                                              x-text="fileSourceLabel(src)"></span>
+                                    </template>
+                                </div>
                             </div>
+                            <span class="text-muted" style="font-size:11px;white-space:nowrap" x-text="formatSize(f.size)"></span>
+                            <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
                         </div>
-                        <span class="text-muted" style="font-size:11px;white-space:nowrap" x-text="formatSize(f.size)"></span>
-                        <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
-                    </div>
-                </template>
+                    </template>
+                </div>
             </div>
 
             <div class="cues-col-box">
@@ -688,7 +690,8 @@ window.PAGE_CONFIG = {
                     :value="deviceIdx ?? ''">
                 <option value="" disabled>— select a node —</option>
                 <template x-for="dev in audioDevices" :key="dev._di">
-                    <option :value="dev._di" x-text="dev.name + ' (' + dev.ip + ')'"></option>
+                    <option :value="dev._di" :selected="dev._di === deviceIdx"
+                            x-text="dev.name + ' (' + dev.ip + ')'"></option>
                 </template>
             </select>
             <button class="btn btn-sm" style="margin-left:8px"

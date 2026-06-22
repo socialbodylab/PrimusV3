@@ -131,12 +131,24 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
+        // Authoritative playback state: server report takes priority, falls back to optimistic client state.
+        nowPlaying(di) {
+            const devices = Alpine.store("app").state?.devices || [];
+            const dev = devices[di];
+            if (dev?.audio_status === "stopped") return null;
+            if (dev?.audio_status === "playing" && dev?.now_playing) {
+                return { file: dev.now_playing, cmd: this.playing[di]?.cmd || "play" };
+            }
+            return this.playing[di] || null;
+        },
+
         isPlaying(di, filename) {
-            return this.playing[di]?.file === filename;
+            return this.nowPlaying(di)?.file === filename;
         },
 
         isLooping(di, filename) {
-            return this.playing[di]?.file === filename && this.playing[di]?.cmd === "loop";
+            const np = this.nowPlaying(di);
+            return np?.file === filename && np?.cmd === "loop";
         },
 
         // ── File operations ───────────────────────────────────────────────

@@ -3153,9 +3153,13 @@ input[type="color"] {
     border-radius: var(--radius);
     padding: 10px 12px;
 }
+.cues-library-scroll {
+    max-height: 220px;
+    overflow-y: auto;
+}
 .cues-library-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
     padding: 4px 0;
     border-bottom: 1px solid var(--border);
@@ -3331,3 +3335,156 @@ input[type="color"] {
 }
 .source-local  { background: var(--accent); color: var(--bg-primary); }
 .source-device { background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); }
+
+/* ── Audio panel — device cards ─────────────────────────────────────── */
+.audio-node-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.audio-node-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+.audio-node-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+/* ── Audio panel — transport controls ───────────────────────────────── */
+.audio-transport {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+}
+.audio-vol-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 140px;
+}
+.audio-vol-slider { flex: 1; }
+.audio-now-playing {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+/* ── Audio panel — file manager ─────────────────────────────────────── */
+.audio-fm { display: flex; flex-direction: column; gap: 6px; }
+.audio-fm-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+.audio-fm-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
+}
+.audio-fm-crumb {
+    cursor: pointer;
+    color: var(--accent);
+}
+.audio-fm-crumb:hover { text-decoration: underline; }
+.audio-fm-crumb-seg { display: flex; align-items: center; gap: 2px; }
+.audio-fm-list {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+    max-height: 260px;
+    overflow-y: auto;
+}
+.audio-fm-list.drag-active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
+}
+.audio-fm-empty {
+    padding: 12px;
+    font-size: 12px;
+    text-align: center;
+}
+.audio-fm-drop-hint {
+    padding: 8px 12px;
+    font-size: 12px;
+    text-align: center;
+    color: var(--accent);
+    font-weight: 600;
+}
+.audio-fm-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+.audio-fm-row:last-child { border-bottom: none; }
+.audio-fm-row:hover { background: var(--bg-secondary); }
+.audio-fm-row.fm-row-playing {
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-primary));
+}
+.audio-fm-icon {
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+    color: var(--text-muted);
+}
+.audio-fm-icon.icon-playing { color: var(--accent); }
+.audio-fm-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.audio-fm-name.audio-fm-folder {
+    color: var(--accent);
+    font-weight: 600;
+    cursor: pointer;
+}
+.audio-fm-size {
+    font-size: 11px;
+    flex-shrink: 0;
+    min-width: 52px;
+    text-align: right;
+}
+.audio-fm-rename-input {
+    flex: 1;
+    font-size: 12px;
+    padding: 2px 6px;
+    background: var(--bg-primary);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm, 3px);
+    color: var(--text-primary);
+    min-width: 0;
+}
