@@ -193,6 +193,75 @@ V3.6 receivers use standard Art-Net UDP 6454 plus existing Primus custom extensi
 
 V3.6 dynamic brightness does not change this packet table. The sender scales RGB bytes before ArtDmx transmission; receivers keep NeoPixel/NeoPXL8 hardware brightness locked at 255 and write the received RGB values directly to the configured output buffers. Do not reintroduce the historical V2 leading brightness byte unless it becomes a deliberate protocol requirement.
 
+## VS1053 Audio Chip: Safe Patterns
+
+### sciWrite() does not check DREQ
+
+The Adafruit VS1053 library's `sciWrite()` writes SCI register bytes directly over SPI **without checking DREQ first**:
+
+```cpp
+void Adafruit_VS1053::sciWrite(uint8_t addr, uint16_t data) {
+  uint8_t buffer[4] = {VS1053_SCI_WRITE, addr, uint8_t(data >> 8), uint8_t(data & 0xFF)};
+  spi_dev_ctrl->write(buffer, 4);  // no DREQ gate
+}
+```
+
+The VS1053 datasheet states that SCI writes are only guaranteed when DREQ is high. A write that lands while DREQ is low may be silently dropped or corrupt an adjacent register. In practice, a bad write after `sineTest()` can put the chip into a state where subsequent `startPlayingFile()` calls produce no audio output, even though the library reports `playingMusic = true`.
+
+### sineTest() resets the chip and leaves DREQ unstable
+
+`sineTest()` calls `reset()` internally at the start:
+
+```cpp
+void Adafruit_VS1053::sineTest(uint8_t n, uint16_t ms) {
+  reset();           // soft reset + clock setup + setVolume(40,40)
+  // ... enters SM_TEST mode, plays sine wave, sends sine_stop ...
+  // SM_TEST is NOT cleared on return
+}
+```
+
+After `sineTest()` returns:
+- `SCI_MODE` still has `SM_TEST` set — the chip is still in hardware test mode.
+- DREQ may be low or transitioning as the VS1053 exits its sine burst.
+- Any `sciWrite()` call (e.g. `setVolume()`) issued before DREQ is confirmed high may be lost or corrupt state.
+
+`startPlayingFile()` does clear `SM_TEST` by writing a clean mode value to `SCI_MODE`, so normal audio playback after a `sineTest()` is safe **as long as no corrupting `sciWrite()` was called in between**.
+
+### Safe pattern for audioTestTone()
+
+Do not call `setVolume()` or any `sciWrite()` immediately after `sineTest()`. The working pattern is:
+
+```cpp
+void audioTestTone() {
+  if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  // No setVolume before sineTest — reset() inside sineTest always overrides
+  // to setVolume(40,40) regardless.
+  _musicMaker.sineTest(0x44, 500);
+  // Do NOT call setVolume() here. sciWrite() does not check DREQ; a write
+  // immediately after sineTest() while DREQ is low will corrupt VS1053 state
+  // and silence all subsequent audio output until the next power cycle.
+}
+```
+
+The version that broke everything was adding `setVolume(vs1053vol, vs1053vol)` before and `setVolume(254, 254)` / `audioSetVolume()` after the `sineTest()` call. The before-call is harmless (reset() overrides it to 40,40), but the after-call consistently corrupted state after the first play/stop cycle.
+
+### setVolume(254, 254) in audioBootTest() is safe
+
+`audioBootTest()` calls `setVolume(254, 254)` immediately after `sineTest()`. This is safe at **boot** because the chip was just initialized by `audioInit()` → `begin()`, so DREQ is fully settled. The call is **not safe** to replicate at runtime (after a play/stop cycle) without first polling for DREQ high.
+
+### Controlling test tone volume (future improvement)
+
+`sineTest()` always plays at the volume that `reset()` sets (`setVolume(40, 40)`, approximately -20 dB). There is currently no way to adjust this without polling DREQ. To do this safely in a future version, poll DREQ before calling `setVolume()`:
+
+```cpp
+// After sineTest(), wait for DREQ to go high before any sciWrite
+uint32_t t = millis();
+while (!digitalRead(MM_DREQ_PIN) && millis() - t < 200) { delay(1); }
+audioSetVolume(_audioVolume);
+```
+
+Alternatively, replace `sineTest()` with a short WAV file playback for the test tone, which gives full volume and waveform control without touching SM_TEST mode.
+
 ## WiFi Reliability: setSleep After Connect
 
 The ESP32 Arduino WiFi stack resets modem sleep to the default (`WIFI_PS_MIN_MODEM`) during the WPA association/authentication phase, silently overriding any `WiFi.setSleep(false)` call made before `WiFi.begin()`. With modem sleep active, the radio periodically goes dark between beacon intervals — UDP packets that arrive during that window are dropped. For Art-Net and audio status reporting this produces intermittent packet loss that is hard to distinguish from a network problem.

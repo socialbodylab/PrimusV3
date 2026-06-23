@@ -686,9 +686,8 @@ window.PAGE_CONFIG = {
         <div class="form-group mb-4">
             <label class="form-label">Radius Node</label>
             <select class="form-select" style="max-width:280px"
-                    @change="selectDevice(parseInt($event.target.value))"
-                    :value="deviceIdx ?? ''">
-                <option value="" disabled>— select a node —</option>
+                    @change="selectDevice($event.target.value === '' ? null : parseInt($event.target.value))">
+                <option value="" disabled :selected="deviceIdx === null">— select a node —</option>
                 <template x-for="dev in audioDevices" :key="dev._di">
                     <option :value="dev._di" :selected="dev._di === deviceIdx"
                             x-text="dev.name + ' (' + dev.ip + ')'"></option>

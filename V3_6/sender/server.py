@@ -43,6 +43,11 @@ _inventory_lock  = threading.Lock()
 _device_inventory = {}   # {ip: {name, files: [str], scanned_at: float}}
 
 
+def _is_audio_file(name):
+    """True if name is a playable WAV file (not a macOS metadata stub)."""
+    return name.lower().endswith(".wav") and not name.startswith("._")
+
+
 def _safe_id(value):
     """Return True if value is a safe resource identifier (no path traversal)."""
     return bool(value) and bool(_SAFE_ID_RE.match(value))
@@ -1361,13 +1366,13 @@ def _run_pull_job(job, state):
         with _sync_lock:
             job["status"] = "running"
 
-        # FTP-list all devices
+        # FTP-list all devices — WAV files only, exclude macOS metadata stubs
         listing = {}   # ip → set of filenames
         for dev in connected:
             ip = dev["ip"]
             try:
                 entries    = ftp_list_dir(ip, "/")
-                listing[ip] = {e["name"] for e in entries if not e["is_dir"]}
+                listing[ip] = {e["name"] for e in entries if _is_audio_file(e["name"])}
             except Exception as e:
                 with _sync_lock:
                     job["errors"].append({
@@ -1496,7 +1501,7 @@ def _run_rescan_job(state):
             try:
                 entries = ftp_list_dir(ip, "/")
                 entries_by_ip[ip] = sorted(
-                    e["name"] for e in entries if not e["is_dir"]
+                    e["name"] for e in entries if _is_audio_file(e["name"])
                 )
             except Exception:
                 pass

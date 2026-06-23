@@ -505,6 +505,7 @@ void handleScreenCycle() {
 void handleD1Press() {
   switch (infoScreenIndex) {
     case 2:  // Audio screen — play test tone
+      displayAudioStatus("test_tone", _audioVolume, true);  // show playing before blocking call
       audioTestTone();
       displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
       break;

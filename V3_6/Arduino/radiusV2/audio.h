@@ -145,15 +145,17 @@ void audioTestTone() {
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
   Serial.println("[Audio] Test tone: 1kHz, 500ms");
   _musicMaker.sineTest(0x44, 500);
+  // Do NOT call setVolume() here. sineTest() calls reset() internally which
+  // can leave DREQ low briefly; sciWrite() does not check DREQ, so any SCI
+  // write immediately after sineTest() may be dropped and corrupt VS1053 state.
   Serial.println("[Audio] Test tone complete");
 }
 
 void audioBootTest() {
   if (!_audioHwReady) return;
   Serial.println("[Boot] Sine test (1kHz, 500ms)...");
-  _musicMaker.setVolume(40, 40);   // unmute for boot beep
+  _musicMaker.setVolume(40, 40);
   _musicMaker.sineTest(0x44, 500);
-  _musicMaker.setVolume(254, 254); // return to muted until playback starts
   Serial.println("[Boot] Sine test complete");
 
   if (!_audioSdReady) {

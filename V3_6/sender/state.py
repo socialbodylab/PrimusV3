@@ -1462,16 +1462,17 @@ class ControllerState:
         return True
 
     def fire_audio_cue(self, cue):
-        """Fire a sender-side audio cue to all connected Radius devices."""
+        """Fire a sender-side audio cue to connected Radius devices.
+
+        Uses per-IP actions from cue["actions"]; devices not listed in actions
+        or with no filename are skipped.
+        """
         CMD_MAP = {
             "play": AUDIO_CMD_PLAY,
             "loop": AUDIO_CMD_LOOP,
             "stop": AUDIO_CMD_STOP,
         }
-        cmd_str = str(cue.get("cmd", "play"))
-        cmd_code = CMD_MAP.get(cmd_str, AUDIO_CMD_PLAY)
-        filename = str(cue.get("filename", ""))
-        volume = cue.get("volume")
+        actions = cue.get("actions", {})
         results = {}
         with self.lock:
             snapshot = [
@@ -1481,9 +1482,17 @@ class ControllerState:
         for ip, connected, is_audio in snapshot:
             if not is_audio:
                 continue
+            action = actions.get(ip)
+            if action is None:
+                results[ip] = {"status": "skipped", "reason": "not in cue"}
+                continue
             if not connected:
                 results[ip] = {"status": "skipped", "reason": "not connected"}
                 continue
+            cmd_str  = str(action.get("cmd", "play"))
+            cmd_code = CMD_MAP.get(cmd_str, AUDIO_CMD_PLAY)
+            filename = str(action.get("filename", ""))
+            volume   = action.get("volume")
             try:
                 kw = {}
                 if volume is not None:
