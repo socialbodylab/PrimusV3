@@ -179,6 +179,7 @@ class FpsListener:
                     self.data[addr[0]] = {
                         "fps": fps, "pkt_rate": pkt, "ts": time.monotonic()
                     }
+                netlog.log_fps(addr[0], fps, pkt)
             elif len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
                 opcode = struct.unpack("<H", raw[8:10])[0]
                 if opcode == ARTNET_OPCODE_AUDIO_STATUS:
@@ -188,6 +189,9 @@ class FpsListener:
                         self.audio_status[addr[0]] = {
                             "status": status, "filename": filename, "ts": time.monotonic()
                         }
+                    state_str = "playing" if status == 1 else "stopped"
+                    file_str = f" \"{filename}\"" if filename else ""
+                    netlog.log("IN", "audio_status", f"AudioStatus {state_str}{file_str} ← {addr[0]}")
 
     def get(self, ip):
         with self.lock:
@@ -307,6 +311,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
         for dest in destinations:
             try:
                 sock.sendto(bytes(poll), (dest, ARTNET_PORT))
+                netlog.log("OUT", "artpoll", f"ArtPoll → {dest}")
             except OSError:
                 pass
 
@@ -357,6 +362,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
                 "num_ports": num_ports,
                 "universes": universes,
             }
+            netlog.log("IN", "artpollreply", f"ArtPollReply from {ip} \"{short_name}\" fw={firmware_version}")
 
     finally:
         sock.close()
@@ -720,15 +726,20 @@ def _ftp_session(ip, timeout=8.0):
 
 
 def _parse_list_line(line):
-    """Parse a SimpleFTPServer LIST line into {name, is_dir, size}."""
-    parts = line.split(None, 7)
-    if len(parts) < 8:
+    """Parse a SimpleFTPServer LIST line into {name, is_dir, size}.
+
+    SimpleFTPServer outputs standard Unix ls long format (9 fields):
+      permissions links user group size month day time/year filename
+    Example: -rw-r--r-- 1 root root 12345 Jan 01 2000 DRONEY.WAV
+    """
+    parts = line.split(None, 8)
+    if len(parts) < 9:
         return None
     try:
-        size = int(parts[3])
+        size = int(parts[4])
     except ValueError:
         size = 0
-    return {"name": parts[7], "is_dir": parts[0].startswith("d"), "size": size}
+    return {"name": parts[8], "is_dir": parts[0].startswith("d"), "size": size}
 
 
 def ftp_list_dir(ip, path="/"):

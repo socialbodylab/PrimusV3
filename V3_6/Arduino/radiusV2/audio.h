@@ -88,7 +88,10 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
     }
   }
 
-  if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  if (_musicMaker.playingMusic) {
+    _musicMaker.stopPlaying();
+    delay(20);  // let VS1053 fully flush before feeding new file header
+  }
 
   strncpy(_audioCurrentFile, filename, 32);
   _audioCurrentFile[32] = '\0';

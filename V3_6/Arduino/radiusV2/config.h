@@ -112,9 +112,8 @@
 #define OEM_CODE           0xFFFF
 #define ESTA_CODE          0x0000
 
-// FPS back-channel
-#define FPS_REPORT_PORT         6455
-#define FPS_BACKCHANNEL_ENABLED true
+// Audio report back-channel (port shared with LED FPS telemetry on sender side)
+#define AUDIO_REPORT_PORT       6455
 
 // =====================================================================
 //  FTP Server
@@ -126,7 +125,7 @@
 // =====================================================================
 //  Timing Constants (ms)
 // =====================================================================
-#define FPS_INTERVAL        1000
+#define STATUS_INTERVAL     1000
 #define CONNECTION_TIMEOUT  10000
 #define RECONNECT_INTERVAL  5000
 

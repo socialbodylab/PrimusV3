@@ -47,7 +47,7 @@ bool sdBusy = false;
 // ── Art-Net ──────────────────────────────────────────────────────────
 #define MAX_UDP_PACKET 600
 WiFiUDP udp;
-WiFiUDP udpFps;
+WiFiUDP udpReport;
 uint8_t udpBuf[MAX_UDP_PACKET];
 
 #define ARTNET_HEADER_LEN  8
@@ -77,8 +77,8 @@ uint8_t storedGateway[4] = {0};
 uint8_t storedSubnet[4]  = {0};
 
 // ── Packet telemetry ─────────────────────────────────────────────────
-unsigned long lastFpsTime  = 0;
-unsigned long packetCount  = 0;
+unsigned long lastStatusTime = 0;
+unsigned long packetCount    = 0;
 
 // ── Screen cycling ───────────────────────────────────────────────────
 uint8_t infoScreenIndex = 0;
@@ -408,30 +408,6 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
 }
 
 // =====================================================================
-//  FPS Back-Channel
-// =====================================================================
-
-static const uint8_t FPS_MAGIC[3] = { 'P', 'F', 'P' };
-
-void sendFpsTelemetry(uint16_t pktRate) {
-  if (!FPS_BACKCHANNEL_ENABLED) return;
-  if (!senderKnown || !wifiConnected) return;
-
-  uint8_t buf[7];
-  buf[0] = FPS_MAGIC[0];
-  buf[1] = FPS_MAGIC[1];
-  buf[2] = FPS_MAGIC[2];
-  buf[3] = 0;              // measuredFps high byte (no frames on audio node)
-  buf[4] = 0;              // measuredFps low byte
-  buf[5] = (pktRate >> 8) & 0xFF;
-  buf[6] =  pktRate       & 0xFF;
-
-  udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
-  udpFps.write(buf, 7);
-  udpFps.endPacket();
-}
-
-// =====================================================================
 //  SD screen file navigation
 // =====================================================================
 
@@ -485,9 +461,9 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   buf[11] = 0x0E;
   buf[12] = status;
   if (filename && filename[0]) strncpy((char*)&buf[13], filename, 32);
-  udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
-  udpFps.write(buf, 46);
-  udpFps.endPacket();
+  udpReport.beginPacket(senderIP, AUDIO_REPORT_PORT);
+  udpReport.write(buf, 46);
+  udpReport.endPacket();
 }
 
 // =====================================================================
@@ -613,7 +589,7 @@ void setup() {
   displayConnection(DEFAULT_WIFI_SSID, IPAddress(0,0,0,0), false, 0);
 
   udp.begin(ARTNET_PORT);
-  udpFps.begin(0);
+  udpReport.begin(0);
 
   // Audio
   audioInit();
@@ -627,7 +603,7 @@ void setup() {
   ftpInit();
   if (audioSdIsReady()) ftpStart();
 
-  lastFpsTime = millis();
+  lastStatusTime = millis();
 
   Serial.println("Setup complete. D0=Screen D1=Action(screen-dependent)");
   Serial.println();
@@ -692,10 +668,10 @@ void loop() {
     }
   }
 
-  // ── Packet-rate reporting ─────────────────────────────────────────
+  // ── Periodic status / serial diagnostic ──────────────────────────
   unsigned long now = millis();
-  if (now - lastFpsTime >= FPS_INTERVAL) {
-    unsigned long elapsed = now - lastFpsTime;
+  if (now - lastStatusTime >= STATUS_INTERVAL) {
+    unsigned long elapsed = now - lastStatusTime;
     float pktRate = packetCount * 1000.0f / elapsed;
 
     Serial.print("P/s: ");
@@ -710,10 +686,9 @@ void loop() {
     Serial.print(WiFi.RSSI());
     Serial.println("dBm");
 
-    sendFpsTelemetry((uint16_t)pktRate);
     displayUpdateFooter(pktRate);
 
     packetCount = 0;
-    lastFpsTime = now;
+    lastStatusTime = now;
   }
 }

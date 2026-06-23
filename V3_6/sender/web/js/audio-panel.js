@@ -11,8 +11,10 @@ document.addEventListener("alpine:init", () => {
 
         // ── Playback ────────────────────────────────────────────────────
         playing:      {},   // { di: { file, cmd } }
+        lastPlayed:   {},   // { di: filename } — last file played per device
         volume:       {},   // { di: 0-100 }
         _lastVolSent: {},
+        _spaceHandler: null,
 
         // ── File manager ────────────────────────────────────────────────
         cwd:     {},        // { di: "/" }
@@ -38,6 +40,36 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ── Lifecycle ───────────────────────────────────────────────────
+
+        init() {
+            this._spaceHandler = (e) => {
+                if (e.code !== "Space") return;
+                if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+                if (Alpine.store("app").mode !== "audio") return;
+                e.preventDefault();
+                this.spacebarToggle();
+            };
+            window.addEventListener("keydown", this._spaceHandler);
+        },
+
+        destroy() {
+            if (this._spaceHandler) window.removeEventListener("keydown", this._spaceHandler);
+        },
+
+        spacebarToggle() {
+            // Stop the first playing device
+            for (const dev of this.audioDevices) {
+                if (this.nowPlaying(dev.di)) {
+                    this.stop(dev.di);
+                    return;
+                }
+            }
+            // Nothing playing — play last file or first WAV on first device
+            const dev = this.audioDevices[0];
+            if (!dev) return;
+            const filename = this.lastPlayed[dev.di] || this.wavFiles(dev.di)[0]?.name;
+            if (filename) this.play(dev.di, filename);
+        },
 
         initDevice(di) {
             if (this.cwd[di] === undefined) {
@@ -106,7 +138,8 @@ document.addEventListener("alpine:init", () => {
             await api("POST", "/api/audio/cmd", {
                 device: di, cmd, filename, volume: this.getVolume(di),
             });
-            this.playing = { ...this.playing, [di]: { file: filename, cmd } };
+            this.playing    = { ...this.playing,    [di]: { file: filename, cmd } };
+            this.lastPlayed = { ...this.lastPlayed, [di]: filename };
         },
 
         async stop(di) {
