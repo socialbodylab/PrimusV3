@@ -193,6 +193,20 @@ V3.6 receivers use standard Art-Net UDP 6454 plus existing Primus custom extensi
 
 V3.6 dynamic brightness does not change this packet table. The sender scales RGB bytes before ArtDmx transmission; receivers keep NeoPixel/NeoPXL8 hardware brightness locked at 255 and write the received RGB values directly to the configured output buffers. Do not reintroduce the historical V2 leading brightness byte unless it becomes a deliberate protocol requirement.
 
+## WiFi Reliability: setSleep After Connect
+
+The ESP32 Arduino WiFi stack resets modem sleep to the default (`WIFI_PS_MIN_MODEM`) during the WPA association/authentication phase, silently overriding any `WiFi.setSleep(false)` call made before `WiFi.begin()`. With modem sleep active, the radio periodically goes dark between beacon intervals — UDP packets that arrive during that window are dropped. For Art-Net and audio status reporting this produces intermittent packet loss that is hard to distinguish from a network problem.
+
+The fix is to call `WiFi.setSleep(false)` **after** the connection is established, not before `WiFi.begin()`. In Radius firmware this is done inside `checkWifiConnection()` at the point where `wifiConnected` transitions from false to true:
+
+```cpp
+WiFi.setSleep(false);  // must be set after connect — connection process resets it
+```
+
+Calling it before `WiFi.begin()` as well is harmless and keeps the intent visible at startup, but the post-connect call is the one that actually takes effect.
+
+The LED receiver firmware (`primusV3_receiver.ino`) currently only calls `WiFi.setSleep(false)` before `WiFi.begin()`. It has the same latent issue, but because LED receivers stay powered on for the duration of a show the connection process runs only once and the effect has not been observed in practice. Apply the post-connect call there if intermittent ArtDmx drop-outs are reported on LED nodes.
+
 ## Discovery Node Report
 
 The V3.6 Node Report keeps the V3.1 `PV3CAP1` shape and adds parser-safe board and IP-mode segments:

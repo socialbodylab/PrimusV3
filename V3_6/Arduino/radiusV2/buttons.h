@@ -28,12 +28,13 @@ volatile bool btnD2          = false;   // D2 pressed — context action
 //  Init
 // =====================================================================
 void buttonsInit() {
-  pinMode(BTN_D0, INPUT_PULLUP);     // D0: active-LOW
 #if TARGET_BOARD != BOARD_FEATHER_ESP32
-  // On HUZZAH32, BTN_D1=GPIO14 conflicts with MM_SDCS_PIN — do not init
+  pinMode(BTN_D0, INPUT_PULLUP);     // D0: active-LOW
   pinMode(BTN_D1, INPUT_PULLDOWN);   // D1: active-HIGH
   pinMode(BTN_D2, INPUT_PULLDOWN);   // D2: active-HIGH
 #endif
+  // HUZZAH32 (rv1): no user buttons — GPIO0 is the BOOT pin, GPIO14 conflicts
+  // with MM_SDCS_PIN. Nothing to init.
 }
 
 // =====================================================================
@@ -50,12 +51,9 @@ static bool readButton(uint8_t index) {
 // =====================================================================
 void buttonsPoll() {
 #if TARGET_BOARD == BOARD_FEATHER_ESP32
-  // HUZZAH32: only poll D0 — BTN_D1/BTN_D2 conflict with SD CS and have no physical button
-  const uint8_t btnCount = 1;
-#else
-  const uint8_t btnCount = 3;
+  return;  // HUZZAH32 has no user buttons
 #endif
-  for (uint8_t i = 0; i < btnCount; i++) {
+  for (uint8_t i = 0; i < 3; i++) {
     bool pressed = readButton(i);
     if (pressed && !lastBtnState[i]) {
       if      (i == 0) btnScreenCycle = true;

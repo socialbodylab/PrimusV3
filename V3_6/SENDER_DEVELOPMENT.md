@@ -372,6 +372,22 @@ Both push and pull job items carry byte-level progress:
 
 `ftp_download()` in `artnet.py` accepts an optional `progress_callback(received, total)` that the job thread calls on each received chunk. The UI polls `GET /api/audio_sync/status` on a 500 ms interval and renders a per-file progress bar from `bytes_received / bytes_total`.
 
+### SimpleFTPServer LIST Format
+
+SimpleFTPServer (xreef, SD storage backend) omits the Unix `group` field from its `LIST` response, producing 8 whitespace-separated fields instead of the standard 9:
+
+```
+# SimpleFTPServer (8 fields — no group):
+-rw-rw-r--  1  primus  19902420  Jan 01  00:00  pairing2.wav
+
+# Standard Unix ls long format (9 fields):
+-rw-r--r--  1  root  root  12345  Jan 01  2000  DRONEY.WAV
+```
+
+`_parse_list_line()` in `artnet.py` handles both formats. If the line has 9 parts after `split(None, 8)`, size is at index 4 and name is at index 8 (standard). If it has 8 parts, size is at index 3 and name is at index 7 (SimpleFTPServer). Lines with fewer than 8 parts are silently skipped.
+
+Do not change this parser to require exactly 9 fields — that breaks all Radius SD card file listings.
+
 ### Module Responsibilities
 
 | Module | Responsibility |

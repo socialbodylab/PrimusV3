@@ -141,6 +141,7 @@ void checkWifiConnection() {
     if (!wifiConnected) {
       wifiConnected  = true;
       wifiConnecting = false;
+      WiFi.setSleep(false);  // must be set after connect — connection process resets it
       Serial.print("WiFi connected! IP: ");
       Serial.println(WiFi.localIP());
       udp.begin(ARTNET_PORT);
@@ -605,7 +606,11 @@ void setup() {
 
   lastStatusTime = millis();
 
+#if TARGET_BOARD == BOARD_FEATHER_ESP32
+  Serial.println("Setup complete. (rv1 — no buttons, no display)");
+#else
   Serial.println("Setup complete. D0=Screen D1=Action(screen-dependent)");
+#endif
   Serial.println();
 }
 

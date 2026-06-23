@@ -479,6 +479,48 @@ Solder to the duplicate through-holes beside the header on the doubler — not t
 
 ---
 
+## Troubleshooting
+
+### SD Card Not Found at Boot
+
+**Symptom:** Serial output shows `[Audio] WARNING: SD card not found — file playback unavailable`. FTP server never starts. Radius Central shows no files for the device.
+
+**Cause:** The Music Maker FeatherWing's microSD slot is not occupied or the card is not seated properly.
+
+**Procedure:**
+
+1. Open serial monitor at 115200 baud:
+   ```bash
+   # arduino-cli (specify board to avoid 9600 default):
+   arduino-cli monitor -p /dev/cu.usbserial-XXXX -b esp32:esp32:featheresp32
+   # Or with screen:
+   screen /dev/cu.usbserial-XXXX 115200
+   ```
+
+2. Observe boot output. Healthy SD output:
+   ```
+   [Audio] VS1053 OK
+   [Audio] SD OK
+   [Boot] Sine test (1kHz, 500ms)...
+   ```
+   SD failure output:
+   ```
+   [Audio] VS1053 OK
+   [Audio] WARNING: SD card not found — file playback unavailable
+   [Boot] Sine test (1kHz, 500ms)...
+   [Boot] SD not ready — skipping file playback
+   ```
+
+3. If SD failure: power off, physically insert or reseat the microSD card in the Music Maker FeatherWing slot, power on and confirm `[Audio] SD OK` in serial output.
+
+4. If SD card is inserted and the error persists, try a different card formatted as FAT32. The VS1053 library requires FAT32.
+
+5. FTP requires SD — if SD is unavailable, FTP will not start and status lines will show `FTP: off`.
+
+**Known affected device:** Radius-E5 (192.168.8.154, HUZZAH32 V1) — SD card not inserted as of 2026-06-22. WiFi confirmed working (RSSI −22 dBm). Insert SD card to restore file playback and FTP.
+
+---
+
 # Future Research / Archived Audio Hardware
 
 The following hardware was tested as alternatives to the Music Maker FeatherWing but was not successful. Kept here for future reference.

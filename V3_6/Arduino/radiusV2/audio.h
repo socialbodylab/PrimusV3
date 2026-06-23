@@ -149,8 +149,11 @@ void audioTestTone() {
 }
 
 void audioBootTest() {
+  if (!_audioHwReady) return;
   Serial.println("[Boot] Sine test (1kHz, 500ms)...");
+  _musicMaker.setVolume(40, 40);   // unmute for boot beep
   _musicMaker.sineTest(0x44, 500);
+  _musicMaker.setVolume(254, 254); // return to muted until playback starts
   Serial.println("[Boot] Sine test complete");
 
   if (!_audioSdReady) {
