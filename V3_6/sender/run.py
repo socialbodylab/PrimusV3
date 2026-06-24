@@ -671,6 +671,39 @@ def main():
     state = ControllerState(fps_listener)
     cue_list = CueList()
     osc_service = OscControlServer(cue_list, state)
+
+    if args.mode == "radius":
+        from artnet import AUDIO_CMD_STOP, AUDIO_CMD_TEST_TONE, send_audio_cmd as _send_audio_cmd
+
+        def _audio_osc_dispatch(action, number=None):
+            if action == "fire":
+                from server import Handler as _H
+                with _H.audio_cues_lock:
+                    cues = _H.audio_cues_data.get("cues", [])
+                cue = next((c for c in cues if c.get("number") == number), None)
+                if cue is None:
+                    return {"ok": False, "error": f"audio cue {number} not found"}
+                return state.fire_audio_cue(cue)
+            elif action == "stop":
+                with state.lock:
+                    devs = [(d["ip"], d.get("connected"), d.get("is_audio"))
+                            for d in state.devices]
+                for ip, connected, is_audio in devs:
+                    if is_audio and connected:
+                        _send_audio_cmd(ip, AUDIO_CMD_STOP)
+                return {"ok": True}
+            elif action == "hello":
+                with state.lock:
+                    devs = [(d["ip"], d.get("connected"), d.get("is_audio"))
+                            for d in state.devices]
+                for ip, connected, is_audio in devs:
+                    if is_audio and connected:
+                        _send_audio_cmd(ip, AUDIO_CMD_TEST_TONE)
+                return {"ok": True}
+            return {"ok": False, "error": f"unknown audio action {action!r}"}
+
+        osc_service.set_audio_dispatch(_audio_osc_dispatch)
+
     osc_service.start()
 
     # Restore previously saved devices

@@ -18,7 +18,10 @@ from firmware import FirmwareRequestError, firmware_jobs
 import mixer
 import netlog
 import sharing
-from artnet import discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download, send_audio_cmd
+from artnet import (
+    discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download, send_audio_cmd,
+    _ftp_session, _ftp_retrbinary, _parse_list_line,
+)
 from network_settings import (
     NetworkSettingsError,
     apply_static_ip,
@@ -821,6 +824,26 @@ class Handler(BaseHTTPRequestHandler):
                 _audio_cues_mod.save_audio_cues(data)
             self._json_response(data)
 
+        elif path == "/api/audio_cues/push_cue_maps":
+            with self.audio_cues_lock:
+                cues = list(self.audio_cues_data.get("cues", []))
+            radius_devs = _snap_audio_devices(self.controller_state)
+            connected   = [d for d in radius_devs if d["connected"]]
+            if not connected:
+                self._json_response({"results": {}, "message": "no connected audio devices"})
+                return
+            results = {}
+            for dev in connected:
+                ip      = dev["ip"]
+                cue_map = _audio_cues_mod.derive_device_cue_map(cues, ip)
+                try:
+                    raw = json.dumps(cue_map, indent=2).encode()
+                    ftp_upload(ip, "/cues.json", raw)
+                    results[ip] = {"status": "ok", "cue_count": len(cue_map)}
+                except Exception as e:
+                    results[ip] = {"status": "error", "error": str(e)}
+            self._json_response({"results": results})
+
         elif path == "/api/audio_cues/fire":
             number = data.get("number")
             with self.audio_cues_lock:
@@ -1390,94 +1413,118 @@ def _run_pull_job(job, state):
             for fname in listing.get(ip, set()):
                 filename_map.setdefault(fname, []).append(dev)
 
-        # Process each filename
-        for fname, sources in sorted(filename_map.items()):
-            # Download all copies
-            downloaded = {}   # checksum → (data, [source_dicts])
-            for dev in sources:
-                ip       = dev["ip"]
-                item = {
-                    "filename":       fname,
-                    "device_ip":      ip,
-                    "device_name":    dev["name"],
-                    "bytes_total":    0,
-                    "bytes_received": 0,
-                    "status":         "downloading",
-                }
-                with _sync_lock:
-                    job["items"].append(item)
-
+        # Open one FTP session per device for all downloads (avoids N handshakes per device)
+        import contextlib
+        with contextlib.ExitStack() as _ftp_stack:
+            _ftp_conns = {}
+            for dev in connected:
+                ip = dev["ip"]
+                if not listing.get(ip):
+                    continue
                 try:
-                    def _progress(recv, total, _item=item):
-                        _item["bytes_received"] = recv
-                        _item["bytes_total"]    = total
-
-                    data = ftp_download(ip, f"/{fname}", progress_callback=_progress)
-                    cs   = _checksum(data)
-                    item["status"] = "checksumming"
-
-                    if cs in downloaded:
-                        downloaded[cs][1].append({"type": "device", "device_ip": ip, "device_name": dev["name"]})
-                    else:
-                        downloaded[cs] = (data, [{"type": "device", "device_ip": ip, "device_name": dev["name"]}])
-
-                    item["bytes_received"] = item["bytes_total"]
-                    item["status"] = "done"
-
+                    _ftp_conns[ip] = _ftp_stack.enter_context(_ftp_session(ip))
                 except Exception as e:
-                    item["status"] = "error"
-                    item["error"]  = str(e)
-                    netlog.log("OUT", "ftp_pull", f"pull failed {fname} from {ip}: {e}")
+                    with _sync_lock:
+                        job["errors"].append({
+                            "device_ip":   ip,
+                            "device_name": dev["name"],
+                            "error":       f"FTP connect failed: {e}",
+                        })
 
-            if not downloaded:
-                continue
+            # Process each filename
+            for fname, sources in sorted(filename_map.items()):
+                # Download all copies
+                downloaded = {}   # checksum → (data, [source_dicts])
+                for dev in sources:
+                    ip       = dev["ip"]
+                    ftp      = _ftp_conns.get(ip)
+                    item = {
+                        "filename":       fname,
+                        "device_ip":      ip,
+                        "device_name":    dev["name"],
+                        "bytes_total":    0,
+                        "bytes_received": 0,
+                        "status":         "downloading",
+                    }
+                    with _sync_lock:
+                        job["items"].append(item)
 
-            # Check local library
-            local_path     = _audio_cues_mod.get_project_audio_path(fname)
-            local_checksum = _audio_cues_mod._get_cached_checksum(fname) if local_path else None
+                    if ftp is None:
+                        item["status"] = "error"
+                        item["error"]  = "FTP connection unavailable"
+                        continue
 
-            if local_checksum:
-                if local_checksum in downloaded:
-                    downloaded[local_checksum][1].insert(0, {"type": "local"})
-                else:
-                    # Read local bytes for staging if needed
                     try:
-                        with open(local_path, "rb") as f:
-                            local_data = f.read()
-                        downloaded[local_checksum] = (local_data, [{"type": "local"}])
-                    except OSError:
-                        pass
+                        def _progress(recv, total, _item=item):
+                            _item["bytes_received"] = recv
+                            _item["bytes_total"]    = total
 
-            if len(downloaded) == 1:
-                cs, (data, srcs) = next(iter(downloaded.items()))
-                has_local = any(s.get("type") == "local" for s in srcs)
-                if not has_local:
-                    try:
-                        _audio_cues_mod.save_project_audio(fname, data)
+                        data = _ftp_retrbinary(ftp, f"/{fname}", progress_callback=_progress)
+                        cs   = _checksum(data)
+                        item["status"] = "checksumming"
+
+                        if cs in downloaded:
+                            downloaded[cs][1].append({"type": "device", "device_ip": ip, "device_name": dev["name"]})
+                        else:
+                            downloaded[cs] = (data, [{"type": "device", "device_ip": ip, "device_name": dev["name"]}])
+
+                        item["bytes_received"] = item["bytes_total"]
+                        item["status"] = "done"
+
                     except Exception as e:
-                        with _sync_lock:
-                            job["errors"].append({"filename": fname, "error": str(e)})
-            else:
-                # Multiple versions — build conflict groups
-                groups = []
-                for cs, (data, srcs) in downloaded.items():
-                    is_local_group = any(s.get("type") == "local" for s in srcs)
-                    temp_path = None
-                    if not is_local_group:
+                        item["status"] = "error"
+                        item["error"]  = str(e)
+                        netlog.log("OUT", "ftp_pull", f"pull failed {fname} from {ip}: {e}")
+
+                if not downloaded:
+                    continue
+
+                # Check local library
+                local_path     = _audio_cues_mod.get_project_audio_path(fname)
+                local_checksum = _audio_cues_mod._get_cached_checksum(fname) if local_path else None
+
+                if local_checksum:
+                    if local_checksum in downloaded:
+                        downloaded[local_checksum][1].insert(0, {"type": "local"})
+                    else:
+                        # Read local bytes for staging if needed
                         try:
-                            temp_path = _audio_cues_mod.save_project_audio_temp(cs, data)
-                        except Exception:
+                            with open(local_path, "rb") as f:
+                                local_data = f.read()
+                            downloaded[local_checksum] = (local_data, [{"type": "local"}])
+                        except OSError:
                             pass
-                    groups.append({
-                        "checksum":       cs,
-                        "size":           len(data),
-                        "sources":        srcs,
-                        "temp_path":      temp_path,
-                        "suggested_name": fname,
-                    })
-                _suggested_name(fname, groups)
-                with _sync_lock:
-                    job["conflicts"].append({"filename": fname, "groups": groups})
+
+                if len(downloaded) == 1:
+                    cs, (data, srcs) = next(iter(downloaded.items()))
+                    has_local = any(s.get("type") == "local" for s in srcs)
+                    if not has_local:
+                        try:
+                            _audio_cues_mod.save_project_audio(fname, data)
+                        except Exception as e:
+                            with _sync_lock:
+                                job["errors"].append({"filename": fname, "error": str(e)})
+                else:
+                    # Multiple versions — build conflict groups
+                    groups = []
+                    for cs, (data, srcs) in downloaded.items():
+                        is_local_group = any(s.get("type") == "local" for s in srcs)
+                        temp_path = None
+                        if not is_local_group:
+                            try:
+                                temp_path = _audio_cues_mod.save_project_audio_temp(cs, data)
+                            except Exception:
+                                pass
+                        groups.append({
+                            "checksum":       cs,
+                            "size":           len(data),
+                            "sources":        srcs,
+                            "temp_path":      temp_path,
+                            "suggested_name": fname,
+                        })
+                    _suggested_name(fname, groups)
+                    with _sync_lock:
+                        job["conflicts"].append({"filename": fname, "groups": groups})
 
         with _sync_lock:
             job["status"] = "done"

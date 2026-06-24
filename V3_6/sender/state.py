@@ -1490,8 +1490,14 @@ class ControllerState:
                 results[ip] = {"status": "skipped", "reason": "not connected"}
                 continue
             cmd_str  = str(action.get("cmd", "play"))
+            if cmd_str == "none":
+                results[ip] = {"status": "skipped", "reason": "no action"}
+                continue
             cmd_code = CMD_MAP.get(cmd_str, AUDIO_CMD_PLAY)
             filename = str(action.get("filename", ""))
+            if cmd_code in (AUDIO_CMD_PLAY, AUDIO_CMD_LOOP) and not filename:
+                results[ip] = {"status": "skipped", "reason": "no filename"}
+                continue
             volume   = action.get("volume")
             try:
                 kw = {}

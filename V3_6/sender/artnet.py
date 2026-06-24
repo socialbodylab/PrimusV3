@@ -764,28 +764,36 @@ def ftp_list_dir(ip, path="/"):
     return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
 
 
+_FTP_BLOCKSIZE = 65536   # larger blocks → fewer recv() calls per file
+
+
+def _ftp_retrbinary(ftp, path, progress_callback=None):
+    """Download path using an existing ftplib.FTP session; return bytes."""
+    buf = io.BytesIO()
+    if progress_callback:
+        try:
+            total = ftp.size(path) or 0
+        except Exception:
+            total = 0
+        received = [0]
+        def _cb(block):
+            buf.write(block)
+            received[0] += len(block)
+            progress_callback(received[0], total)
+        ftp.retrbinary(f"RETR {path}", _cb, blocksize=_FTP_BLOCKSIZE)
+    else:
+        ftp.retrbinary(f"RETR {path}", buf.write, blocksize=_FTP_BLOCKSIZE)
+    return buf.getvalue()
+
+
 def ftp_download(ip, path, progress_callback=None):
     """Download and return bytes from path on the SD card.
 
     progress_callback: optional callable(bytes_received, bytes_total).
     bytes_total is 0 if the server does not report a file size.
     """
-    buf = io.BytesIO()
     with _ftp_session(ip) as ftp:
-        if progress_callback:
-            try:
-                total = ftp.size(path) or 0
-            except Exception:
-                total = 0
-            received = [0]
-            def _cb(block):
-                buf.write(block)
-                received[0] += len(block)
-                progress_callback(received[0], total)
-            ftp.retrbinary(f"RETR {path}", _cb)
-        else:
-            ftp.retrbinary(f"RETR {path}", buf.write)
-    return buf.getvalue()
+        return _ftp_retrbinary(ftp, path, progress_callback)
 
 
 def ftp_upload(ip, path, data, progress_callback=None):

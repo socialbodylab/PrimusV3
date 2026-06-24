@@ -120,6 +120,44 @@ def load_audio_cues():
     return {"cues": []}
 
 
+_DEVICE_CUE_CMDS = {"play", "loop", "stop", "volume"}
+
+
+def derive_device_cue_map(cues, ip):
+    """Derive /cues.json content for one device from the sender cue sheet.
+
+    Returns {str(number): entry_dict} ready for JSON upload to the device SD.
+    Entries with cmd="none", unknown cmd, or play/loop with empty filename are
+    excluded. stop and volume entries require no filename. All other fields
+    (volume, duration) are included only when present and non-zero.
+    """
+    result = {}
+    for cue in cues:
+        number = cue.get("number")
+        if number is None:
+            continue
+        action = cue.get("actions", {}).get(ip)
+        if action is None:
+            continue
+        cmd = str(action.get("cmd", "none"))
+        if cmd not in _DEVICE_CUE_CMDS:
+            continue
+        entry = {"cmd": cmd}
+        if cmd in ("play", "loop"):
+            filename = str(action.get("filename", ""))
+            if not filename:
+                continue
+            entry["file"] = filename
+        volume = action.get("volume")
+        if volume is not None:
+            entry["volume"] = int(volume)
+        duration = action.get("duration")
+        if duration:
+            entry["duration"] = int(duration)
+        result[str(number)] = entry
+    return result
+
+
 def save_audio_cues(data):
     """Write cue sheet to disk."""
     try:

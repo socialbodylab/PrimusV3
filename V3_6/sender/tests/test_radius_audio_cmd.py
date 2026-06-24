@@ -98,11 +98,15 @@ class FireAudioCueTests(unittest.TestCase):
         state.add_device_from_node(_bare_node("192.168.1.22", "PrimusLED"), auto_save=False)
         return state
 
+    def _cue(self, ips, cmd="play", filename="show.wav", volume=80):
+        """Build a per-IP actions cue covering the given IPs."""
+        return {"actions": {ip: {"cmd": cmd, "filename": filename, "volume": volume} for ip in ips}}
+
     def test_connected_audio_devices_receive_command(self):
         state = self._make_state()
         state.devices[0]["connected"] = True
         state.devices[1]["connected"] = True
-        cue = {"cmd": "play", "filename": "show.wav"}
+        cue = self._cue(["192.168.1.20", "192.168.1.21"])
         with patch("state.send_audio_cmd") as mock_send:
             results = state.fire_audio_cue(cue)
         self.assertEqual(results["192.168.1.20"]["status"], "sent")
@@ -113,7 +117,7 @@ class FireAudioCueTests(unittest.TestCase):
         state = self._make_state()
         state.devices[0]["connected"] = True
         # devices[1] stays disconnected
-        cue = {"cmd": "play", "filename": "show.wav"}
+        cue = self._cue(["192.168.1.20", "192.168.1.21"])
         with patch("state.send_audio_cmd") as mock_send:
             results = state.fire_audio_cue(cue)
         self.assertEqual(results["192.168.1.20"]["status"], "sent")
@@ -123,7 +127,7 @@ class FireAudioCueTests(unittest.TestCase):
     def test_led_device_is_not_included_in_results(self):
         state = self._make_state()
         state.devices[2]["connected"] = True
-        cue = {"cmd": "play", "filename": "show.wav"}
+        cue = self._cue(["192.168.1.20", "192.168.1.21", "192.168.1.22"])
         with patch("state.send_audio_cmd"):
             results = state.fire_audio_cue(cue)
         self.assertNotIn("192.168.1.22", results)
@@ -131,7 +135,7 @@ class FireAudioCueTests(unittest.TestCase):
     def test_loop_command_uses_correct_code(self):
         state = self._make_state()
         state.devices[0]["connected"] = True
-        cue = {"cmd": "loop", "filename": "ambient.wav"}
+        cue = self._cue(["192.168.1.20"], cmd="loop", filename="ambient.wav")
         with patch("state.send_audio_cmd") as mock_send:
             state.fire_audio_cue(cue)
         args = mock_send.call_args
@@ -140,16 +144,43 @@ class FireAudioCueTests(unittest.TestCase):
     def test_stop_command_uses_correct_code(self):
         state = self._make_state()
         state.devices[0]["connected"] = True
-        cue = {"cmd": "stop", "filename": ""}
+        cue = self._cue(["192.168.1.20"], cmd="stop", filename="")
         with patch("state.send_audio_cmd") as mock_send:
             state.fire_audio_cue(cue)
         args = mock_send.call_args
         self.assertEqual(args[0][1], artnet.AUDIO_CMD_STOP)
 
+    def test_none_command_is_skipped(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"], cmd="none", filename="")
+        with patch("state.send_audio_cmd") as mock_send:
+            results = state.fire_audio_cue(cue)
+        self.assertEqual(results["192.168.1.20"]["status"], "skipped")
+        mock_send.assert_not_called()
+
+    def test_play_with_empty_filename_is_skipped(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"], cmd="play", filename="")
+        with patch("state.send_audio_cmd") as mock_send:
+            results = state.fire_audio_cue(cue)
+        self.assertEqual(results["192.168.1.20"]["status"], "skipped")
+        mock_send.assert_not_called()
+
+    def test_device_not_in_cue_is_skipped(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = {"actions": {}}  # no devices in cue
+        with patch("state.send_audio_cmd") as mock_send:
+            results = state.fire_audio_cue(cue)
+        self.assertEqual(results["192.168.1.20"]["status"], "skipped")
+        mock_send.assert_not_called()
+
     def test_send_error_recorded_in_results(self):
         state = self._make_state()
         state.devices[0]["connected"] = True
-        cue = {"cmd": "play", "filename": "show.wav"}
+        cue = self._cue(["192.168.1.20"])
         with patch("state.send_audio_cmd", side_effect=OSError("network unreachable")):
             results = state.fire_audio_cue(cue)
         self.assertEqual(results["192.168.1.20"]["status"], "error")

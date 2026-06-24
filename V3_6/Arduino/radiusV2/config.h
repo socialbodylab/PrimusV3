@@ -115,6 +115,9 @@
 // Audio report back-channel (port shared with LED FPS telemetry on sender side)
 #define AUDIO_REPORT_PORT       6455
 
+// OSC control port — matches Radius Central default (EOS/QLab standard)
+#define OSC_PORT                53001
+
 // =====================================================================
 //  FTP Server
 // =====================================================================

@@ -31,6 +31,10 @@ document.addEventListener("alpine:init", () => {
         // Rescan
         rescanning:   false,
 
+        // Push cue maps
+        pushingMaps:   false,
+        pushMapsResult: null,
+
         // Fire results: cue_number -> {ip -> {status, reason}}
         fireResults:   {},
         _fireFadeTimers: {},
@@ -551,6 +555,41 @@ document.addEventListener("alpine:init", () => {
                 console.error("[audio-cues] rescan failed:", e);
             } finally {
                 this.rescanning = false;
+            }
+        },
+
+        // ── Push cue maps ─────────────────────────────────────────────
+
+        async pushCueMaps() {
+            this.pushingMaps = true;
+            this.pushMapsResult = null;
+            try {
+                const data = await api("POST", "/api/audio_cues/push_cue_maps");
+                const results = data.results || {};
+                const ips = Object.keys(results);
+                if (ips.length === 0) {
+                    this.pushMapsResult = data.message || "No connected devices";
+                } else {
+                    const ok  = ips.filter(ip => results[ip].status === "ok").length;
+                    const err = ips.filter(ip => results[ip].status === "error").length;
+                    const parts = [];
+                    if (ok)  parts.push(`${ok} ok`);
+                    if (err) parts.push(`${err} failed`);
+                    this.pushMapsResult = parts.join(", ");
+                    if (err) {
+                        const errDetails = ips
+                            .filter(ip => results[ip].status === "error")
+                            .map(ip => `${ip}: ${results[ip].error}`)
+                            .join("\n");
+                        console.warn("[audio-cues] push_cue_maps errors:\n" + errDetails);
+                    }
+                }
+            } catch (e) {
+                this.pushMapsResult = "Error: " + e.message;
+                console.error("[audio-cues] push_cue_maps failed:", e);
+            } finally {
+                this.pushingMaps = false;
+                setTimeout(() => this.pushMapsResult = null, 6000);
             }
         },
 

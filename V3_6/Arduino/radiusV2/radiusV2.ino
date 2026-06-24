@@ -48,7 +48,12 @@ bool sdBusy = false;
 #define MAX_UDP_PACKET 600
 WiFiUDP udp;
 WiFiUDP udpReport;
+WiFiUDP udpOsc;
 uint8_t udpBuf[MAX_UDP_PACKET];
+
+// ── OSC ──────────────────────────────────────────────────────────────
+#define MAX_OSC_PACKET 512
+uint8_t oscBuf[MAX_OSC_PACKET];
 
 #define ARTNET_HEADER_LEN  8
 
@@ -145,6 +150,7 @@ void checkWifiConnection() {
       Serial.print("WiFi connected! IP: ");
       Serial.println(WiFi.localIP());
       udp.begin(ARTNET_PORT);
+      udpOsc.begin(OSC_PORT);
       broadcastArtPollReply();
       if (infoScreenIndex == 0)
         displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), true, WiFi.RSSI());
@@ -323,8 +329,9 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
     case 7: {
       AudioCue cue;
       if (cueLookup(volume, &cue)) {
-        if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
-        else          audioLoop(cue.filename, _audioVolume, cue.duration);
+        uint8_t vol = (cue.volume != CUE_VOLUME_UNSET) ? cue.volume : _audioVolume;
+        if (cmd == 6) audioPlay(cue.filename, vol, cue.duration);
+        else          audioLoop(cue.filename, vol, cue.duration);
       } else {
         Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
@@ -373,6 +380,69 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
     delay(200);
     ESP.restart();
   }
+}
+
+// =====================================================================
+//  OSC /cue/N, /stop, /hello
+// =====================================================================
+
+void dispatchCue(const AudioCue* cue) {
+  uint8_t vol = (cue->volume != CUE_VOLUME_UNSET) ? cue->volume : _audioVolume;
+  switch (cue->cmd) {
+    case AUDIO_CUE_CMD_PLAY:   audioPlay(cue->filename, vol, cue->duration); break;
+    case AUDIO_CUE_CMD_LOOP:   audioLoop(cue->filename, vol, cue->duration); break;
+    case AUDIO_CUE_CMD_STOP:   audioStop();              break;
+    case AUDIO_CUE_CMD_VOLUME: audioSetVolume(vol);      break;
+  }
+  if (infoScreenIndex == 2)
+    displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
+}
+
+void handleOscPacket() {
+  int len = udpOsc.parsePacket();
+  if (len <= 0) return;
+  if (len > MAX_OSC_PACKET) { udpOsc.flush(); return; }
+  int n = udpOsc.readBytes((char*)oscBuf, len);
+  if (n < 2 || oscBuf[0] != '/') return;
+  oscBuf[n < MAX_OSC_PACKET ? n : MAX_OSC_PACKET - 1] = '\0';
+  const char* addr = (const char*)oscBuf;
+
+  Serial.print("[OSC] "); Serial.println(addr);
+
+  if (strcmp(addr, "/stop") == 0) {
+    audioStop();
+    if (infoScreenIndex == 2)
+      displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
+    sendAudioStatus(0, "");
+    return;
+  }
+
+  if (strcmp(addr, "/hello") == 0 || strcmp(addr, "/radius/hello") == 0
+      || strcmp(addr, "/primus/hello") == 0) {
+    Serial.println("[OSC] Hello — playing test tone");
+    audioTestTone();
+    if (infoScreenIndex == 2)
+      displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
+    return;
+  }
+
+  if (strncmp(addr, "/cue/", 5) == 0) {
+    int cueNum = atoi(addr + 5);
+    if (cueNum <= 0 || cueNum > 255) {
+      Serial.printf("[OSC] Invalid cue number: %s\n", addr);
+      return;
+    }
+    AudioCue cue;
+    if (!cueLookup((uint8_t)cueNum, &cue)) {
+      Serial.printf("[OSC] Cue %d not found — dismissed\n", cueNum);
+      return;
+    }
+    dispatchCue(&cue);
+    return;
+  }
+
+  Serial.printf("[OSC] Unknown address — dismissed: %s\n", addr);
 }
 
 // =====================================================================
@@ -673,6 +743,9 @@ void loop() {
       processArtNetPacket(udpBuf, bytesRead, remoteAddr);
     }
   }
+
+  // ── OSC packets ──────────────────────────────────────────────────
+  handleOscPacket();
 
   // ── Periodic status / serial diagnostic ──────────────────────────
   unsigned long now = millis();

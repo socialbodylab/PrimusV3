@@ -335,7 +335,11 @@ window.PAGE_CONFIG = {
     <div class="panel" x-show="$store.app.mode === 'cues'" x-data="audioCues">
 
         <div class="flex justify-between items-center mb-4">
-            <span class="section-title" style="margin:0">Audio Cues</span>
+            <div class="flex items-center gap-3">
+                <span class="section-title" style="margin:0">Audio Cues</span>
+                <span class="text-muted" style="font-size:11px"
+                      title="OSC port for Radius Central and Radius devices">OSC :53001</span>
+            </div>
             <div class="btn-group">
                 <button class="btn btn-sm" @click="addCue()">+ Cue</button>
                 <button class="btn btn-sm" @click="exportCueSheet()">↓ Export</button>
@@ -345,6 +349,10 @@ window.PAGE_CONFIG = {
                         x-text="rescanning ? '…' : '↺ Scan'"></button>
                 <button class="btn btn-sm" @click="startPull()"
                         title="Download files from devices to project library">↓ Pull</button>
+                <button class="btn btn-sm" @click="pushCueMaps()"
+                        :disabled="pushingMaps"
+                        :title="pushMapsResult || 'Push cue map JSON to each connected device SD card'"
+                        x-text="pushingMaps ? 'Pushing…' : '↑ Cue Maps'"></button>
                 <button class="btn btn-sm btn-primary" @click="startSync()">↑ Push</button>
             </div>
         </div>
@@ -417,6 +425,9 @@ window.PAGE_CONFIG = {
                         <input type="number" class="form-input" min="1" max="255" style="width:60px"
                                :value="cue.number"
                                @change="updateCueField(idx, 'number', parseInt($event.target.value) || 1)">
+                        <span class="text-muted" style="font-size:11px;white-space:nowrap;font-family:monospace"
+                              :title="'OSC address — send this from EOS or QLab to fire cue ' + cue.number"
+                              x-text="'/cue/' + cue.number"></span>
                         <input type="text" class="form-input" placeholder="note…" style="flex:1"
                                :value="cue.note"
                                @input="updateCueField(idx, 'note', $event.target.value)">

@@ -256,6 +256,8 @@ def command_from_message(message):
         return {"action": "stop"}
     if lower in (["panic"], ["blackout"], ["primus", "blackout"], ["cue", "blackout"], ["primus", "cue", "blackout"]):
         return {"action": "blackout", "fade_time": _coerce_fade(args[0] if args else 0.0)}
+    if lower in (["hello"], ["radius", "hello"], ["primus", "hello"]):
+        return {"action": "hello"}
 
     if lower in (["primus", "cue", "goto"], ["cue", "goto"]):
         if not args:
@@ -312,6 +314,30 @@ def execute_command(command, cue_list, controller_state):
     return {"ok": False, "action": action or "unknown", "error": "unsupported command"}
 
 
+def execute_radius_command(command, audio_dispatch):
+    """Execute an OSC command in Radius (audio-only) mode.
+
+    audio_dispatch(action, number=None) -> dict
+      action "fire"  — fire audio cue by number
+      action "stop"  — stop all audio
+      action "hello" — identify device (test tone + display)
+    """
+    action = command.get("action")
+    if action == "goto":
+        number = command.get("number")
+        if number is None:
+            return {"ok": False, "action": "audio_fire", "error": "cue number required"}
+        audio_dispatch("fire", number)
+        return {"ok": True, "action": "audio_fire", "number": number}
+    if action == "stop":
+        audio_dispatch("stop")
+        return {"ok": True, "action": "audio_stop"}
+    if action == "hello":
+        audio_dispatch("hello")
+        return {"ok": True, "action": "audio_hello"}
+    return {"ok": False, "action": action or "unknown", "error": "unsupported command in radius mode"}
+
+
 def execute_message(message, cue_list, controller_state):
     command = command_from_message(message)
     return execute_command(command, cue_list, controller_state)
@@ -341,6 +367,15 @@ class OscControlServer:
         self._running = False
         self._last_error = ""
         self._bound = {"host": "", "port": 0}
+        self._audio_dispatch = None
+
+    def set_audio_dispatch(self, fn):
+        """Enable radius mode: route /cue/N, /stop, /hello to fn instead of LED cues.
+
+        fn(action, number=None) where action is "fire", "stop", or "hello".
+        Pass None to disable radius mode and restore LED cue routing.
+        """
+        self._audio_dispatch = fn
 
     def start(self):
         self.stop()
@@ -421,7 +456,11 @@ class OscControlServer:
             return
         for message in messages:
             try:
-                result = execute_message(message, self.cue_list, self.controller_state)
+                if self._audio_dispatch is not None:
+                    command = command_from_message(message)
+                    result  = execute_radius_command(command, self._audio_dispatch)
+                else:
+                    result = execute_message(message, self.cue_list, self.controller_state)
             except OscCommandError as exc:
                 result = {"ok": False, "error": str(exc)}
             except Exception as exc:
@@ -464,7 +503,7 @@ class OscControlServer:
             "bound": bound,
             "history": history,
             "examples": osc_examples(),
-            "cue_triggers": self.cue_list.external_triggers(),
+            "cue_triggers": self.cue_list.external_triggers() if self.cue_list else [],
         }
 
 
