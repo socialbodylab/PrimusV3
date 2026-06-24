@@ -1499,10 +1499,13 @@ class ControllerState:
                 results[ip] = {"status": "skipped", "reason": "no filename"}
                 continue
             volume   = action.get("volume")
+            duration = action.get("duration")
             try:
                 kw = {}
                 if volume is not None:
                     kw["volume"] = int(volume)
+                if duration:
+                    kw["duration"] = int(duration)
                 send_audio_cmd(ip, cmd_code, filename=filename, **kw)
                 results[ip] = {"status": "sent", "reason": None}
             except Exception as exc:

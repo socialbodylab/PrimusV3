@@ -98,9 +98,12 @@ class FireAudioCueTests(unittest.TestCase):
         state.add_device_from_node(_bare_node("192.168.1.22", "PrimusLED"), auto_save=False)
         return state
 
-    def _cue(self, ips, cmd="play", filename="show.wav", volume=80):
+    def _cue(self, ips, cmd="play", filename="show.wav", volume=80, duration=None):
         """Build a per-IP actions cue covering the given IPs."""
-        return {"actions": {ip: {"cmd": cmd, "filename": filename, "volume": volume} for ip in ips}}
+        action = {"cmd": cmd, "filename": filename, "volume": volume}
+        if duration is not None:
+            action["duration"] = duration
+        return {"actions": {ip: dict(action) for ip in ips}}
 
     def test_connected_audio_devices_receive_command(self):
         state = self._make_state()
@@ -185,6 +188,48 @@ class FireAudioCueTests(unittest.TestCase):
             results = state.fire_audio_cue(cue)
         self.assertEqual(results["192.168.1.20"]["status"], "error")
         self.assertIn("network unreachable", results["192.168.1.20"]["reason"])
+
+    def test_duration_is_passed_when_set(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"], duration=30)
+        with patch("state.send_audio_cmd") as mock_send:
+            state.fire_audio_cue(cue)
+        self.assertEqual(mock_send.call_args[1]["duration"], 30)
+
+    def test_duration_zero_is_not_passed(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"], duration=0)
+        with patch("state.send_audio_cmd") as mock_send:
+            state.fire_audio_cue(cue)
+        self.assertNotIn("duration", mock_send.call_args[1])
+
+    def test_duration_absent_is_not_passed(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"])  # no duration kwarg
+        with patch("state.send_audio_cmd") as mock_send:
+            state.fire_audio_cue(cue)
+        self.assertNotIn("duration", mock_send.call_args[1])
+
+    def test_duration_is_cast_to_int(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"], duration=10.7)
+        with patch("state.send_audio_cmd") as mock_send:
+            state.fire_audio_cue(cue)
+        self.assertEqual(mock_send.call_args[1]["duration"], 10)
+
+    def test_volume_and_duration_both_passed(self):
+        state = self._make_state()
+        state.devices[0]["connected"] = True
+        cue = self._cue(["192.168.1.20"], volume=75, duration=45)
+        with patch("state.send_audio_cmd") as mock_send:
+            state.fire_audio_cue(cue)
+        kw = mock_send.call_args[1]
+        self.assertEqual(kw["volume"], 75)
+        self.assertEqual(kw["duration"], 45)
 
 
 if __name__ == "__main__":

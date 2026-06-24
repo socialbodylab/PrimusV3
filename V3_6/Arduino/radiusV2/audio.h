@@ -186,8 +186,8 @@ void audioBootTest() {
 }
 
 void audioLoop(const char* filename, uint8_t volume, uint16_t duration = 0) {
-  _audioLooping = true;
   audioPlay(filename, volume, duration);
+  _audioLooping = true;  // must be set after audioPlay() — audioPlay() resets it to false
 }
 
 void audioUpdate() {

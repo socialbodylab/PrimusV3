@@ -69,6 +69,8 @@ The I2C wiring and volume control pattern are documented in `HARDWARE_WIRING.md`
 ### Audio playback bug fix
 
 - [x] Add `delay(20)` after `stopPlaying()` in `audioPlay()` (`audio.h`) — prevents VS1053 from misparsing the new file's WAV header when switching tracks without an explicit stop, which caused playback at wrong (higher) frequency
+- [x] Fix `audioLoop()` in `audio.h`: `_audioLooping = true` was set before calling `audioPlay()`, which resets it to `false`; moved the assignment to after `audioPlay()` so loop restart in `audioUpdate()` actually fires
+- [x] Fix `fire_audio_cue()` in `state.py`: `duration` from per-IP action was read but never passed to `send_audio_cmd()`; added `kw["duration"] = int(duration)` alongside the existing `volume` kwarg
 
 ### Minor cleanup
 

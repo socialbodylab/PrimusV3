@@ -730,9 +730,11 @@ window.PAGE_CONFIG = {
             <table class="cue-list">
                 <thead>
                     <tr>
-                        <th style="width:70px">Cue #</th>
+                        <th style="width:60px">Cue #</th>
+                        <th style="width:90px">Cmd</th>
                         <th>File</th>
-                        <th style="width:90px">Duration (s)</th>
+                        <th style="width:60px">Vol</th>
+                        <th style="width:75px">Dur (s)</th>
                         <th style="width:80px">Actions</th>
                     </tr>
                 </thead>
@@ -742,10 +744,18 @@ window.PAGE_CONFIG = {
                             <td>
                                 <input type="number" class="form-input form-input-sm"
                                        x-model.number="row.number"
-                                       min="1" max="64" style="width:54px">
+                                       min="1" max="255" style="width:50px">
                             </td>
                             <td>
-                                <template x-if="deviceFiles.length > 0">
+                                <select class="form-select" x-model="row.cmd" style="width:85px">
+                                    <option value="play">Play</option>
+                                    <option value="loop">Loop</option>
+                                    <option value="stop">Stop</option>
+                                    <option value="volume">Volume</option>
+                                </select>
+                            </td>
+                            <td>
+                                <template x-if="needsFile(row.cmd) && deviceFiles.length > 0">
                                     <select class="form-select" x-model="row.file">
                                         <option value="">— select —</option>
                                         <template x-for="f in deviceFiles" :key="f">
@@ -753,18 +763,30 @@ window.PAGE_CONFIG = {
                                         </template>
                                     </select>
                                 </template>
-                                <template x-if="deviceFiles.length === 0">
+                                <template x-if="needsFile(row.cmd) && deviceFiles.length === 0">
                                     <input type="text" class="form-input" x-model="row.file"
                                            placeholder="filename.wav">
                                 </template>
+                                <template x-if="!needsFile(row.cmd)">
+                                    <span class="text-muted" style="font-size:11px;padding-left:4px">—</span>
+                                </template>
                             </td>
                             <td>
-                                <div class="flex items-center gap-1">
+                                <input type="number" class="form-input form-input-sm"
+                                       :value="row.volume ?? ''"
+                                       @input="row.volume = $event.target.value !== '' ? parseInt($event.target.value) : null"
+                                       min="0" max="100" style="width:50px" placeholder="—">
+                            </td>
+                            <td>
+                                <template x-if="needsFile(row.cmd)">
                                     <input type="number" class="form-input form-input-sm"
                                            x-model.number="row.duration"
-                                           min="0" max="3600" style="width:60px"
+                                           min="0" max="3600" style="width:55px"
                                            placeholder="0=full">
-                                </div>
+                                </template>
+                                <template x-if="!needsFile(row.cmd)">
+                                    <span class="text-muted" style="font-size:11px;padding-left:4px">—</span>
+                                </template>
                             </td>
                             <td>
                                 <div class="btn-group">
@@ -783,7 +805,7 @@ window.PAGE_CONFIG = {
         </template>
 
         <p class="text-muted text-sm" style="margin-top:12px">
-            Duration 0 = play full file. Max 64 cues. Changes take effect after device reboot.
+            Vol blank = device current volume. Dur 0 = play full file. Max 64 cues. Changes take effect after device reboot.
         </p>
 
     </div><!-- /.Cue Map panel -->
