@@ -1,5 +1,5 @@
 /*
- * marius.h — Marius BLE Performance Controller (Phase 1: scaffolding)
+ * marius.h — Marius BLE Performance Controller (Phase 2: JSON loader + audio dispatch)
  * ====================================================================
  * When /marius.json is present on SD, the Radius becomes a Marius
  * receiver. A Puck.js v2 worn by a performer sends BLE UART lines over
@@ -9,8 +9,9 @@
  *   "btn/release"   — button released
  *   "accel x y z"  — accelerometer at 12.5 Hz while held (Phase 5)
  *
- * Phase 1 logs events to serial and tracks connection state.
- * Audio and network dispatch are added in Phases 2 and 3.
+ * Phase 2 loads action arrays from marius.json and dispatches
+ * audio_play / audio_stop actions on press and release.
+ * Network actions (osc, artnet_audio, artnet_dmx) are added in Phase 3.
  *
  * BLE UUIDs (NUS):
  *   Service:       6E400001-B5A3-F393-E0A9-E50E24DCCA9E
@@ -33,6 +34,25 @@
 // ── NUS UUIDs ─────────────────────────────────────────────────────────
 #define NUS_SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define NUS_TX_UUID      "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+// ── Action types ───────────────────────────────────────────────────────
+#define MARIUS_ACTION_NONE        0
+#define MARIUS_ACTION_AUDIO_PLAY  1
+#define MARIUS_ACTION_AUDIO_STOP  2
+// Phase 3: MARIUS_ACTION_OSC, MARIUS_ACTION_ARTNET_AUDIO, MARIUS_ACTION_ARTNET_DMX
+
+#define MARIUS_ACTIONS_MAX  8
+#define MARIUS_VOLUME_UNSET 255   // use device's current _audioVolume
+
+struct MariusAction {
+    uint8_t type;        // MARIUS_ACTION_*
+    char    file[33];    // audio_play: WAV filename on SD
+    uint8_t volume;      // audio_play: 0–100 or MARIUS_VOLUME_UNSET
+    bool    loop;        // audio_play: true → audioLoop(), false → audioPlay()
+};
+
+#define MARIUS_EVENT_PRESS   0
+#define MARIUS_EVENT_RELEASE 1
 
 // ── Internal state ─────────────────────────────────────────────────────
 enum MariusState { MARIUS_IDLE, MARIUS_SCANNING, MARIUS_CONNECTING, MARIUS_CONNECTED };
@@ -57,6 +77,16 @@ static char     _mariusLineBuf[128] = {0};
 static uint8_t  _mariusLineBufLen   = 0;
 
 static NimBLEClient* _mariusClient = nullptr;
+
+// ── Phase 2: action arrays ─────────────────────────────────────────────
+static MariusAction _mariusPressActions[MARIUS_ACTIONS_MAX];
+static uint8_t      _mariusPressCount   = 0;
+static MariusAction _mariusReleaseActions[MARIUS_ACTIONS_MAX];
+static uint8_t      _mariusReleaseCount = 0;
+
+// mtime-based reload: check every 5 s; skip if SD is busy with audio
+static uint32_t _mariusJsonMtime   = 0;
+static uint32_t _mariusMtimeLastMs = 0;
 
 // =====================================================================
 //  Notify callback — runs in BLE task
@@ -178,19 +208,95 @@ void mariusRevert() {
 }
 
 // =====================================================================
-//  mariusLoad() — call after cuesLoad() in setup()
+//  mariusFireActions() — dispatch audio actions for an event
+// =====================================================================
+
+void mariusFireActions(uint8_t event) {
+    MariusAction* actions = (event == MARIUS_EVENT_PRESS)
+                            ? _mariusPressActions  : _mariusReleaseActions;
+    uint8_t count         = (event == MARIUS_EVENT_PRESS)
+                            ? _mariusPressCount    : _mariusReleaseCount;
+
+    for (uint8_t i = 0; i < count; i++) {
+        switch (actions[i].type) {
+            case MARIUS_ACTION_AUDIO_PLAY: {
+                // Use device current volume if none specified in marius.json
+                uint8_t vol = (actions[i].volume != MARIUS_VOLUME_UNSET)
+                              ? actions[i].volume : _audioVolume;
+                if (actions[i].loop)
+                    audioLoop(actions[i].file, vol, 0);
+                else
+                    audioPlay(actions[i].file, vol, 0);
+                break;
+            }
+            case MARIUS_ACTION_AUDIO_STOP:
+                audioStop();
+                break;
+        }
+    }
+}
+
+// =====================================================================
+//  Action array parser (used by mariusLoad)
+// =====================================================================
+
+static void _mariusParseActionArray(JsonArray arr, MariusAction* actions, uint8_t* count) {
+    *count = 0;
+    for (JsonObject obj : arr) {
+        if (*count >= MARIUS_ACTIONS_MAX) break;
+        const char* typeStr = obj["type"] | "";
+        MariusAction& a = actions[*count];
+        a.file[0] = '\0';
+        a.volume  = MARIUS_VOLUME_UNSET;
+        a.loop    = false;
+
+        if (strcmp(typeStr, "audio_play") == 0) {
+            a.type = MARIUS_ACTION_AUDIO_PLAY;
+            const char* fn = obj["file"] | "";
+            strncpy(a.file, fn, 32);
+            a.file[32] = '\0';
+            if (a.file[0] == '\0') {
+                Serial.println("[Marius] audio_play action missing file — skipped");
+                continue;
+            }
+            if (obj["volume"].is<int>()) {
+                int v = obj["volume"].as<int>();
+                a.volume = (v >= 0 && v <= 100) ? (uint8_t)v : MARIUS_VOLUME_UNSET;
+            }
+            a.loop = obj["loop"] | false;
+            Serial.printf("[Marius]   audio_%s \"%s\" vol=%s\n",
+                a.loop ? "loop" : "play", a.file,
+                a.volume == MARIUS_VOLUME_UNSET ? "dev" : String(a.volume).c_str());
+            (*count)++;
+        } else if (strcmp(typeStr, "audio_stop") == 0) {
+            a.type = MARIUS_ACTION_AUDIO_STOP;
+            Serial.println("[Marius]   audio_stop");
+            (*count)++;
+        } else {
+            // Phase 3: osc, artnet_audio, artnet_dmx
+            Serial.printf("[Marius]   skipping Phase 3+ action: %s\n", typeStr);
+        }
+    }
+}
+
+// =====================================================================
+//  mariusLoad() — call after cuesLoad() in setup(), and on SD reload
 // =====================================================================
 
 void mariusLoad() {
-    _mariusConfigured = false;
-    _mariusActive     = false;
+    _mariusConfigured  = false;
+    _mariusActive      = false;
     _mariusPuckName[0] = '\0';
+    _mariusPressCount  = 0;
+    _mariusReleaseCount = 0;
 
     File f = SD.open("/marius.json");
     if (!f) {
         Serial.println("[Marius] No /marius.json — Radius mode");
         return;
     }
+
+    _mariusJsonMtime = (uint32_t)f.getLastWrite();
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
@@ -209,9 +315,19 @@ void mariusLoad() {
 
     strncpy(_mariusPuckName, name, 32);
     _mariusPuckName[32] = '\0';
+
+    Serial.printf("[Marius] Configured — puck: \"%s\"\n", _mariusPuckName);
+    Serial.println("[Marius] press actions:");
+    _mariusParseActionArray(doc["actions"]["press"].as<JsonArray>(),
+                            _mariusPressActions, &_mariusPressCount);
+    Serial.println("[Marius] release actions:");
+    _mariusParseActionArray(doc["actions"]["release"].as<JsonArray>(),
+                            _mariusReleaseActions, &_mariusReleaseCount);
+    Serial.printf("[Marius] press:%d release:%d action(s) loaded\n",
+                  _mariusPressCount, _mariusReleaseCount);
+
     _mariusConfigured = true;
     _mariusActive     = true;
-    Serial.printf("[Marius] Configured — will scan for: \"%s\"\n", _mariusPuckName);
 }
 
 // =====================================================================
@@ -237,6 +353,21 @@ void mariusInit() {
 void mariusUpdate() {
     if (!_mariusActive) return;
 
+    // ── SD reload: check marius.json mtime every 5 s ──────────────────
+    uint32_t now = millis();
+    if (now - _mariusMtimeLastMs > 5000 && !sdBusy) {
+        _mariusMtimeLastMs = now;
+        File fChk = SD.open("/marius.json");
+        if (fChk) {
+            uint32_t mtime = (uint32_t)fChk.getLastWrite();
+            fChk.close();
+            if (mtime != _mariusJsonMtime) {
+                Serial.println("[Marius] /marius.json updated — reloading");
+                mariusLoad();
+            }
+        }
+    }
+
     // ── Dispatch pending event (written by BLE task, read here) ──────
     if (_mariusEventPending) {
         _mariusEventPending = false;
@@ -247,11 +378,11 @@ void mariusUpdate() {
         if (strcmp(line, "btn/press") == 0) {
             Serial.println("[Marius] PRESS");
             strncpy(_mariusLastEvent, "PRESS", sizeof(_mariusLastEvent) - 1);
-            // Phase 2: mariusFireActions(MARIUS_EVENT_PRESS);
+            mariusFireActions(MARIUS_EVENT_PRESS);
         } else if (strcmp(line, "btn/release") == 0) {
             Serial.println("[Marius] RELEASE");
             strncpy(_mariusLastEvent, "RELEASE", sizeof(_mariusLastEvent) - 1);
-            // Phase 2: mariusFireActions(MARIUS_EVENT_RELEASE);
+            mariusFireActions(MARIUS_EVENT_RELEASE);
         } else if (strncmp(line, "accel ", 6) == 0) {
             // Phase 5: parse floats and dispatch accel actions
             Serial.printf("[Marius] accel: %s\n", line + 6);
