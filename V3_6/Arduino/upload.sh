@@ -333,6 +333,7 @@ case "$BOARD_PROFILE" in
       "Adafruit VS1053 Library"
       "ArduinoJson"
       "SimpleFTPServer"
+      "NimBLE-Arduino"
     )
     ;;
   rv1|radius_v1|radius-v1)
@@ -345,6 +346,7 @@ case "$BOARD_PROFILE" in
       "Adafruit VS1053 Library"
       "ArduinoJson"
       "SimpleFTPServer"
+      "NimBLE-Arduino"
     )
     ;;
   *)

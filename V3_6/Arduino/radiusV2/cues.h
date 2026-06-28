@@ -101,7 +101,7 @@ void cuesLoad() {
       }
 
       // volume — optional; CUE_VOLUME_UNSET means "use device current"
-      if (obj.containsKey("volume")) {
+      if (obj["volume"].is<int>()) {
         int v = obj["volume"] | -1;
         cue.volume = (v >= 0 && v <= 100) ? (uint8_t)v : CUE_VOLUME_UNSET;
       }

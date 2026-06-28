@@ -34,6 +34,7 @@
 #include "audio.h"
 #include "cues.h"
 #include "ftp.h"
+#include "marius.h"
 
 // =====================================================================
 //  Shared globals (referenced by audio.h and ftp.h via extern)
@@ -675,6 +676,10 @@ void setup() {
   ftpInit();
   if (audioSdIsReady()) ftpStart();
 
+  // Marius BLE — activate if /marius.json is on the SD card
+  mariusLoad();
+  if (mariusIsConfigured()) mariusInit();
+
   lastStatusTime = millis();
 
 #if TARGET_BOARD == BOARD_FEATHER_ESP32
@@ -698,6 +703,9 @@ void loop() {
 
   // ── FTP update ───────────────────────────────────────────────────
   ftpUpdate();
+
+  // ── Marius BLE update ────────────────────────────────────────────
+  mariusUpdate();
 
   // ── Audio update ─────────────────────────────────────────────────
   audioUpdate();
@@ -759,6 +767,10 @@ void loop() {
     Serial.print(audioIsPlaying() ? audioCurrentFile() : "idle");
     Serial.print("  FTP: ");
     Serial.print(ftpIsRunning() ? "ON" : "off");
+    if (mariusIsConfigured()) {
+      Serial.print("  Marius: ");
+      Serial.print(mariusIsConnected() ? mariusPuckName() : (mariusIsActive() ? "scanning" : "reverted"));
+    }
     Serial.print("  Heap: ");
     Serial.print(ESP.getFreeHeap());
     Serial.print("B  RSSI: ");
