@@ -1,5 +1,5 @@
 /*
- * marius.h — Marius BLE Performance Controller (Phase 2: JSON loader + audio dispatch)
+ * marius.h — Marius BLE Performance Controller (Phase 3: network actions)
  * ====================================================================
  * When /marius.json is present on SD, the Radius becomes a Marius
  * receiver. A Puck.js v2 worn by a performer sends BLE UART lines over
@@ -11,7 +11,7 @@
  *
  * Phase 2 loads action arrays from marius.json and dispatches
  * audio_play / audio_stop actions on press and release.
- * Network actions (osc, artnet_audio, artnet_dmx) are added in Phase 3.
+ * Phase 3 adds osc, artnet_audio, and artnet_dmx network actions.
  *
  * BLE UUIDs (NUS):
  *   Service:       6E400001-B5A3-F393-E0A9-E50E24DCCA9E
@@ -29,26 +29,54 @@
 #include "config.h"
 #include <ArduinoJson.h>
 #include <SD.h>
+#include <WiFiUdp.h>
 #include <NimBLEDevice.h>
+
+// Globals declared later in radiusV2.ino — visible here because marius.h
+// is compiled in the same translation unit, but we need forward externs
+// for the send helpers that reference them before their definition point.
+extern IPAddress senderIP;
+extern bool      senderKnown;
+extern bool      wifiConnected;
+extern WiFiUDP   udpReport;
 
 // ── NUS UUIDs ─────────────────────────────────────────────────────────
 #define NUS_SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define NUS_TX_UUID      "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
 // ── Action types ───────────────────────────────────────────────────────
-#define MARIUS_ACTION_NONE        0
-#define MARIUS_ACTION_AUDIO_PLAY  1
-#define MARIUS_ACTION_AUDIO_STOP  2
-// Phase 3: MARIUS_ACTION_OSC, MARIUS_ACTION_ARTNET_AUDIO, MARIUS_ACTION_ARTNET_DMX
+#define MARIUS_ACTION_NONE          0
+#define MARIUS_ACTION_AUDIO_PLAY    1
+#define MARIUS_ACTION_AUDIO_STOP    2
+#define MARIUS_ACTION_OSC           3
+#define MARIUS_ACTION_ARTNET_AUDIO  4
+#define MARIUS_ACTION_ARTNET_DMX    5
 
 #define MARIUS_ACTIONS_MAX  8
 #define MARIUS_VOLUME_UNSET 255   // use device's current _audioVolume
 
 struct MariusAction {
-    uint8_t type;        // MARIUS_ACTION_*
-    char    file[33];    // audio_play: WAV filename on SD
-    uint8_t volume;      // audio_play: 0–100 or MARIUS_VOLUME_UNSET
-    bool    loop;        // audio_play: true → audioLoop(), false → audioPlay()
+    uint8_t  type;           // MARIUS_ACTION_*
+
+    // audio_play / artnet_audio: filename + volume
+    char     file[33];       // WAV filename on SD
+    uint8_t  volume;         // 0–100 or MARIUS_VOLUME_UNSET
+    bool     loop;           // audio_play: true → audioLoop()
+
+    // network actions: target routing (all three network types)
+    char     target_ip[16];  // "" = use senderIP as default
+    uint16_t target_port;    // osc only; 0 = OSC_PORT
+
+    // osc
+    char     osc_addr[64];   // e.g. "/cue/1", "/stop"
+
+    // artnet_audio
+    uint8_t  artnet_cmd;     // 0-7 (same as ArtAudioCmd cmd byte)
+
+    // artnet_dmx
+    uint16_t dmx_universe;   // 0-based Art-Net universe
+    uint16_t dmx_channel;    // 1–512
+    uint8_t  dmx_value;      // 0–255
 };
 
 #define MARIUS_EVENT_PRESS   0
@@ -189,6 +217,121 @@ static bool _mariusConnect() {
 }
 
 // =====================================================================
+//  Network send helpers (Phase 3)
+//  senderIP, senderKnown, wifiConnected, udpReport, ARTNET_PORT, OSC_PORT
+//  are globals defined in radiusV2.ino; visible here in the same TU.
+// =====================================================================
+
+// Static Art-Net DMX packet buffer — up to 512 slots + 18-byte header.
+static uint8_t _mariusDmxBuf[530];
+
+// Art-Net header bytes, reused by both send helpers.
+static const uint8_t _kArtMagic[8] = {'A','r','t','-','N','e','t','\0'};
+
+// Resolve target: explicit IP string or sender fallback.
+static IPAddress _mariusResolveTarget(const char* ipStr) {
+    if (ipStr[0] != '\0') {
+        IPAddress ip;
+        if (ip.fromString(ipStr)) return ip;
+    }
+    return senderIP;
+}
+
+// Check that we have a destination before sending.
+static bool _mariusHasDest(const char* ipStr) {
+    return (ipStr[0] != '\0') || senderKnown;
+}
+
+// OSC 1.0 message with no arguments.
+static void _mariusSendOsc(const MariusAction& a) {
+    if (!wifiConnected || !_mariusHasDest(a.target_ip)) return;
+    if (a.osc_addr[0] == '\0') return;
+
+    IPAddress dest = _mariusResolveTarget(a.target_ip);
+    uint16_t  port = (a.target_port != 0) ? a.target_port : OSC_PORT;
+
+    // Address string padded to 4-byte boundary (includes null terminator).
+    uint8_t addrLen    = (uint8_t)strlen(a.osc_addr);
+    uint8_t addrPadded = (addrLen + 4) & ~3u;
+    if (addrPadded > 96) return;  // safety guard
+
+    uint8_t buf[104];
+    memset(buf, 0, sizeof(buf));
+    memcpy(buf, a.osc_addr, addrLen);
+    // Type tag string ",\0\0\0" starts right after address block.
+    buf[addrPadded] = ',';
+    uint8_t pktLen = addrPadded + 4;  // type tag: ',' + 3 nulls already cleared
+
+    udpReport.beginPacket(dest, port);
+    udpReport.write(buf, pktLen);
+    udpReport.endPacket();
+    Serial.printf("[Marius] OSC -> %s:%d %s\n", dest.toString().c_str(), port, a.osc_addr);
+}
+
+// ArtAudioCmd (opcode 0x8300) to a Radius device or the sender.
+static void _mariusSendArtAudio(const MariusAction& a) {
+    if (!wifiConnected || !_mariusHasDest(a.target_ip)) return;
+
+    IPAddress dest = _mariusResolveTarget(a.target_ip);
+
+    uint8_t buf[48];
+    memset(buf, 0, sizeof(buf));
+    memcpy(buf, _kArtMagic, 8);
+    buf[8]  = 0x00;  // opcode 0x8300 LE
+    buf[9]  = 0x83;
+    buf[10] = 0x00;
+    buf[11] = 0x0E;  // protocol version 14
+    buf[12] = a.artnet_cmd;
+    buf[13] = (a.volume != MARIUS_VOLUME_UNSET) ? a.volume : 0;
+
+    uint8_t pktLen = 15;
+    if (a.artnet_cmd == 1 || a.artnet_cmd == 2) {
+        uint8_t fnLen = (uint8_t)strlen(a.file);
+        if (fnLen > 32) fnLen = 32;
+        memcpy(buf + 14, a.file, fnLen);
+        // buf[14+fnLen] is already '\0' from memset
+        pktLen = 15 + fnLen;
+    }
+
+    udpReport.beginPacket(dest, ARTNET_PORT);
+    udpReport.write(buf, pktLen);
+    udpReport.endPacket();
+    Serial.printf("[Marius] ArtAudio -> %s cmd=%d\n", dest.toString().c_str(), a.artnet_cmd);
+}
+
+// ArtDmx (opcode 0x5000) — sends enough slots to cover the target channel.
+static void _mariusSendArtDmx(const MariusAction& a) {
+    if (!wifiConnected || !_mariusHasDest(a.target_ip)) return;
+    if (a.dmx_channel < 1 || a.dmx_channel > 512) return;
+
+    IPAddress dest = _mariusResolveTarget(a.target_ip);
+
+    // Slot count must be even and >= channel (1-indexed).
+    uint16_t ch        = a.dmx_channel;
+    uint16_t slotCount = (ch % 2 == 0) ? ch : ch + 1;
+
+    memset(_mariusDmxBuf, 0, 18 + slotCount);
+    memcpy(_mariusDmxBuf, _kArtMagic, 8);
+    _mariusDmxBuf[8]  = 0x00;  // opcode 0x5000 LE
+    _mariusDmxBuf[9]  = 0x50;
+    _mariusDmxBuf[10] = 0x00;
+    _mariusDmxBuf[11] = 0x0E;
+    _mariusDmxBuf[12] = 0;     // sequence (disabled)
+    _mariusDmxBuf[13] = 0;     // physical
+    _mariusDmxBuf[14] = a.dmx_universe & 0xFF;
+    _mariusDmxBuf[15] = (a.dmx_universe >> 8) & 0x0F;
+    _mariusDmxBuf[16] = (slotCount >> 8) & 0xFF;  // length big-endian
+    _mariusDmxBuf[17] = slotCount & 0xFF;
+    _mariusDmxBuf[18 + ch - 1] = a.dmx_value;
+
+    udpReport.beginPacket(dest, ARTNET_PORT);
+    udpReport.write(_mariusDmxBuf, 18 + slotCount);
+    udpReport.endPacket();
+    Serial.printf("[Marius] ArtDmx -> %s u%d ch%d=%d\n",
+                  dest.toString().c_str(), a.dmx_universe, ch, a.dmx_value);
+}
+
+// =====================================================================
 //  Public API
 // =====================================================================
 
@@ -220,7 +363,6 @@ void mariusFireActions(uint8_t event) {
     for (uint8_t i = 0; i < count; i++) {
         switch (actions[i].type) {
             case MARIUS_ACTION_AUDIO_PLAY: {
-                // Use device current volume if none specified in marius.json
                 uint8_t vol = (actions[i].volume != MARIUS_VOLUME_UNSET)
                               ? actions[i].volume : _audioVolume;
                 if (actions[i].loop)
@@ -232,6 +374,15 @@ void mariusFireActions(uint8_t event) {
             case MARIUS_ACTION_AUDIO_STOP:
                 audioStop();
                 break;
+            case MARIUS_ACTION_OSC:
+                _mariusSendOsc(actions[i]);
+                break;
+            case MARIUS_ACTION_ARTNET_AUDIO:
+                _mariusSendArtAudio(actions[i]);
+                break;
+            case MARIUS_ACTION_ARTNET_DMX:
+                _mariusSendArtDmx(actions[i]);
+                break;
         }
     }
 }
@@ -240,15 +391,32 @@ void mariusFireActions(uint8_t event) {
 //  Action array parser (used by mariusLoad)
 // =====================================================================
 
+// Parse volume field common to audio_play and artnet_audio.
+static uint8_t _mariusParseVolume(JsonObject obj) {
+    if (obj["volume"].is<int>()) {
+        int v = obj["volume"].as<int>();
+        return (v >= 0 && v <= 100) ? (uint8_t)v : MARIUS_VOLUME_UNSET;
+    }
+    return MARIUS_VOLUME_UNSET;
+}
+
+// Parse target_ip and target_port common to all network actions.
+static void _mariusParseRouting(JsonObject obj, MariusAction& a) {
+    const char* ip = obj["target_ip"] | "";
+    strncpy(a.target_ip, ip, 15);
+    a.target_ip[15] = '\0';
+    a.target_port = obj["target_port"] | 0;
+}
+
 static void _mariusParseActionArray(JsonArray arr, MariusAction* actions, uint8_t* count) {
     *count = 0;
     for (JsonObject obj : arr) {
         if (*count >= MARIUS_ACTIONS_MAX) break;
         const char* typeStr = obj["type"] | "";
         MariusAction& a = actions[*count];
-        a.file[0] = '\0';
-        a.volume  = MARIUS_VOLUME_UNSET;
-        a.loop    = false;
+        // Zero all fields; individual parsers only fill what they need.
+        memset(&a, 0, sizeof(MariusAction));
+        a.volume = MARIUS_VOLUME_UNSET;
 
         if (strcmp(typeStr, "audio_play") == 0) {
             a.type = MARIUS_ACTION_AUDIO_PLAY;
@@ -256,25 +424,71 @@ static void _mariusParseActionArray(JsonArray arr, MariusAction* actions, uint8_
             strncpy(a.file, fn, 32);
             a.file[32] = '\0';
             if (a.file[0] == '\0') {
-                Serial.println("[Marius] audio_play action missing file — skipped");
+                Serial.println("[Marius]   audio_play missing file — skipped");
                 continue;
             }
-            if (obj["volume"].is<int>()) {
-                int v = obj["volume"].as<int>();
-                a.volume = (v >= 0 && v <= 100) ? (uint8_t)v : MARIUS_VOLUME_UNSET;
-            }
-            a.loop = obj["loop"] | false;
+            a.volume = _mariusParseVolume(obj);
+            a.loop   = obj["loop"] | false;
             Serial.printf("[Marius]   audio_%s \"%s\" vol=%s\n",
                 a.loop ? "loop" : "play", a.file,
                 a.volume == MARIUS_VOLUME_UNSET ? "dev" : String(a.volume).c_str());
             (*count)++;
+
         } else if (strcmp(typeStr, "audio_stop") == 0) {
             a.type = MARIUS_ACTION_AUDIO_STOP;
             Serial.println("[Marius]   audio_stop");
             (*count)++;
+
+        } else if (strcmp(typeStr, "osc") == 0) {
+            const char* addr = obj["address"] | "";
+            if (addr[0] == '\0') {
+                Serial.println("[Marius]   osc missing address — skipped");
+                continue;
+            }
+            a.type = MARIUS_ACTION_OSC;
+            strncpy(a.osc_addr, addr, 63);
+            a.osc_addr[63] = '\0';
+            _mariusParseRouting(obj, a);
+            Serial.printf("[Marius]   osc %s -> %s:%d\n", a.osc_addr,
+                a.target_ip[0] ? a.target_ip : "sender",
+                a.target_port ? a.target_port : OSC_PORT);
+            (*count)++;
+
+        } else if (strcmp(typeStr, "artnet_audio") == 0) {
+            a.type       = MARIUS_ACTION_ARTNET_AUDIO;
+            a.artnet_cmd = obj["cmd"] | 0;
+            if (a.artnet_cmd == 1 || a.artnet_cmd == 2) {
+                const char* fn = obj["file"] | "";
+                strncpy(a.file, fn, 32);
+                a.file[32] = '\0';
+                if (a.file[0] == '\0') {
+                    Serial.println("[Marius]   artnet_audio play/loop missing file — skipped");
+                    continue;
+                }
+            }
+            a.volume = _mariusParseVolume(obj);
+            _mariusParseRouting(obj, a);
+            Serial.printf("[Marius]   artnet_audio cmd=%d -> %s\n", a.artnet_cmd,
+                a.target_ip[0] ? a.target_ip : "sender");
+            (*count)++;
+
+        } else if (strcmp(typeStr, "artnet_dmx") == 0) {
+            a.type         = MARIUS_ACTION_ARTNET_DMX;
+            a.dmx_universe = obj["universe"] | 0;
+            a.dmx_channel  = obj["channel"]  | 0;
+            a.dmx_value    = obj["value"]    | 0;
+            if (a.dmx_channel < 1 || a.dmx_channel > 512) {
+                Serial.println("[Marius]   artnet_dmx invalid channel — skipped");
+                continue;
+            }
+            _mariusParseRouting(obj, a);
+            Serial.printf("[Marius]   artnet_dmx u%d ch%d=%d -> %s\n",
+                a.dmx_universe, a.dmx_channel, a.dmx_value,
+                a.target_ip[0] ? a.target_ip : "sender");
+            (*count)++;
+
         } else {
-            // Phase 3: osc, artnet_audio, artnet_dmx
-            Serial.printf("[Marius]   skipping Phase 3+ action: %s\n", typeStr);
+            Serial.printf("[Marius]   unknown action type: %s — skipped\n", typeStr);
         }
     }
 }
