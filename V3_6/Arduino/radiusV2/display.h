@@ -9,6 +9,7 @@
  *   2 — Audio status
  *   3 — FTP status
  *   4 — SD card status
+ *   5 — Marius BLE status (shown only when mariusIsConfigured())
  */
 
 #ifndef DISPLAY_H
@@ -20,6 +21,15 @@
 // =====================================================================
 //  NO_DISPLAY stubs — headless builds (HUZZAH32, no TFT)
 // =====================================================================
+// State values passed to displayMariusStatus/Update.
+// Mirrors MariusState enum (defined in marius.h) — use uint8_t to avoid
+// a circular header dependency between display.h and marius.h.
+#define MARIUS_DISPLAY_IDLE       0
+#define MARIUS_DISPLAY_SCANNING   1
+#define MARIUS_DISPLAY_CONNECTING 2
+#define MARIUS_DISPLAY_CONNECTED  3
+#define MARIUS_DISPLAY_REVERTED   4
+
 #ifdef NO_DISPLAY
 
 #define NUM_INFO_SCREENS 5
@@ -39,6 +49,8 @@ inline void displayAudioUpdate(const char*, uint8_t, bool)       {}
 inline void displayFtpStatus(bool, IPAddress, uint16_t)          {}
 inline void displaySdStatus(bool, uint16_t, const char* = nullptr, bool = false) {}
 inline void displayUpdateFooter(float) {}
+inline void displayMariusStatus(uint8_t, const char*, const char*) {}
+inline void displayMariusUpdate(uint8_t, const char*, const char*) {}
 
 #else  // full TFT implementation below
 
@@ -60,10 +72,11 @@ enum ScreenMode {
   SCREEN_ERROR      = 2,
   SCREEN_AUDIO      = 3,
   SCREEN_FTP        = 4,
-  SCREEN_SD         = 5
+  SCREEN_SD         = 5,
+  SCREEN_MARIUS     = 6
 };
 
-#define NUM_INFO_SCREENS 5
+#define NUM_INFO_SCREENS 6
 
 ScreenMode currentScreen = SCREEN_STARTUP;
 
@@ -500,6 +513,119 @@ void displayUpdateFooter(float pktRate) {
   tft.setTextSize(1);
   tft.setTextColor(ST77XX_CYAN);
   if (pktRate > 0) tft.print(pktRate, 1); else tft.print("--");
+}
+
+// =====================================================================
+//  Marius BLE Screen (screen index 5)
+//  state: MARIUS_DISPLAY_* constant; puckName / lastEvent from marius.h
+// =====================================================================
+static uint16_t _mariusStateColor(uint8_t state) {
+  switch (state) {
+    case MARIUS_DISPLAY_CONNECTED:  return ST77XX_CYAN;
+    case MARIUS_DISPLAY_SCANNING:   return ST77XX_YELLOW;
+    case MARIUS_DISPLAY_CONNECTING: return 0xFD60;  // orange
+    case MARIUS_DISPLAY_REVERTED:   return 0x4208;  // dim grey
+    default:                        return 0x7BEF;  // light grey
+  }
+}
+
+static const char* _mariusStateLabel(uint8_t state) {
+  switch (state) {
+    case MARIUS_DISPLAY_CONNECTED:  return "CONNECTED";
+    case MARIUS_DISPLAY_SCANNING:   return "Scanning...";
+    case MARIUS_DISPLAY_CONNECTING: return "Connecting...";
+    case MARIUS_DISPLAY_REVERTED:   return "Reverted";
+    default:                        return "Idle";
+  }
+}
+
+void displayMariusStatus(uint8_t state, const char* puckName, const char* lastEvent) {
+  currentScreen = SCREEN_MARIUS;
+  tft.fillScreen(ST77XX_BLACK);
+
+  // Header
+  tft.setCursor(4, 4);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.print(headerName());
+  tft.print(" | Marius BLE");
+  tft.drawFastHLine(0, 14, 240, _mariusStateColor(state));
+
+  // Puck name
+  tft.setCursor(4, 22);
+  tft.setTextColor(0x7BEF);
+  tft.print("Puck: ");
+  tft.setTextColor(ST77XX_WHITE);
+  char truncPuck[21];
+  strncpy(truncPuck, puckName && puckName[0] ? puckName : "—", 20);
+  truncPuck[20] = '\0';
+  tft.print(truncPuck);
+
+  // State badge (size 2)
+  tft.setCursor(4, 36);
+  tft.setTextSize(2);
+  tft.setTextColor(_mariusStateColor(state));
+  tft.print(_mariusStateLabel(state));
+
+  // Last event
+  tft.setCursor(4, 62);
+  tft.setTextSize(1);
+  tft.setTextColor(0x7BEF);
+  tft.print("Last event:");
+  tft.setCursor(4, 75);
+  tft.setTextSize(2);
+  const char* ev = (lastEvent && lastEvent[0]) ? lastEvent : "—";
+  tft.setTextColor(strcmp(ev, "PRESS") == 0 ? ST77XX_GREEN :
+                   strcmp(ev, "RELEASE") == 0 ? ST77XX_YELLOW : 0x7BEF);
+  tft.print(ev);
+
+  // Footer
+  tft.drawFastHLine(0, 100, 240, 0x4208);
+  tft.setCursor(4, 106);
+  tft.setTextSize(1);
+  tft.setTextColor(0x7BEF);
+  if (state == MARIUS_DISPLAY_REVERTED) {
+    tft.print("BLE reverted — reboot to restore");
+  } else {
+    tft.setTextColor(ST77XX_YELLOW);
+    tft.print("D1: Revert to Radius");
+  }
+}
+
+// Partial update — only redraws the dynamic regions.
+void displayMariusUpdate(uint8_t state, const char* puckName, const char* lastEvent) {
+  if (currentScreen != SCREEN_MARIUS) return;
+
+  // Puck line
+  tft.fillRect(4, 22, 236, 8, ST77XX_BLACK);
+  tft.setCursor(4, 22);
+  tft.setTextSize(1);
+  tft.setTextColor(0x7BEF);
+  tft.print("Puck: ");
+  tft.setTextColor(ST77XX_WHITE);
+  char truncPuck[21];
+  strncpy(truncPuck, puckName && puckName[0] ? puckName : "—", 20);
+  truncPuck[20] = '\0';
+  tft.print(truncPuck);
+
+  // State badge
+  tft.fillRect(4, 36, 236, 18, ST77XX_BLACK);
+  tft.setCursor(4, 36);
+  tft.setTextSize(2);
+  tft.setTextColor(_mariusStateColor(state));
+  tft.print(_mariusStateLabel(state));
+
+  // Divider colour update
+  tft.drawFastHLine(0, 14, 240, _mariusStateColor(state));
+
+  // Last event
+  tft.fillRect(4, 75, 180, 18, ST77XX_BLACK);
+  tft.setCursor(4, 75);
+  tft.setTextSize(2);
+  const char* ev = (lastEvent && lastEvent[0]) ? lastEvent : "—";
+  tft.setTextColor(strcmp(ev, "PRESS") == 0 ? ST77XX_GREEN :
+                   strcmp(ev, "RELEASE") == 0 ? ST77XX_YELLOW : 0x7BEF);
+  tft.print(ev);
 }
 
 #endif // NO_DISPLAY

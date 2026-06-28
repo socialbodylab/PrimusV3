@@ -833,6 +833,8 @@ class ControllerState:
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
                     "now_playing": as_["filename"] if as_ else "",
                     "audio_status": "playing" if as_ and as_["status"] == 1 else "stopped",
+                    "marius_connected": dev.get("marius_connected", False),
+                    "marius_puck": dev.get("marius_puck", ""),
                     "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
                     "outputs": [],
                 }
@@ -1066,6 +1068,8 @@ class ControllerState:
                     "firmware_version", capabilities.get("firmware_version")),
                 "ip_config_pending": None,
                 "outputs": [],
+                "marius_connected": capabilities.get("marius_connected", False),
+                "marius_puck": capabilities.get("marius_puck", ""),
             }
             _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
             dev["outputs"] = self._build_device_outputs_unlocked(
@@ -1155,6 +1159,8 @@ class ControllerState:
             "firmware_version", capabilities.get("firmware_version"))
         _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
         dev["ip_config_pending"] = None
+        dev["marius_connected"] = capabilities.get("marius_connected", False)
+        dev["marius_puck"]      = capabilities.get("marius_puck", "")
 
         output_cfgs = _output_configs_from_node(node_info)
         if output_cfgs:

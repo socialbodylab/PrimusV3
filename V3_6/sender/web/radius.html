@@ -7,8 +7,8 @@
 <link rel="stylesheet" href="/css/style.css">
 <script>
 window.PAGE_CONFIG = {
-    modes: ["audio", "cues", "cue-map", "log"],
-    modeLabels: { audio: "Audio", cues: "Audio Cues", "cue-map": "Cue Map", log: "Net Log" },
+    modes: ["audio", "cues", "cue-map", "marius", "log"],
+    modeLabels: { audio: "Audio", cues: "Audio Cues", "cue-map": "Cue Map", marius: "Marius", log: "Net Log" },
 };
 </script>
 <script defer src="/js/alpine.min.js"></script>
@@ -17,6 +17,7 @@ window.PAGE_CONFIG = {
 <script src="/js/audio-cues.js"></script>
 <script src="/js/cue-map.js"></script>
 <script src="/js/net-log.js"></script>
+<script src="/js/marius.js"></script>
 </head>
 <body>
 
@@ -85,6 +86,10 @@ window.PAGE_CONFIG = {
                           :title="$store.conn.networkModeTitle(item)"
                           x-text="$store.conn.networkModeLabel(item)"></span>
                     <span class="audio-badge" title="V3.2 Audio Node">♪</span>
+                    <span x-show="item.marius_connected"
+                          class="audio-badge"
+                          style="background:#1e4f6e;color:#67d4f8"
+                          :title="'Marius: ' + (item.marius_puck || 'connected')">BLE</span>
                 </div>
                 <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === item._di" x-cloak>
                     <div class="form-group compact">
@@ -811,6 +816,169 @@ window.PAGE_CONFIG = {
     </div><!-- /.Cue Map panel -->
 
     <!-- ──── NET LOG PANEL ──── -->
+    <!-- ──── MARIUS PANEL ──── -->
+    <div class="panel" x-show="$store.app.mode === 'marius'" x-data="mariusEditor()">
+
+        <div class="flex justify-between items-center mb-4">
+            <span class="section-title" style="margin:0">Marius BLE Editor</span>
+            <div class="btn-group">
+                <button class="btn btn-sm" @click="importJson()">↑ Import</button>
+                <button class="btn btn-sm" @click="exportJson()">↓ Export</button>
+            </div>
+        </div>
+
+        <!-- Status banner -->
+        <template x-if="status">
+            <div class="mb-3 px-3 py-2 rounded text-sm"
+                 :class="status.ok === true ? 'bg-green-900 text-green-200' : status.ok === false ? 'bg-red-900 text-red-200' : 'bg-gray-800 text-gray-300'"
+                 x-text="status.msg"></div>
+        </template>
+
+        <!-- Device selector -->
+        <div class="form-group mb-4">
+            <label class="form-label">Device</label>
+            <div class="flex gap-2 items-center">
+                <select class="form-input" x-model.number="deviceIdx"
+                        :disabled="audioDevices.length === 0">
+                    <template x-for="(d, i) in audioDevices" :key="d.ip">
+                        <option :value="i" x-text="d.name + ' (' + d.ip + ')'"></option>
+                    </template>
+                </select>
+                <button class="btn btn-sm btn-primary"
+                        @click="loadFromDevice()"
+                        :disabled="!selectedDevice">↓ Load</button>
+                <button class="btn btn-sm btn-primary"
+                        @click="saveToDevice()"
+                        :disabled="!selectedDevice">↑ Save</button>
+            </div>
+            <template x-if="selectedDevice && selectedDevice.marius_connected">
+                <div class="text-sm mt-1" style="color:#67d4f8">
+                    BLE connected — <span x-text="selectedDevice.marius_puck"></span>
+                </div>
+            </template>
+        </div>
+
+        <!-- Puck name -->
+        <div class="form-group mb-4">
+            <label class="form-label">Puck Name (BLE advertised name)</label>
+            <input class="form-input" type="text" x-model="puckName"
+                   placeholder="Puck.js abc" maxlength="32">
+        </div>
+
+        <!-- Action list for one event -->
+        <template x-for="event in ['press', 'release']">
+            <div class="mb-5">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="section-title" style="margin:0;text-transform:capitalize"
+                          x-text="event + ' Actions'"></span>
+                    <button class="btn btn-sm btn-primary" @click="addAction(event)">+ Add</button>
+                </div>
+
+                <template x-if="(event === 'press' ? pressActions : releaseActions).length === 0">
+                    <p class="text-muted text-sm">No actions.</p>
+                </template>
+
+                <template x-for="(a, idx) in (event === 'press' ? pressActions : releaseActions)" :key="idx">
+                    <div class="device-card mb-2" style="padding:10px">
+                        <!-- Row header: type + move + remove -->
+                        <div class="flex gap-2 items-center mb-2">
+                            <select class="form-input form-input-sm" x-model="a.type" style="flex:1">
+                                <option value="audio_play">Audio Play</option>
+                                <option value="audio_stop">Audio Stop</option>
+                                <option value="osc">OSC</option>
+                                <option value="artnet_audio">Art-Net Audio</option>
+                                <option value="artnet_dmx">Art-Net DMX</option>
+                            </select>
+                            <button class="btn btn-sm" @click="moveAction(event, idx, -1)" :disabled="idx===0">↑</button>
+                            <button class="btn btn-sm" @click="moveAction(event, idx, 1)"
+                                    :disabled="idx === (event==='press'?pressActions:releaseActions).length-1">↓</button>
+                            <button class="btn btn-sm btn-danger" @click="removeAction(event, idx)">&times;</button>
+                        </div>
+
+                        <!-- Type-specific fields -->
+                        <div class="grid gap-2" style="grid-template-columns:1fr 1fr">
+
+                            <!-- File -->
+                            <div class="form-group compact" x-show="needsFile(a)">
+                                <label class="form-label">File</label>
+                                <input class="form-input form-input-sm" type="text"
+                                       x-model="a.file" placeholder="sound.wav">
+                            </div>
+
+                            <!-- Volume -->
+                            <div class="form-group compact" x-show="needsVolume(a)">
+                                <label class="form-label">Volume (0–100)</label>
+                                <input class="form-input form-input-sm" type="number"
+                                       x-model="a.volume" min="0" max="100" placeholder="device default">
+                            </div>
+
+                            <!-- Loop checkbox -->
+                            <div class="form-group compact" x-show="needsLoop(a)">
+                                <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px;margin-top:16px">
+                                    <input type="checkbox" x-model="a.loop">
+                                    <span>Loop</span>
+                                </label>
+                            </div>
+
+                            <!-- OSC address -->
+                            <div class="form-group compact" x-show="needsOsc(a)">
+                                <label class="form-label">Address</label>
+                                <input class="form-input form-input-sm" type="text"
+                                       x-model="a.osc_addr" placeholder="/cue/1">
+                            </div>
+
+                            <!-- Art-Net audio cmd -->
+                            <div class="form-group compact" x-show="needsArtCmd(a)">
+                                <label class="form-label">Cmd</label>
+                                <select class="form-input form-input-sm" x-model.number="a.cmd">
+                                    <option value="0">0 — Stop</option>
+                                    <option value="1">1 — Play</option>
+                                    <option value="2">2 — Loop</option>
+                                    <option value="3">3 — Pause</option>
+                                    <option value="4">4 — Volume</option>
+                                    <option value="6">6 — Play Cue</option>
+                                    <option value="7">7 — Loop Cue</option>
+                                </select>
+                            </div>
+
+                            <!-- DMX fields -->
+                            <div class="form-group compact" x-show="needsDmx(a)">
+                                <label class="form-label">Universe</label>
+                                <input class="form-input form-input-sm" type="number"
+                                       x-model.number="a.universe" min="0" max="255">
+                            </div>
+                            <div class="form-group compact" x-show="needsDmx(a)">
+                                <label class="form-label">Channel (1–512)</label>
+                                <input class="form-input form-input-sm" type="number"
+                                       x-model.number="a.channel" min="1" max="512">
+                            </div>
+                            <div class="form-group compact" x-show="needsDmx(a)">
+                                <label class="form-label">Value (0–255)</label>
+                                <input class="form-input form-input-sm" type="number"
+                                       x-model.number="a.value" min="0" max="255">
+                            </div>
+
+                            <!-- target_ip (network actions) -->
+                            <div class="form-group compact" x-show="hasTarget(a)">
+                                <label class="form-label">Target IP (blank = sender)</label>
+                                <input class="form-input form-input-sm" type="text"
+                                       x-model="a.target_ip" placeholder="192.168.8.x">
+                            </div>
+
+                            <!-- target_port (OSC only) -->
+                            <div class="form-group compact" x-show="needsOsc(a)">
+                                <label class="form-label">Port (blank = 53001)</label>
+                                <input class="form-input form-input-sm" type="number"
+                                       x-model="a.target_port" placeholder="53001">
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+    </div><!-- /.Marius panel -->
+
     <div class="panel" x-show="$store.app.mode === 'log'" x-data="netLog">
 
         <div class="flex justify-between items-center mb-3">

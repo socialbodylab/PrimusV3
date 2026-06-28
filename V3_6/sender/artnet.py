@@ -51,6 +51,8 @@ NODE_CAPS_PREFIX = "PV3CAP1"
 NODE_CAPS_FEATURE_PREFIX = "F:"
 NODE_CAPS_BOARD_PREFIX = "B:"
 NODE_CAPS_IP_PREFIX = "IP:"
+NODE_CAPS_MARIUS_PREFIX = "MC:"
+NODE_CAPS_MARIUS_PUCK_PREFIX = "MP:"
 
 BOARD_PROFILE_LABELS = {
     "v1": "V1 Huzzah32",
@@ -416,6 +418,8 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
         "hello": False,
         "ip_config": False,
         "output_config": False,
+        "marius_connected": False,
+        "marius_puck": "",
     }
     name_blob = f"{short_name} {long_name}".lower()
     parts = _node_capability_parts(node_report)
@@ -432,6 +436,12 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
                 continue
             if part.startswith(NODE_CAPS_IP_PREFIX):
                 _parse_ip_capability(part, caps)
+                continue
+            if part.startswith(NODE_CAPS_MARIUS_PREFIX):
+                caps["marius_connected"] = part[len(NODE_CAPS_MARIUS_PREFIX):].strip() == "1"
+                continue
+            if part.startswith(NODE_CAPS_MARIUS_PUCK_PREFIX):
+                caps["marius_puck"] = part[len(NODE_CAPS_MARIUS_PUCK_PREFIX):].strip()
                 continue
             if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
                 continue

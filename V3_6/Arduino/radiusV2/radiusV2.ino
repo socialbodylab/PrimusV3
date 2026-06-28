@@ -216,10 +216,22 @@ void sendArtPollReply(IPAddress dest) {
   strncpy((char*)&reply[26], nameToUse, 17);
   strncpy((char*)&reply[44], DEVICE_LONG_NAME, 63);
 
-  char reportBuf[64];
-  snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] OK|PV3CAP1|F:RIH|IP:%c",
-           (int)packetCount, useStaticIP ? 'S' : 'D');
+  char reportBuf[128];
+  if (mariusIsConfigured() && mariusIsConnected()) {
+    snprintf(reportBuf, sizeof(reportBuf),
+             "#0001 [%04d] OK|PV3CAP1|F:RIH|IP:%c|MC:1|MP:%s",
+             (int)packetCount, useStaticIP ? 'S' : 'D', mariusPuckName());
+  } else if (mariusIsConfigured()) {
+    snprintf(reportBuf, sizeof(reportBuf),
+             "#0001 [%04d] OK|PV3CAP1|F:RIH|IP:%c|MC:0",
+             (int)packetCount, useStaticIP ? 'S' : 'D');
+  } else {
+    snprintf(reportBuf, sizeof(reportBuf),
+             "#0001 [%04d] OK|PV3CAP1|F:RIH|IP:%c",
+             (int)packetCount, useStaticIP ? 'S' : 'D');
+  }
   strncpy((char*)&reply[108], reportBuf, 63);
+  reply[171] = '\0';
 
   // reply[173] = 0  (no LED outputs — already zeroed by memset)
 
@@ -543,7 +555,8 @@ void sendAudioStatus(uint8_t status, const char* filename) {
 // =====================================================================
 
 void handleScreenCycle() {
-  infoScreenIndex = (infoScreenIndex + 1) % NUM_INFO_SCREENS;
+  uint8_t maxScreens = mariusIsConfigured() ? NUM_INFO_SCREENS : NUM_INFO_SCREENS - 1;
+  infoScreenIndex = (infoScreenIndex + 1) % maxScreens;
   switch (infoScreenIndex) {
     case 0:
       displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), wifiConnected,
@@ -570,6 +583,11 @@ void handleScreenCycle() {
                       audioIsPlaying() && sdSelectedFile[0] != '\0' &&
                       strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
       break;
+    case 5: {
+      uint8_t ds = mariusIsActive() ? (uint8_t)mariusGetState() : MARIUS_DISPLAY_REVERTED;
+      displayMariusStatus(ds, mariusPuckName(), mariusLastEvent());
+      break;
+    }
   }
 }
 
@@ -606,6 +624,10 @@ void handleD1Press() {
       displaySdStatus(audioSdIsReady(), sdCachedFileCount, sdSelectedFile,
                       audioIsPlaying() && sdSelectedFile[0] != '\0' &&
                       strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
+      break;
+    case 5:  // Marius screen — D1 reverts BLE for this session
+      if (mariusIsActive()) mariusRevert();
+      displayMariusStatus(MARIUS_DISPLAY_REVERTED, mariusPuckName(), mariusLastEvent());
       break;
     default:
       break;

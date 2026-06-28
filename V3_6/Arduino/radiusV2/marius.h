@@ -605,6 +605,18 @@ void mariusUpdate() {
         }
     }
 
+    // ── Display update on state or event change ───────────────────────
+    {
+        static uint8_t prevDisplayState = 255;
+        static char    prevEvent[16]    = {0};
+        uint8_t ds = _mariusActive ? (uint8_t)_mariusState : MARIUS_DISPLAY_REVERTED;
+        if (ds != prevDisplayState || strcmp(_mariusLastEvent, prevEvent) != 0) {
+            prevDisplayState = ds;
+            strncpy(prevEvent, _mariusLastEvent, sizeof(prevEvent) - 1);
+            displayMariusUpdate(ds, _mariusPuckName, _mariusLastEvent);
+        }
+    }
+
     // ── State machine ──────────────────────────────────────────────────
     switch (_mariusState) {
 

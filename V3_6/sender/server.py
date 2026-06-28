@@ -218,6 +218,18 @@ class Handler(BaseHTTPRequestHandler):
             entries = netlog.get_entries(since_id=since)
             self._json_response({"entries": entries})
             return
+        if path == "/api/marius":
+            params = self._query_params()
+            ip = params.get("ip", "").strip()
+            if not ip:
+                self._json_error(400, "missing ip")
+                return
+            try:
+                raw = ftp_download(ip, "/marius.json")
+                self._json_response(json.loads(raw.decode()))
+            except Exception as e:
+                self._json_error(500, str(e))
+            return
         if path == "/api/audio/cue_map":
             params = self._query_params()
             try:
@@ -823,6 +835,19 @@ class Handler(BaseHTTPRequestHandler):
                 Handler.audio_cues_data = data
                 _audio_cues_mod.save_audio_cues(data)
             self._json_response(data)
+
+        elif path == "/api/marius/push":
+            ip      = data.get("ip", "").strip()
+            content = data.get("content")
+            if not ip or not isinstance(content, dict):
+                self._json_error(400, "missing ip or content")
+                return
+            try:
+                raw = json.dumps(content, indent=2).encode()
+                ftp_upload(ip, "/marius.json", raw)
+                self._ok()
+            except Exception as e:
+                self._json_error(500, str(e))
 
         elif path == "/api/audio_cues/push_cue_maps":
             with self.audio_cues_lock:
