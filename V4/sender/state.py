@@ -19,6 +19,7 @@ from artnet import (
     parse_node_capabilities,
     parse_node_outputs,
     send_output_config,
+    send_receive_config,
     send_art_address,
     send_ip_config,
     ipv4_octets,
@@ -61,6 +62,9 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "hello": False,
     "ip_config": False,
     "output_config": False,
+    "receive_config": False,
+    "receive_mode": "split",
+    "base_universe": 0,
     "battery": False,
 }
 CONTROL_CAPABILITY_LABELS = {
@@ -68,7 +72,10 @@ CONTROL_CAPABILITY_LABELS = {
     "hello": "remote identify flash",
     "ip_config": "remote IP configuration",
     "output_config": "remote output configuration",
+    "receive_config": "remote receive mode configuration",
 }
+RECEIVE_MODES = ("split", "combined")
+COMBINED_RECEIVE_MAX_PIXELS = 170
 _DEVICE_FILTER_UNCHANGED = object()
 TRANSPORT_FAIL_STREAK_LIMIT = 90  # ~3 s at 30 FPS before surfacing a send warning
 
@@ -259,6 +266,11 @@ def _normalize_device_capabilities(capabilities=None):
     out["hello"] = bool(out["hello"])
     out["ip_config"] = bool(out["ip_config"])
     out["output_config"] = bool(out["output_config"])
+    out["receive_config"] = bool(out.get("receive_config"))
+    mode = str(out.get("receive_mode") or "split").lower()
+    out["receive_mode"] = mode if mode in RECEIVE_MODES else "split"
+    base = out.get("base_universe")
+    out["base_universe"] = int(base) if base is not None else 0
     out["battery"] = bool(out.get("battery"))
     return out
 
@@ -292,6 +304,8 @@ def _save_devices(devices):
             "static_ip": d.get("static_ip"),
             "gateway": d.get("gateway"),
             "subnet": d.get("subnet"),
+            "receive_mode": d.get("receive_mode", "split"),
+            "base_universe": d.get("base_universe", 0),
             "outputs": saved_outputs,
         })
     data["devices"] = saved_devices
@@ -462,6 +476,124 @@ def _output_configs_from_node(node_info):
         type_keys=LOOK_OUTPUT_TYPES)
 
 
+def _receive_fields_from_node(node_info, capabilities, fallback_base=0):
+    mode = node_info.get("receive_mode")
+    base = node_info.get("base_universe")
+    if mode is None:
+        mode = capabilities.get("receive_mode")
+    if base is None:
+        base = capabilities.get("base_universe")
+    if mode not in RECEIVE_MODES:
+        mode = "split"
+    if base is None:
+        base = fallback_base
+    return mode, int(base)
+
+
+def _combined_pixel_total(outputs):
+    return sum(int(o.get("count") or 0) for o in outputs)
+
+
+def _validate_receive_mode_for_device(receive_mode, outputs):
+    if receive_mode != "combined":
+        return True, None
+    total = _combined_pixel_total(outputs)
+    if total > COMBINED_RECEIVE_MAX_PIXELS:
+        return False, (
+            f"combined mode requires at most {COMBINED_RECEIVE_MAX_PIXELS} pixels "
+            f"({total} configured)"
+        )
+    return True, None
+
+
+def _apply_output_universes(outputs, receive_mode, base_u):
+    active_idx = 0
+    for output in outputs:
+        if output.get("type") == "none" or int(output.get("count") or 0) <= 0:
+            continue
+        if receive_mode == "combined":
+            output["universe"] = base_u
+        else:
+            output["universe"] = base_u + active_idx
+            active_idx += 1
+
+
+def _device_blackout_info(dev):
+    outputs = dev.get("outputs", [])
+    receive_mode = dev.get("receive_mode", "split")
+    if receive_mode == "combined":
+        total = _combined_pixel_total(outputs)
+        if total <= 0:
+            return []
+        return [(dev.get("base_universe", 0), total)]
+    info = []
+    for output in outputs:
+        count = int(output.get("count") or 0)
+        if count <= 0:
+            continue
+        info.append((output["universe"], count))
+    return info
+
+
+def _queue_device_frame_sends(send_queue, di, dev, frame_buffers):
+    """Append Art-Net sends for one device frame.
+
+    frame_buffers maps output index -> rgb bytes for outputs with pixel data.
+    """
+    outputs = dev.get("outputs", [])
+    receive_mode = dev.get("receive_mode", "split")
+    sender = dev["sender"]
+    if receive_mode == "combined":
+        combined = bytearray()
+        for oi, output in enumerate(outputs):
+            count = int(output.get("count") or 0)
+            if count <= 0:
+                continue
+            data = frame_buffers.get(oi)
+            if data is None:
+                combined.extend(bytes(count * 3))
+            else:
+                expected = count * 3
+                if len(data) >= expected:
+                    combined.extend(data[:expected])
+                else:
+                    combined.extend(data)
+                    combined.extend(bytes(expected - len(data)))
+        if combined:
+            send_queue.append(
+                (di, sender, dev.get("base_universe", 0), bytes(combined)))
+        return
+
+    for oi, data in frame_buffers.items():
+        if oi >= len(outputs):
+            continue
+        send_queue.append((di, sender, outputs[oi]["universe"], data))
+
+
+def _device_flash_entries(dev, rgb_triplet):
+    """Build (universe, bytes) entries for a solid-color flash."""
+    outputs = dev.get("outputs", [])
+    receive_mode = dev.get("receive_mode", "split")
+    if receive_mode == "combined":
+        combined = bytearray()
+        for output in outputs:
+            count = int(output.get("count") or 0)
+            if count <= 0:
+                continue
+            combined.extend(rgb_triplet * count)
+        if not combined:
+            return []
+        return [(dev.get("base_universe", 0), bytes(combined))]
+
+    entries = []
+    for output in outputs:
+        count = int(output.get("count") or 0)
+        if count <= 0:
+            continue
+        entries.append((output["universe"], rgb_triplet * count))
+    return entries
+
+
 # ======================================================================
 #  CONTROLLER STATE
 # ======================================================================
@@ -579,6 +711,8 @@ class ControllerState:
                     "static_ip": sd.get("static_ip"),
                     "gateway": sd.get("gateway"),
                     "subnet": sd.get("subnet"),
+                    "receive_mode": sd.get("receive_mode", "split"),
+                    "base_universe": sd.get("base_universe", 0),
                     "outputs": sd.get("outputs"),
                 }, auto_save=False)
         if refreshed:
@@ -806,6 +940,7 @@ class ControllerState:
                     "name": dev["name"],
                     "ip": dev["ip"],
                     "base_universe": dev["base_universe"],
+                    "receive_mode": dev.get("receive_mode", "split"),
                     "hardware_profile": dev.get("hardware_profile", "unknown"),
                     "hardware_label": dev.get("hardware_label", "Unknown hardware"),
                     "firmware_version": dev.get("firmware_version"),
@@ -1046,6 +1181,52 @@ class ControllerState:
             _save_devices(self.devices)
             return {"ok": True}
 
+    def set_device_receive_mode(self, di, receive_mode, base_universe):
+        with self.lock:
+            status = self._device_capability_status_unlocked(di, "receive_config")
+            if not status["ok"]:
+                return status
+            if receive_mode not in RECEIVE_MODES:
+                return {"ok": False, "error": f"invalid receive_mode: {receive_mode!r}"}
+            dev = self.devices[di]
+            try:
+                base_universe = int(base_universe)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "base_universe must be an integer"}
+            if base_universe < 0 or base_universe > 32767:
+                return {"ok": False, "error": "base_universe must be 0-32767"}
+            valid, err = _validate_receive_mode_for_device(receive_mode, dev.get("outputs", []))
+            if not valid:
+                return {"ok": False, "error": err}
+            prior_mode = dev.get("receive_mode", "split")
+            prior_base = dev.get("base_universe", 0)
+            dev["receive_mode"] = receive_mode
+            dev["base_universe"] = base_universe
+            _apply_output_universes(dev["outputs"], receive_mode, base_universe)
+            if dev["sender"].connected:
+                if not self._ensure_sender_connected_unlocked(dev):
+                    dev["receive_mode"] = prior_mode
+                    dev["base_universe"] = prior_base
+                    _apply_output_universes(dev["outputs"], prior_mode, prior_base)
+                    return {
+                        "ok": False,
+                        "error": dev.get("transport_error") or "sender connection failed",
+                    }
+                try:
+                    send_receive_config(
+                        dev["ip"],
+                        receive_mode,
+                        base_universe,
+                        source_ip=self.artnet_source_ip,
+                    )
+                except OSError as error:
+                    dev["receive_mode"] = prior_mode
+                    dev["base_universe"] = prior_base
+                    _apply_output_universes(dev["outputs"], prior_mode, prior_base)
+                    return {"ok": False, "error": self._transport_error_text(error)}
+            _save_devices(self.devices)
+            return {"ok": True}
+
     # ------------------------------------------------------------------
     #  Device management
     # ------------------------------------------------------------------
@@ -1065,7 +1246,7 @@ class ControllerState:
                     "ok": False,
                     "error": config_error or "output configuration failed",
                 }
-            info = [(o["universe"], o["count"]) for o in dev["outputs"]]
+            info = _device_blackout_info(dev)
             dev["sender"].blackout(info)
             self._clear_transport_error_unlocked(dev)
             return {"ok": True}
@@ -1074,7 +1255,7 @@ class ControllerState:
         with self.lock:
             dev = self.devices[di]
             if dev["sender"].connected:
-                info = [(o["universe"], o["count"]) for o in dev["outputs"]]
+                info = _device_blackout_info(dev)
                 dev["sender"].blackout(info)
             dev["sender"].disconnect()
             dev["connected"] = False
@@ -1102,17 +1283,20 @@ class ControllerState:
                 }
 
             output_cfgs = _output_configs_from_node(node_info)
+            capabilities = _capabilities_from_node(node_info)
             base_u = (
                 output_cfgs[0].get("universe", 0)
                 if output_cfgs else
                 (node_info["universes"][0] if node_info.get("universes") else 0)
             )
-            capabilities = _capabilities_from_node(node_info)
+            receive_mode, base_u = _receive_fields_from_node(
+                node_info, capabilities, fallback_base=base_u)
 
             dev = {
                 "name": node_info.get("short_name", "Node"),
                 "ip": node_info["ip"],
                 "base_universe": base_u,
+                "receive_mode": receive_mode,
                 "connected": False,
                 "sender": ArtNetSender(node_info["ip"], source_ip=self.artnet_source_ip),
                 "transport_error": None,
@@ -1129,7 +1313,7 @@ class ControllerState:
             }
             _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
             dev["outputs"] = self._build_device_outputs_unlocked(
-                node_info, output_cfgs, base_u)
+                node_info, output_cfgs, base_u, receive_mode=receive_mode)
             self.devices.append(dev)
             if auto_save:
                 _save_devices(self.devices)
@@ -1158,7 +1342,8 @@ class ControllerState:
         return None
 
     def _build_device_outputs_unlocked(self, node_info, output_cfgs, base_u,
-                                       existing_outputs=None):
+                                       existing_outputs=None,
+                                       receive_mode="split"):
         outputs = []
         existing_outputs = existing_outputs or []
         existing_by_name = {
@@ -1191,6 +1376,7 @@ class ControllerState:
                 "grid_order": grid_order if is_grid else "progressive",
                 "grid_rotation": grid_rotation if is_grid else 0,
             })
+        _apply_output_universes(outputs, receive_mode, base_u)
         return outputs
 
     def _refresh_device_from_node_unlocked(self, dev, node_info):
@@ -1213,14 +1399,19 @@ class ControllerState:
 
         output_cfgs = _output_configs_from_node(node_info)
         if output_cfgs:
-            base_u = output_cfgs[0].get(
+            fallback_base = output_cfgs[0].get(
                 "universe",
                 node_info.get("universes", [dev.get("base_universe", 0)])[0]
                 if node_info.get("universes") else dev.get("base_universe", 0)
             )
+            receive_mode, base_u = _receive_fields_from_node(
+                node_info, capabilities, fallback_base=fallback_base)
+            dev["receive_mode"] = receive_mode
             dev["base_universe"] = base_u
             dev["outputs"] = self._build_device_outputs_unlocked(
-                node_info, output_cfgs, base_u, existing_outputs=dev.get("outputs", []))
+                node_info, output_cfgs, base_u,
+                existing_outputs=dev.get("outputs", []),
+                receive_mode=receive_mode)
         dev["sender"].ip = dev["ip"]
         return True
 
@@ -1249,7 +1440,7 @@ class ControllerState:
             if 0 <= di < len(self.devices):
                 dev = self.devices[di]
                 if dev["sender"].connected:
-                    info = [(o["universe"], o["count"]) for o in dev["outputs"]]
+                    info = _device_blackout_info(dev)
                     dev["sender"].blackout(info)
                     dev["sender"].disconnect()
                 self.devices.pop(di)
@@ -1367,7 +1558,7 @@ class ControllerState:
         with self.lock:
             for dev in self.devices:
                 if dev["sender"].connected:
-                    info = [(o["universe"], o["count"]) for o in dev["outputs"]]
+                    info = _device_blackout_info(dev)
                     dev["sender"].blackout(info)
                     dev["sender"].disconnect()
                     dev["connected"] = False
@@ -1410,20 +1601,18 @@ class ControllerState:
                 return False
             if not self._ensure_sender_connected_unlocked(dev):
                 return False
-            outputs_info = []
-            for o in dev["outputs"]:
-                outputs_info.append((o["universe"], o["count"]))
+            flash_on = _device_flash_entries(dev, bytes([255, 0, 0]))
+            blackout_on = _device_flash_entries(dev, bytes([0, 0, 0]))
             sender = dev["sender"]
 
         # Flash red then black (outside lock to avoid blocking animation)
         ok = True
-        for universe, count in outputs_info:
-            red = bytes([255, 0, 0] * count)
-            ok = sender.send_output(universe, red) and ok
+        for universe, data in flash_on:
+            ok = sender.send_output(universe, data) and ok
         sender.advance_sequence()
         time.sleep(1.0)
-        for universe, count in outputs_info:
-            ok = sender.send_output(universe, bytes(count * 3)) and ok
+        for universe, data in blackout_on:
+            ok = sender.send_output(universe, data) and ok
         sender.advance_sequence()
         if ok:
             return True
@@ -1687,6 +1876,7 @@ class ControllerState:
                         frames = self._override_default_frames
                     if not frames:
                         continue
+                    frame_buffers = {}
                     for oi, o in enumerate(dev["outputs"]):
                         if oi >= len(frames):
                             continue
@@ -1706,9 +1896,12 @@ class ControllerState:
                         buf = bytearray()
                         for r, g, b in send_pixels:
                             buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
-                        send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
+                        frame_buffers[oi] = bytes(buf)
+                    if frame_buffers:
+                        _queue_device_frame_sends(send_queue, di, dev, frame_buffers)
                         devices_sent.add(di)
                     continue
+                frame_buffers = {}
                 for oi, o in enumerate(dev["outputs"]):
                     if oi >= len(self.active_look["outputs"]):
                         continue
@@ -1728,7 +1921,9 @@ class ControllerState:
                     buf = bytearray()
                     for r, g, b in send_pixels:
                         buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
-                    send_queue.append((di, dev["sender"], o["universe"], bytes(buf)))
+                    frame_buffers[oi] = bytes(buf)
+                if frame_buffers:
+                    _queue_device_frame_sends(send_queue, di, dev, frame_buffers)
                     devices_sent.add(di)
 
             # Keepalive blackout so receivers learn sender IP and report telemetry
@@ -1740,6 +1935,14 @@ class ControllerState:
                 if dev_filter is not None and di not in dev_filter:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
+                    continue
+                if dev.get("receive_mode") == "combined":
+                    total = _combined_pixel_total(dev.get("outputs", []))
+                    if total <= 0:
+                        continue
+                    send_queue.append(
+                        (di, dev["sender"], dev.get("base_universe", 0), bytes(total * 3)))
+                    devices_sent.add(di)
                     continue
                 for o in dev["outputs"]:
                     count = o.get("count") or 0
@@ -1797,7 +2000,7 @@ class ControllerState:
         self.running = False
         for dev in self.devices:
             if dev["sender"].connected:
-                info = [(o["universe"], o["count"]) for o in dev["outputs"]]
+                info = _device_blackout_info(dev)
                 dev["sender"].blackout(info)
                 dev["sender"].disconnect()
 

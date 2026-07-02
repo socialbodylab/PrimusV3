@@ -21,6 +21,7 @@ ARTNET_OPCODE_POLL = 0x2000
 ARTNET_OPCODE_POLLREPLY = 0x2100
 ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
+ARTNET_OPCODE_RECEIVE_CONFIG = 0x8110
 ARTNET_OPCODE_IP_CONFIG = 0x8200
 ARTNET_OPCODE_AUDIO_CMD = 0x8300
 ARTNET_OPCODE_FTP_CMD = 0x8301
@@ -31,6 +32,7 @@ NODE_CAPS_PREFIX_RADIUS = "PVRAD1"
 NODE_CAPS_FEATURE_PREFIX = "F:"
 NODE_CAPS_BOARD_PREFIX = "B:"
 NODE_CAPS_IP_PREFIX = "IP:"
+NODE_CAPS_UNIVERSE_PREFIX = "U:"
 
 BOARD_PROFILE_LABELS = {
     "v1": "V1 Huzzah32",
@@ -690,6 +692,9 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
         "hello": False,
         "ip_config": False,
         "output_config": False,
+        "receive_config": False,
+        "receive_mode": "split",
+        "base_universe": None,
         "battery": False,
         "audio": False,
         "ftp": False,
@@ -710,6 +715,9 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             if part.startswith(NODE_CAPS_IP_PREFIX):
                 _parse_ip_capability(part, caps)
                 continue
+            if part.startswith(NODE_CAPS_UNIVERSE_PREFIX):
+                _parse_universe_capability(part, caps)
+                continue
             if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
                 continue
             saw_feature_token = True
@@ -718,6 +726,7 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             caps["hello"] = "H" in features
             caps["ip_config"] = "I" in features
             caps["output_config"] = "O" in features
+            caps["receive_config"] = "M" in features
             caps["battery"] = "B" in features
         if saw_feature_token:
             if caps["hardware_profile"] == "unknown" and "primusv3" in name_blob:
@@ -749,6 +758,15 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             "output_config": True,
         })
     return caps
+
+
+def _parse_universe_capability(part, caps):
+    match = re.fullmatch(r"U:([SC]):(\d+)", part)
+    if not match:
+        return
+    mode_code, base_text = match.groups()
+    caps["receive_mode"] = "combined" if mode_code == "C" else "split"
+    caps["base_universe"] = int(base_text)
 
 
 def _parse_ip_capability(part, caps):
@@ -904,6 +922,26 @@ def send_output_config(ip, output_types, type_to_id_map, source_ip=None):
     type_to_id_map: dict mapping type key -> firmware enum int.
     """
     pkt = build_output_config_packet(output_types, type_to_id_map)
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
+
+
+def build_receive_config_packet(receive_mode, base_universe):
+    """Build an ArtReceiveConfig packet."""
+    mode_id = 1 if receive_mode == "combined" else 0
+    pkt = bytearray(15)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_RECEIVE_CONFIG)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = mode_id
+    struct.pack_into("<H", pkt, 13, int(base_universe) & 0xFFFF)
+    return bytes(pkt)
+
+
+def send_receive_config(ip, receive_mode, base_universe, source_ip=None):
+    """Send ArtReceiveConfig packet."""
+    if receive_mode not in ("split", "combined"):
+        raise ValueError(f"invalid receive_mode: {receive_mode!r}")
+    pkt = build_receive_config_packet(receive_mode, base_universe)
     _send_udp_packet(ip, pkt, source_ip=source_ip)
 
 
