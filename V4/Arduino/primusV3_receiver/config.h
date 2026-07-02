@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.7.0"
+#define FIRMWARE_VERSION "3.8.0"
 
 // =====================================================================
 //  Board Profile
@@ -42,6 +42,8 @@
 
 // Maximum pixels on any single output. Sized for the V3.6 extra-long strip.
 #define MAX_LEDS_PER_PORT 122
+// Maximum DMX buffer bytes per output (RGBW-sized).
+#define MAX_BUFFER_SIZE (MAX_LEDS_PER_PORT * 4)
 
 // =====================================================================
 //  Output Type Definitions
@@ -76,7 +78,7 @@ enum OutputType {
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP   // Collar (72 px strip)
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A13
-  #define BOARD_BATTERY_FEATURES  "RIOHB"
+  #define BOARD_BATTERY_FEATURES  "RIOHBM"
 #elif defined(PRIMUS_PROFILE_V2)
   #define BOARD_PROFILE_ID        "v2_feather"
   #define BOARD_PROFILE_CODE      "v2"
@@ -113,7 +115,7 @@ enum OutputType {
   #define BOARD_BATTERY_MONITOR   0
 #endif
 #ifndef BOARD_BATTERY_FEATURES
-  #define BOARD_BATTERY_FEATURES  "RIOH"
+  #define BOARD_BATTERY_FEATURES  "RIOHM"
 #endif
 
 #ifndef BOARD_HAS_STATUS_LED
@@ -182,7 +184,7 @@ struct OutputConfig {
   OutputType  type;
   uint8_t     pxl8Port;      // NeoPXL8 strand index, or direct-driver output index
   uint8_t     dataPin;       // physical data pin for direct-driver profiles
-  uint8_t     universe;      // Art-Net universe for this output
+  uint16_t    universe;      // Art-Net universe for this output
   // Derived fields — call deriveFromType() after setting .type
   uint16_t    pixelCount;
   uint8_t     bytesPerPixel;
@@ -267,6 +269,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_POLLREPLY 0x2100
 #define ARTNET_OPCODE_ADDRESS  0x6000
 #define ARTNET_OPCODE_OUTPUT_CONFIG 0x8100  // Vendor-defined: set output types
+#define ARTNET_OPCODE_RECEIVE_CONFIG 0x8110 // Vendor-defined: set receive mode / universe base
 #define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
 #define ARTNET_PROTOCOL_VER    14
 
@@ -277,7 +280,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 7
+#define FIRMWARE_VERSION_L 8
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 
