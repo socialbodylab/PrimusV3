@@ -29,11 +29,14 @@ or Art-Net DMX to an LED receiver).
 
 ---
 
-## Puck.js Firmware (`puckjsbutton.js`) — already done
+## Puck.js Firmware (`puckjsbutton.js`) — done
 
 - [x] `btn/press` on button down
 - [x] `btn/release` on button up
 - [x] `accel x y z` at 12.5 Hz while button held (LSM6DS3, ±2g, scale 8192 counts/g)
+- [x] Triple-tap sleep: three releases within 800 ms sends `btn/sleep` then calls `NRF.sleep()`
+      (`NRF.sleep()` turns off the BLE radio; the CPU keeps running and `setWatch` stays active)
+- [x] Wake: first button press after sleep calls `NRF.wake()` and returns — does not fire a cue
 
 ---
 
@@ -44,13 +47,17 @@ uploads a new version.
 
 ```json
 {
-  "puck_name": "Puck.js abc",
+  "puck_name": "Puck.js d8c8",
   "actions": {
     "press": [
       { "type": "audio_play", "file": "hit.wav", "volume": 80 }
     ],
     "release": [
       { "type": "audio_stop" }
+    ],
+    "press_cycle": [
+      { "type": "osc", "address": "/cue/1" },
+      { "type": "osc", "address": "/cue/3" }
     ],
     "accel": [
       { "type": "osc", "address": "/marius/accel" }
@@ -59,9 +66,12 @@ uploads a new version.
 }
 ```
 
-`puck_name` — BLE advertised name to connect to (e.g. "Puck.js abc").  
-`actions.press`, `actions.release`, `actions.accel` — each is an array of action objects
-(multiple actions per event are allowed).
+`puck_name` — BLE advertised name to connect to (e.g. "Puck.js d8c8").  
+`actions.press` — fires all listed actions on every button press.  
+`actions.release` — fires all listed actions on every button release.  
+`actions.press_cycle` — fires one action per press, advancing round-robin through the list.
+`press` and `press_cycle` are independent and can coexist.  
+`actions.accel` — Phase 5, not yet implemented.
 
 ### Action types
 
@@ -155,6 +165,18 @@ Goal: press/release can trigger OSC, remote audio, or LED DMX.
 - [x] `_mariusResolveTarget()` — resolves `target_ip` string or falls back to `senderIP`
 - [x] `_mariusHasDest()` — guards sends when target_ip absent and sender not yet known
 - [x] All three types parsed from `_mariusParseActionArray()` with field validation
+
+### `marius.h` — reliability fixes (landed with Phase 3 testing)
+
+- [x] Per-event-type pending flags (`_mariusPressEventPending`, `_mariusReleaseEventPending`,
+      `_mariusSleepEventPending`, `_mariusAccelEventPending`) replace single shared flag —
+      press and release arriving in the same BLE notification packet are both dispatched
+- [x] `btn/sleep` handler: proactively disconnects and restarts scan so the Radius is already
+      scanning when the user wakes the Puck (avoids 3-5 s supervision timeout delay)
+- [x] `press_cycle` event: fires one action per press, round-robin through the list;
+      `press` and `press_cycle` are independent and both fire if both are defined
+- [x] File-size based marius.json hot-reload replaces mtime check — ESP32 has no RTC so
+      FAT mtime is always epoch after FTP writes; size changes reliably on any real edit
 
 ---
 
@@ -316,11 +338,13 @@ NimBLE is strongly preferred over the classic Arduino BLE library for coexistenc
 
 ## Testing
 
-- [ ] Flash Puck.js with `puckjsbutton.js` via Espruino Web IDE
-- [ ] Confirm `btn/press` / `btn/release` / `accel` lines appear in BLE UART terminal
-- [ ] Flash Radius with Marius build; confirm serial shows BLE scanning and connects to Puck
+- [x] Flash Puck.js with `puckjsbutton.js` via espruino CLI
+- [x] Confirm `btn/press` / `btn/release` / `accel` lines appear in BLE UART terminal
+- [x] Flash Radius with Marius build; confirm serial shows BLE scanning and connects to Puck
+- [x] Test `osc` action with `press_cycle` — `/cue/1` and `/cue/3` alternate on each press
+- [x] Test sleep: triple-tap sends `btn/sleep`, Radius pre-emptively disconnects and rescans
+- [x] Test wake: single press calls `NRF.wake()`, Radius reconnects, next press fires cue
+- [x] Test hot-reload: FTP new `marius.json` → Radius picks up change within 5 s (file-size check)
 - [ ] Test `audio_play` / `audio_stop` action on press/release
-- [ ] Test `osc` action — verify packet arrives in sender Net Log
 - [ ] Test `artnet_audio` action — verify second Radius device plays audio
 - [ ] Test `artnet_dmx` action — verify LED device responds
-- [ ] Test reconnect: turn Puck off, back on — Radius should re-scan and reconnect

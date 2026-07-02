@@ -69,9 +69,13 @@ If you cannot connect over BLE at all:
 | Button press | `btn/press` over BLE UART |
 | Button release | `btn/release` over BLE UART |
 | Button held | `accel x y z` at 12.5 Hz over BLE UART |
-| Triple tap | `btn/sleep` then device sleeps |
+| Triple tap | `btn/sleep` then `NRF.sleep()` — BLE radio off, CPU stays on |
+| Press after sleep | `NRF.wake()` — BLE restarts and advertises; no cue is fired |
 
-Press once to wake from sleep. The Radius will detect the reconnect automatically.
+**Sleep/wake detail**: `NRF.sleep()` turns off the BLE radio but keeps the CPU and `setWatch`
+running. The next button press calls `NRF.wake()` to restore advertising, then returns without
+firing a cue. The Radius receives `btn/sleep` and immediately disconnects and starts scanning
+so it is ready before the user wakes the Puck.
 
 ---
 
@@ -83,3 +87,5 @@ Press once to wake from sleep. The Radius will detect the reconnect automaticall
 | Device not found by `--list` | Use `-d Puck` (name match) rather than MAC address on first connect |
 | `save()` fails silently | Device has prior Web IDE code — run `reset(true)` first |
 | Build errors on `npm install` | Use Node.js 18 or 20; or add `--ignore-scripts` |
+| Puck not visible after wake | The wake press calls `NRF.wake()` but BLE advertising takes ~1-2 s to start; wait briefly before the Radius connects |
+| Puck connected to Radius — can't reflash | BLE central/peripheral: Puck won't advertise while connected; power-off the Radius or wait for it to disconnect first |
