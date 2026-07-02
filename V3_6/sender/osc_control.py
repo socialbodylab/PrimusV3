@@ -15,6 +15,7 @@ import time
 from collections import deque
 from urllib.parse import unquote
 
+import netlog
 from paths import state_file
 from state import ControllerState
 
@@ -22,7 +23,7 @@ from state import ControllerState
 STATE_KEY = "osc_control"
 DEFAULT_OSC_SETTINGS = {
     "enabled": True,
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 53001,
 }
 MAX_PACKET_BYTES = 65535
@@ -478,6 +479,9 @@ class OscControlServer:
                 entry["cue_number"] = cue.get("number")
                 entry["cue_name"] = cue.get("name")
             self._record(entry)
+            args_str = " " + str(_safe_args(message.args)) if message.args else ""
+            status = "✓" if entry["ok"] else f"✗ {entry['error']}"
+            netlog.log("IN", "osc", f"OSC {message.address}{args_str} ← {remote_label} {status}")
 
     def _record(self, entry):
         row = {

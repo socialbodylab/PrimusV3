@@ -10,8 +10,9 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("audioPanel", () => ({
 
         // ── Playback ────────────────────────────────────────────────────
-        playing:      {},   // { di: { file, cmd } }
-        lastPlayed:   {},   // { di: filename } — last file played per device
+        playing:        {},   // { di: { file, cmd } }
+        _playingExpiry: {},   // { di: timestamp } — optimistic state expires after 3s without device confirmation
+        lastPlayed:     {},   // { di: filename } — last file played per device
         volume:       {},   // { di: 0-100 }
         _lastVolSent: {},
         _spaceHandler: null,
@@ -138,8 +139,9 @@ document.addEventListener("alpine:init", () => {
             await api("POST", "/api/audio/cmd", {
                 device: di, cmd, filename, volume: this.getVolume(di),
             });
-            this.playing    = { ...this.playing,    [di]: { file: filename, cmd } };
-            this.lastPlayed = { ...this.lastPlayed, [di]: filename };
+            this.playing        = { ...this.playing,        [di]: { file: filename, cmd } };
+            this._playingExpiry = { ...this._playingExpiry, [di]: Date.now() + 3000 };
+            this.lastPlayed     = { ...this.lastPlayed,     [di]: filename };
         },
 
         async stop(di) {
@@ -147,6 +149,9 @@ document.addEventListener("alpine:init", () => {
             const p = { ...this.playing };
             delete p[di];
             this.playing = p;
+            const expiry = { ...this._playingExpiry };
+            delete expiry[di];
+            this._playingExpiry = expiry;
         },
 
         async pause(di) {
@@ -164,7 +169,9 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        // Authoritative playback state: server report takes priority, falls back to optimistic client state.
+        // Authoritative playback state: device report takes priority.
+        // "stopped" from device clears immediately. "unknown" (no report yet) allows
+        // a 3-second optimistic window after a play command so the UI doesn't flash.
         nowPlaying(di) {
             const devices = Alpine.store("app").state?.devices || [];
             const dev = devices[di];
@@ -172,7 +179,9 @@ document.addEventListener("alpine:init", () => {
             if (dev?.audio_status === "playing" && dev?.now_playing) {
                 return { file: dev.now_playing, cmd: this.playing[di]?.cmd || "play" };
             }
-            return this.playing[di] || null;
+            // Unknown status (no report yet) — use optimistic state within 3s of play command
+            if ((this._playingExpiry[di] || 0) > Date.now()) return this.playing[di] || null;
+            return null;
         },
 
         isPlaying(di, filename) {

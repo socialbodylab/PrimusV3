@@ -832,7 +832,7 @@ class ControllerState:
                     "receiver_fps": rx["fps"] if rx else None,
                     "receiver_pkt_rate": rx["pkt_rate"] if rx else None,
                     "now_playing": as_["filename"] if as_ else "",
-                    "audio_status": "playing" if as_ and as_["status"] == 1 else "stopped",
+                    "audio_status": ("playing" if as_["status"] == 1 else "stopped") if as_ is not None else "unknown",
                     "marius_connected": dev.get("marius_connected", False),
                     "marius_puck": dev.get("marius_puck", ""),
                     "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
