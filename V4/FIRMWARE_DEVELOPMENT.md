@@ -10,9 +10,26 @@ Canonical firmware for **both** Primus LED receivers and Radius audio receivers 
 | `v2` | ESP32 Feather (2025 Make) | `./upload.sh --board v2` |
 | `v3` | Reverse TFT Feather + NeoPXL8 (2026 PCB) | `./upload.sh --board v3` |
 
-Discovery capability tag: `PV3CAP1|B:v1|IP:D|F:RIOH` (V1 adds `B` in feature flags: `F:RIOHB`).
+Discovery capability tag: `PV3CAP1|B:v1|IP:D|F:RIOHBM` (V1 battery adds `B` in features; firmware 3.8+ adds `M` for receive-mode config and `U:S:0` or `U:C:N` universe tokens).
 
-Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtIPConfig (`0x8200`), UDP 6455 back-channel (`PFP` FPS, `PBT` battery on V1).
+Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtReceiveConfig (`0x8110`), ArtIPConfig (`0x8200`), UDP 6455 back-channel (`PFP` FPS, `PBT` battery on V1).
+
+### Receive mode (`receive_mode.h`)
+
+| Mode | ArtDmx layout |
+|------|---------------|
+| Split (default) | One universe per active output |
+| Combined | Single universe; port A bytes then port B bytes (≤170 px total) |
+
+NVS keys: `recvMode`, `univBase`. Runtime changes via ArtReceiveConfig or V3 TFT (D1 on Receive screen).
+
+Upload flags: `--receivemode split|combined`, `--universe N`.
+
+```bash
+./V4/Arduino/upload.sh -v1 --auto --receivemode combined --universe 104
+./V4/Arduino/upload.sh --board v3 --compile
+./V4/Arduino/upload.sh -v3 -ssid "MyRouter" -pw "secret" --auto
+```
 
 ### V1 battery telemetry (`PBT`)
 
@@ -29,12 +46,8 @@ V1 Huzzah32 boards read LiPo voltage on **A13** (GPIO35, onboard VBAT divider). 
 
 Sender: `PrimusTelemetryListener` in [`sender/artnet.py`](sender/artnet.py) merges `PFP` + `PBT` per device IP.
 
-```bash
-./V4/Arduino/upload.sh --board v3 --compile
-./V4/Arduino/upload.sh -v3 -ssid "MyRouter" -pw "secret" --auto
-```
-
 Source of truth for output types and pins: [`primusV3_receiver/config.h`](primusV3_receiver/config.h).
+Receive mode module: [`primusV3_receiver/receive_mode.h`](primusV3_receiver/receive_mode.h).
 
 ---
 

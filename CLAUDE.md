@@ -84,9 +84,10 @@ The sender and receiver must agree on:
 - **Output type IDs**: `LOOK_OUTPUT_TYPES` list (Python) indices = `OutputType` enum (C++) values.
 - **Pixel counts**: `OUTPUT_TYPES` dict (Python, in `state.py`) = `OUTPUT_TYPE_TABLE` (C++).
 - **Custom opcode 0x8100**: ArtOutputConfig for runtime output type changes.
+- **Custom opcode 0x8110**: ArtReceiveConfig for split/combined universe layout.
 - **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration.
-- **Discovery capability tag**: `PV3CAP1|...|B:<profile>|IP:D|F:RIOH` in ArtPollReply Node Report.
-- **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config.
+- **Discovery capability tag**: `PV3CAP1|...|B:<profile>|IP:D|U:S:0|F:RIOHM` in ArtPollReply Node Report (`U:C:N` for combined mode).
+- **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config, `M` receive mode config.
 - **FPS telemetry**: 7-byte `PFP` packets on UDP 6455.
 - **Brightness**: sender-side RGB scaling only; no receiver brightness channel.
 
@@ -228,7 +229,7 @@ none, solid, pulse, linear, constrainbow, rainbow, noise, static_noise, sparkle_
 
 **GET**: `/`, `/api/runtime`, `/api/state`, `/api/performance`, `/api/network/status`, `/api/clips`, `/api/clips/<id>`, `/api/clips/<id>/export`, `/api/looks`, `/api/looks/<id>`, `/api/looks/<id>/export`, `/api/cues`, `/api/integrations/osc`, `/api/firmware/status`, `/api/firmware/jobs/<id>`
 
-**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_playback_source`, `/api/device_groups`
+**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_device_output`, `/api/set_device_receive_mode`, `/api/set_playback_source`, `/api/device_groups`
 
 **POST (clips/looks/sharing)**: `/api/clip/preview`, `/api/clips/save`, `/api/clips/save_single`, `/api/import_bundle`, `/api/looks/save`, `/api/mixer/frame`, `/api/mixer/preview`, `/api/mixer/update`, `/api/mixer/stop_preview`
 

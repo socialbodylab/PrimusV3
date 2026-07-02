@@ -66,8 +66,11 @@ also append `B:<profile>` where profile is `v1`, `v2`, or `v31`, and `IP:D` or
 `IP:S` to report whether the receiver is currently using DHCP or saved static IP
 settings. Feature flags are appended as `F:<letters>`; current letters are `R`
 for remote rename via ArtAddress, `I` for remote IP configuration via
-ArtIPConfig, `O` for remote output configuration via ArtOutputConfig, and `H` for
-the identify flash used by `POST /api/hello_device`. Older nodes without this tag
+ArtIPConfig, `O` for remote output configuration via ArtOutputConfig, `M` for
+remote receive mode configuration via ArtReceiveConfig, and `H` for
+the identify flash used by `POST /api/hello_device`. Receive layout is also
+reported as `U:S:<base>` (split: one universe per output starting at base) or
+`U:C:<base>` (combined: all outputs in one universe). Older nodes without this tag
 still fall back to the human-readable Long Name parser, and older PrimusV3 nodes
 without feature flags are treated as legacy-compatible for rename/hello/IP/output-config
 control.
@@ -221,6 +224,58 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 | 3 | Grid 8×8 | 64 |
 | 4 | Small Grid 8×4 | 32 |
 | 5 | Extra Long Strip | 122 |
+
+| 5 | Extra Long Strip | 122 |
+
+---
+
+## 5.1 Remote Receive Mode — ArtReceiveConfig (custom opcode 0x8110)
+
+Primus firmware **3.8+** supports runtime receive-mode changes via ArtReceiveConfig.
+This controls whether each active output listens on its own universe (**split**) or
+all outputs share one contiguous universe (**combined**).
+
+### Receive modes
+
+| Mode ID | Name | Behavior |
+|--------:|------|----------|
+| `0` | Split | Port A0 = base universe, A1 = base+1 (legacy default) |
+| `1` | Combined | Single universe at base; A0 bytes first, A1 bytes immediately after |
+
+Combined mode requires total active pixels ≤ **170** (512-byte ArtDmx limit).
+
+### ArtReceiveConfig Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x8110` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | Mode | `0` = Split, `1` = Combined |
+| 13–14 | 2 | Base universe | uint16 little-endian (0–32767) |
+
+**Total: 15 bytes.** The node validates the mode, persists settings to NVS, clears pixel buffers, and broadcasts an updated ArtPollReply. No reboot is required.
+
+### NVS keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `recvMode` | uint8 | `0` split, `1` combined |
+| `univBase` | uint16 | Base universe |
+
+### Upload-time defaults
+
+```bash
+./V4/Arduino/upload.sh -v1 --auto --receivemode combined --universe 104
+./V4/Arduino/upload.sh -v3 --compile --receivemode split --universe 0
+```
+
+### Node Report examples (firmware 3.8+)
+
+```text
+#0001 [0123] OK|PV3CAP1|0:4:6|1:2:7|B:v1|IP:D|U:S:6|F:RIOHBM
+#0001 [0123] OK|PV3CAP1|0:4:104|1:2:104|B:v31|IP:D|U:C:104|F:RIOHM
+```
 
 ---
 
