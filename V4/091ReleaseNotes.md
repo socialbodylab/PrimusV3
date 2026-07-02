@@ -14,10 +14,10 @@ macOS release built from the V4 unified sender (`--product primus` and `--produc
 ## Validation
 
 - `python3 -m unittest discover -s V4/sender/tests`
-- `PrimusCentral.app` Developer ID signed with network entitlements (notarization pending Apple Developer agreement renewal)
-- `DeviceManager.app` Developer ID signed with network entitlements (notarization pending Apple Developer agreement renewal)
-- `PrimusCentral-0.91-macOS-arm64.dmg` signed and verified with `hdiutil verify`
-- `DeviceManager-0.91-macOS-arm64.dmg` signed and verified with `hdiutil verify`
+- `PrimusCentral.app` Developer ID signed with network entitlements, notarized, and stapled
+- `DeviceManager.app` Developer ID signed with network entitlements, notarized, and stapled
+- `PrimusCentral-0.91-macOS-arm64.dmg` signed, notarized, stapled, and verified with `hdiutil verify`
+- `DeviceManager-0.91-macOS-arm64.dmg` signed, notarized, stapled, and verified with `hdiutil verify`
 
 ## Assets
 
@@ -29,6 +29,6 @@ macOS release built from the V4 unified sender (`--product primus` and `--produc
 ## SHA-256
 
 ```text
-34a0da96dea55a2ddea089de3401916738cf5b468c45073d9d3baf928da0ad94  PrimusCentral-0.91-macOS-arm64.dmg
-c4834b2d1ec24d81112ccd8508bf2a327473c80f451fd601768d62de0d6aeaf3  DeviceManager-0.91-macOS-arm64.dmg
+d59edffe21ca8edc4a5a975d50d22797e9ce9e26b700b4bcc81d119df0039971  PrimusCentral-0.91-macOS-arm64.dmg
+ce1832cb44dd8614a17f198e8bc9d30af03f45f4fcbdb3dc0652e15ec5695183  DeviceManager-0.91-macOS-arm64.dmg
 ```
