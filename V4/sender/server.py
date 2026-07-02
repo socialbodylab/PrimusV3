@@ -9,7 +9,7 @@ import mimetypes
 import threading
 import time
 import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import unquote
 
 import audio_cues as _audio_cues_mod
@@ -43,6 +43,9 @@ from paths import web_dir, frontend_index_path, default_frontend_path, sender_pr
 from radius_state import RadiusState
 from state import OUTPUT_TYPES, ControllerState
 from ui_lifecycle import close_session, init_server, touch_session
+
+
+DEBUG_API_TIMING = os.environ.get("PRIMUSV3_DEBUG_API_TIMING") == "1"
 
 
 _WEB_DIR = web_dir()
@@ -165,7 +168,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response(self._device_state().get_json())
             return
         if path == "/api/performance":
-            self._json_response(self._device_state().get_performance_json())
+            started = time.perf_counter()
+            payload = self._device_state().get_performance_json()
+            built = time.perf_counter()
+            if DEBUG_API_TIMING:
+                print(f"api timing {path}: build={(built - started) * 1000.0:.1f}ms")
+            self._json_response(payload)
+            if DEBUG_API_TIMING:
+                print(f"api timing {path}: total={(time.perf_counter() - started) * 1000.0:.1f}ms")
             return
         if path == "/api/network/status":
             self._json_response(get_network_status())
@@ -262,7 +272,14 @@ class Handler(BaseHTTPRequestHandler):
             if service is None:
                 self._json_error(503, "OSC service unavailable")
             else:
-                self._json_response(service.status())
+                started = time.perf_counter()
+                payload = service.status()
+                built = time.perf_counter()
+                if DEBUG_API_TIMING:
+                    print(f"api timing {path}: build={(built - started) * 1000.0:.1f}ms")
+                self._json_response(payload)
+                if DEBUG_API_TIMING:
+                    print(f"api timing {path}: total={(time.perf_counter() - started) * 1000.0:.1f}ms")
             return
         if path == "/api/audio_cues":
             with self.audio_cues_lock:
@@ -1134,8 +1151,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+        self.wfile.flush()
+        self.close_connection = True
 
     def _serve_static(self, url_path):
         path = url_path.split("?")[0]
@@ -1387,8 +1407,12 @@ def _run_sync_job(job, state, cues_data):
             job["error"] = str(exc)
 
 
+class PrimusThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
 def create_server(host, port, state, cue_list=None, ui_lifecycle_enabled=False, osc_service=None):
-    """Create and return an HTTPServer bound to host:port."""
+    """Create and return a threaded HTTP server bound to host:port."""
     primus_state = state if isinstance(state, ControllerState) else None
     radius_state = state if isinstance(state, RadiusState) else None
     Handler.controller_state = state
@@ -1396,7 +1420,7 @@ def create_server(host, port, state, cue_list=None, ui_lifecycle_enabled=False, 
     Handler.radius_state = radius_state
     Handler.cue_list = cue_list
     Handler.audio_cues_data = _audio_cues_mod.load_audio_cues()
-    server = HTTPServer((host, port), Handler)
+    server = PrimusThreadingHTTPServer((host, port), Handler)
     server.controller_state = state
     server.primus_state = primus_state
     server.radius_state = radius_state

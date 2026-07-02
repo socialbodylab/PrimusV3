@@ -50,6 +50,7 @@ document.addEventListener("alpine:init", () => {
         targetDeviceIps: [],
 
         _pollInterval: null,
+        _pollInFlight: false,
         _lastOscPoll: 0,
         _looksChangedHandler: null,
         _modeChangedHandler: null,
@@ -95,15 +96,20 @@ document.addEventListener("alpine:init", () => {
 
         async _poll() {
             if (Alpine.store("app").mode !== "controller") return;
+            if (this._pollInFlight) return;
+            this._pollInFlight = true;
             try {
                 const data = await api("GET", "/api/cues");
                 this.applyCueState(data);
                 const now = Date.now();
-                if (now - this._lastOscPoll > 250) {
+                if (now - this._lastOscPoll > 1000) {
                     this._lastOscPoll = now;
                     await this.fetchOscStatus(false);
                 }
-            } catch (e) {}
+            } catch (e) {
+            } finally {
+                this._pollInFlight = false;
+            }
         },
 
         async refresh() {

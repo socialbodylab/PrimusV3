@@ -390,9 +390,9 @@ def _listen_targets():
     return targets
 
 
-def _listen_target_strings(port):
+def _listen_target_strings(port, targets=None):
     port = int(port or DEFAULT_OSC_SETTINGS["port"])
-    return [f"{target['ip']}:{port}" for target in _listen_targets()]
+    return [f"{target['ip']}:{port}" for target in (targets if targets is not None else _listen_targets())]
 
 
 def _make_udp_socket():
@@ -407,10 +407,10 @@ def _make_udp_socket():
     return sock
 
 
-def _listen_bind_candidates():
+def _listen_bind_candidates(targets=None):
     candidates = [("0.0.0.0", "all interfaces")]
     seen = {"0.0.0.0"}
-    for target in _listen_targets():
+    for target in (targets if targets is not None else _listen_targets()):
         ip = target.get("ip")
         if ip and ip not in seen:
             seen.add(ip)
@@ -420,11 +420,11 @@ def _listen_bind_candidates():
     return candidates
 
 
-def _open_listen_sockets(port):
+def _open_listen_sockets(port, targets=None):
     sockets = []
     bind_log = []
     bound_port = None
-    for ip, label in _listen_bind_candidates():
+    for ip, label in _listen_bind_candidates(targets):
         sock = _make_udp_socket()
         try:
             use_port = int(bound_port if bound_port is not None else port)
@@ -489,6 +489,9 @@ class OscControlServer:
         self._last_error = ""
         self._bound = {"host": "", "port": 0}
         self._bind_sockets = []
+        self._listen_targets_cache = []
+        self._listen_addresses_cache = []
+        self._last_status_snapshot = None
 
     def start(self):
         self.stop()
@@ -499,6 +502,8 @@ class OscControlServer:
                 self._last_error = ""
                 self._bound = {"host": "", "port": 0}
                 self._bind_sockets = []
+                self._listen_targets_cache = []
+                self._listen_addresses_cache = []
             return
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="PrimusOSC", daemon=True)
@@ -521,6 +526,9 @@ class OscControlServer:
         self._thread = None
         with self._lock:
             self._running = False
+            self._bind_sockets = []
+            self._listen_targets_cache = []
+            self._listen_addresses_cache = []
 
     def update(self, data):
         payload = {}
@@ -545,7 +553,9 @@ class OscControlServer:
     def _run(self):
         bind_port = int(self.settings["port"])
         self._network_event("starting OSC listener", port=bind_port)
-        sockets, bind_log = _open_listen_sockets(bind_port)
+        listen_targets = _listen_targets()
+        listen_addresses = _listen_target_strings(bind_port, listen_targets)
+        sockets, bind_log = _open_listen_sockets(bind_port, listen_targets)
         for entry in bind_log:
             if entry.get("ok"):
                 self._network_event(
@@ -569,6 +579,8 @@ class OscControlServer:
                 self._last_error = f"OSC could not bind UDP port {bind_port} on any interface"
                 self._bound = {"host": "", "port": 0}
                 self._bind_sockets = []
+                self._listen_targets_cache = listen_targets
+                self._listen_addresses_cache = listen_addresses
             return
         self._listen_sockets = sockets
         primary = sockets[0]
@@ -585,6 +597,8 @@ class OscControlServer:
             self._last_error = ""
             self._bound = {"host": primary["ip"], "port": primary["port"]}
             self._bind_sockets = bind_summary
+            self._listen_targets_cache = listen_targets
+            self._listen_addresses_cache = listen_addresses
         self._network_event(
             "listener ready",
             port=bind_port,
@@ -625,6 +639,8 @@ class OscControlServer:
         with self._lock:
             self._running = False
             self._bind_sockets = []
+            self._listen_targets_cache = []
+            self._listen_addresses_cache = []
         self._network_event("listener stopped", port=bind_port)
 
     def _handle_packet(self, data, remote, listen_entry=None):
@@ -694,18 +710,46 @@ class OscControlServer:
                 self._last_error = row.get("error")
 
     def status(self):
-        with self._lock:
+        acquired = self._lock.acquire(timeout=0.01)
+        if not acquired:
+            if self._last_status_snapshot is not None:
+                stale = copy.deepcopy(self._last_status_snapshot)
+                stale["stale"] = True
+                return stale
+            return {
+                "settings": public_settings(self.settings),
+                "enabled": bool(self.settings.get("enabled")),
+                "running": False,
+                "last_error": "OSC status busy",
+                "bound": {"host": "", "port": 0},
+                "bind_sockets": [],
+                "packets_received": self._packets_received,
+                "packets_local": self._packets_local,
+                "packets_remote": self._packets_remote,
+                "listen_targets": [],
+                "listen_addresses": [],
+                "network_log": [],
+                "history": [],
+                "examples": osc_examples(),
+                "cue_triggers": [],
+                "stale": True,
+            }
+        try:
             running = self._running
             last_error = self._last_error
             bound = dict(self._bound)
             history = list(self._history)
             network_log = list(self._network_log)
             bind_sockets = list(self._bind_sockets)
+            listen_targets = list(self._listen_targets_cache)
+            listen_addresses = list(self._listen_addresses_cache)
             packets_received = self._packets_received
             packets_local = self._packets_local
             packets_remote = self._packets_remote
+        finally:
+            self._lock.release()
         port = bound.get("port") or self.settings.get("port") or DEFAULT_OSC_SETTINGS["port"]
-        return {
+        snapshot = {
             "settings": public_settings(self.settings),
             "enabled": bool(self.settings.get("enabled")),
             "running": running,
@@ -715,13 +759,15 @@ class OscControlServer:
             "packets_received": packets_received,
             "packets_local": packets_local,
             "packets_remote": packets_remote,
-            "listen_targets": _listen_targets(),
-            "listen_addresses": _listen_target_strings(port),
+            "listen_targets": listen_targets,
+            "listen_addresses": listen_addresses,
             "network_log": network_log,
             "history": history,
             "examples": osc_examples(),
             "cue_triggers": self.cue_list.external_triggers(),
         }
+        self._last_status_snapshot = copy.deepcopy(snapshot)
+        return snapshot
 
 
 def _format_message_label(address, args):

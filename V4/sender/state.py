@@ -116,6 +116,7 @@ class PerformanceStats:
         self.started_at = time.monotonic()
         self.samples = {}
         self.counters = {}
+        self._last_snapshot = None
 
     def observe(self, name, value):
         try:
@@ -157,9 +158,23 @@ class PerformanceStats:
             self.counters[name] = self.counters.get(name, 0) + amount
 
     def snapshot(self):
-        with self.lock:
+        acquired = self.lock.acquire(timeout=0.01)
+        if not acquired:
+            if self._last_snapshot is not None:
+                stale = copy.deepcopy(self._last_snapshot)
+                stale["stale"] = True
+                return stale
             uptime_seconds = max(time.monotonic() - self.started_at, 0.001)
             return {
+                "uptime_seconds": round(uptime_seconds, 3),
+                "samples": {},
+                "counters": {},
+                "rates_per_second": {},
+                "stale": True,
+            }
+        try:
+            uptime_seconds = max(time.monotonic() - self.started_at, 0.001)
+            snapshot = {
                 "uptime_seconds": round(uptime_seconds, 3),
                 "samples": {
                     name: {
@@ -176,6 +191,10 @@ class PerformanceStats:
                     for name, value in self.counters.items()
                 },
             }
+            self._last_snapshot = copy.deepcopy(snapshot)
+            return snapshot
+        finally:
+            self.lock.release()
 
 
 def set_current_thread_qos():

@@ -120,6 +120,58 @@ class OscSettingsTests(unittest.TestCase):
             self.assertNotIn("host", settings)
             self.assertEqual(settings["port"], 53001)
 
+    def test_status_uses_cached_listen_targets(self):
+        service = OscControlServer(FakeCueList(), FakeControllerState(), settings={
+            "enabled": True,
+            "port": 53001,
+        })
+        with service._lock:
+            service._running = True
+            service._bound = {"host": "0.0.0.0", "port": 53001}
+            service._listen_targets_cache = [{
+                "ip": "192.168.1.50",
+                "label": "Wi-Fi",
+                "type": "wifi",
+            }]
+            service._listen_addresses_cache = ["192.168.1.50:53001"]
+
+        with mock.patch("osc_control._listen_targets", side_effect=AssertionError("live network probe")):
+            status = service.status()
+
+        self.assertEqual(status["listen_targets"][0]["ip"], "192.168.1.50")
+        self.assertEqual(status["listen_addresses"], ["192.168.1.50:53001"])
+
+    def test_status_returns_stale_snapshot_when_lock_is_busy(self):
+        service = OscControlServer(FakeCueList(), FakeControllerState(), settings={
+            "enabled": True,
+            "port": 53001,
+        })
+        service._last_status_snapshot = {
+            "settings": {"enabled": True, "port": 53001},
+            "enabled": True,
+            "running": True,
+            "last_error": "",
+            "bound": {"host": "0.0.0.0", "port": 53001},
+            "bind_sockets": [],
+            "packets_received": 7,
+            "packets_local": 4,
+            "packets_remote": 3,
+            "listen_targets": [],
+            "listen_addresses": [],
+            "network_log": [],
+            "history": [],
+            "examples": [],
+            "cue_triggers": [],
+        }
+        service._lock.acquire()
+        try:
+            status = service.status()
+        finally:
+            service._lock.release()
+
+        self.assertTrue(status["stale"])
+        self.assertEqual(status["packets_received"], 7)
+
 
 class OscParserTests(unittest.TestCase):
     def test_parses_int_float_and_string_args(self):

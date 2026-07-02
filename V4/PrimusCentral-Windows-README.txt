@@ -1,15 +1,15 @@
-PrimusCentral 0.86 for Windows
+PrimusCentral 0.9 for Windows
 ===============================
 
 PrimusCentral is the sender app for Primus V4/V3-compatible LED receiver nodes.
 This Windows build is packaged from the same V4 unified sender as the macOS
-0.86 release.
+0.9 release.
 
 Getting started
 ---------------
 
-1. Install with PrimusCentral-0.86-Windows-x64-Setup.exe, or extract the
-   PrimusCentral-0.86-Windows-x64.zip folder before running PrimusCentral.exe.
+1. Install with PrimusCentral-0.9-Windows-x64-Setup.exe, or extract the
+   PrimusCentral-0.9-Windows-x64.zip folder before running PrimusCentral.exe.
 2. Launch PrimusCentral from the Start menu, desktop shortcut, or extracted
    folder.
 3. The browser UI opens on localhost. The HTTP UI is local to this computer.
@@ -26,7 +26,7 @@ PrimusCentral uses UDP network traffic for receiver control and show control:
 - Receiver FPS telemetry: UDP 6455 inbound
 - External OSC cue input: UDP 53001 by default
 
-Version 0.86 listens for OSC automatically on loopback and active LAN
+Version 0.9 listens for OSC automatically on loopback and active LAN
 interfaces. Only the OSC enable switch and port are configurable in the Cue
 Controller. For QLab or another show-control computer, target one of the LAN
 addresses shown in the Cue Controller's External Control panel, for example

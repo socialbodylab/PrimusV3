@@ -56,7 +56,7 @@ python3 V4/build_sender_app.py \
 
 Environment overrides: `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`.
 
-## Windows PrimusCentral 0.86
+## Windows PrimusCentral 0.9
 
 Build Windows releases on Windows. The current PrimusCentral release target is
 the V4 unified sender with the Primus product selected:
@@ -75,13 +75,13 @@ V4\dist\windows\PrimusCentral.exe
 For release distribution, publish a signed installer and a portable ZIP. Do not
 upload the raw executable as a GitHub release asset.
 
-Expected 0.86 assets:
+Expected 0.9 assets:
 
 ```text
-PrimusCentral-0.86-Windows-x64-Setup.exe
-PrimusCentral-0.86-Windows-x64-Setup.exe.sha256
-PrimusCentral-0.86-Windows-x64.zip
-PrimusCentral-0.86-Windows-x64.zip.sha256
+PrimusCentral-0.9-Windows-x64-Setup.exe
+PrimusCentral-0.9-Windows-x64-Setup.exe.sha256
+PrimusCentral-0.9-Windows-x64.zip
+PrimusCentral-0.9-Windows-x64.zip.sha256
 ```
 
 The installer includes `README-Windows.txt`, generated from the tracked
@@ -115,7 +115,7 @@ Create ignored local metadata such as
   "Endpoint": "https://eus.codesigning.azure.net",
   "CodeSigningAccountName": "<Artifact Signing account name>",
   "CertificateProfileName": "<Certificate profile name>",
-  "CorrelationId": "PrimusCentral-0.86"
+  "CorrelationId": "PrimusCentral-0.9"
 }
 ```
 
@@ -140,8 +140,8 @@ Manual signature checks:
 
 ```powershell
 signtool verify /pa /v V4\dist\windows\PrimusCentral.exe
-signtool verify /pa /v V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe
-Get-AuthenticodeSignature V4\dist\windows\PrimusCentral.exe, V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe | Format-List
+signtool verify /pa /v V4\dist\windows\PrimusCentral-0.9-Windows-x64-Setup.exe
+Get-AuthenticodeSignature V4\dist\windows\PrimusCentral.exe, V4\dist\windows\PrimusCentral-0.9-Windows-x64-Setup.exe | Format-List
 ```
 
 ### ZIP And Checksums
@@ -151,17 +151,17 @@ binary files:
 
 ```powershell
 Remove-Item V4\build\windows\release-staging -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64 | Out-Null
-Copy-Item V4\dist\windows\PrimusCentral.exe V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64\PrimusCentral.exe
-Copy-Item V4\dist\windows\README-Windows.txt V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64\README-Windows.txt
-Compress-Archive -Path V4\build\windows\release-staging\PrimusCentral-0.86-Windows-x64 -DestinationPath V4\dist\windows\PrimusCentral-0.86-Windows-x64.zip -Force
-Get-FileHash V4\dist\windows\PrimusCentral-0.86-Windows-x64.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  PrimusCentral-0.86-Windows-x64.zip" } | Set-Content V4\dist\windows\PrimusCentral-0.86-Windows-x64.zip.sha256 -Encoding ASCII
-Get-FileHash V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  PrimusCentral-0.86-Windows-x64-Setup.exe" } | Set-Content V4\dist\windows\PrimusCentral-0.86-Windows-x64-Setup.exe.sha256 -Encoding ASCII
+New-Item -ItemType Directory -Force V4\build\windows\release-staging\PrimusCentral-0.9-Windows-x64 | Out-Null
+Copy-Item V4\dist\windows\PrimusCentral.exe V4\build\windows\release-staging\PrimusCentral-0.9-Windows-x64\PrimusCentral.exe
+Copy-Item V4\dist\windows\README-Windows.txt V4\build\windows\release-staging\PrimusCentral-0.9-Windows-x64\README-Windows.txt
+Compress-Archive -Path V4\build\windows\release-staging\PrimusCentral-0.9-Windows-x64 -DestinationPath V4\dist\windows\PrimusCentral-0.9-Windows-x64.zip -Force
+Get-FileHash V4\dist\windows\PrimusCentral-0.9-Windows-x64.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  PrimusCentral-0.9-Windows-x64.zip" } | Set-Content V4\dist\windows\PrimusCentral-0.9-Windows-x64.zip.sha256 -Encoding ASCII
+Get-FileHash V4\dist\windows\PrimusCentral-0.9-Windows-x64-Setup.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  PrimusCentral-0.9-Windows-x64-Setup.exe" } | Set-Content V4\dist\windows\PrimusCentral-0.9-Windows-x64-Setup.exe.sha256 -Encoding ASCII
 ```
 
 ### Windows Network Validation
 
-PrimusCentral 0.86 removed the OSC host setting. The listener opens sockets on
+PrimusCentral 0.9 removed the OSC host setting. The listener opens sockets on
 all interfaces, active LAN IPs, and loopback; the Cue Controller shows active
 sockets and a network log. Windows users may still need to allow Defender
 Firewall on the private/show network when the packaged app first uses UDP.

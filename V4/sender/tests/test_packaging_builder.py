@@ -36,8 +36,8 @@ class PackagingBuilderTests(unittest.TestCase):
             windows_installer_name=windows_installer_name,
         )
 
-    def test_default_release_version_is_086(self):
-        self.assertEqual(build_sender_app.DEFAULT_APP_VERSION, "0.86")
+    def test_default_release_version_is_09(self):
+        self.assertEqual(build_sender_app.DEFAULT_APP_VERSION, "0.9")
 
     def test_primus_windows_command_uses_v4_product_assets(self):
         args = self.make_args()
@@ -81,8 +81,8 @@ class PackagingBuilderTests(unittest.TestCase):
             self.assertEqual(output, temp_path / "dist" / "README-Windows.txt")
             self.assertEqual(output.read_text(encoding="utf-8"), "PrimusCentral Windows README\n")
 
-    def test_windows_installer_script_uses_086_release_name_and_user_local_install(self):
-        args = self.make_args(app_version="0.86")
+    def test_windows_installer_script_uses_09_release_name_and_user_local_install(self):
+        args = self.make_args(app_version="0.9")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -105,7 +105,7 @@ class PackagingBuilderTests(unittest.TestCase):
             )
             script = script_path.read_text(encoding="utf-8")
 
-        self.assertEqual(installer_path.name, "PrimusCentral-0.86-Windows-x64-Setup.exe")
+        self.assertEqual(installer_path.name, "PrimusCentral-0.9-Windows-x64-Setup.exe")
         self.assertIn("PrivilegesRequired=lowest", script)
         self.assertIn("DefaultDirName={localappdata}\\Programs\\PrimusCentral", script)
         self.assertIn(f'Source: "{app_path}"; DestDir: "{{app}}"', script)
