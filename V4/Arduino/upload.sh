@@ -61,6 +61,10 @@ STATIC_IP_OVERRIDE_SET=false
 GATEWAY_OVERRIDE_SET=false
 SUBNET_OVERRIDE_SET=false
 DHCP_OVERRIDE_SET=false
+RECEIVE_MODE_OVERRIDE=""
+UNIVERSE_BASE_OVERRIDE=""
+RECEIVE_MODE_OVERRIDE_SET=false
+UNIVERSE_BASE_OVERRIDE_SET=false
 BUILD_OVERRIDE_HEADER=""
 
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
@@ -120,6 +124,9 @@ Flags:
   --gateway <ip>           Gateway to store with --static-ip.
   --subnet <ip>            Subnet mask to store with --static-ip.
   --dhcp                   Clear saved static IP settings on boot for this build.
+  --receivemode split|combined
+                           Default Art-Net receive mode for this build.
+  --universe <n>           Default base universe number (0-32767).
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
 EOF
@@ -228,6 +235,24 @@ while [[ $# -gt 0 ]]; do
     --dhcp)
       DHCP_OVERRIDE_SET=true
       shift
+      ;;
+    --receivemode|--universe-mode|--universemode)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires split or combined"
+        exit 1
+      fi
+      RECEIVE_MODE_OVERRIDE="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+      RECEIVE_MODE_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --universe)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a universe number"
+        exit 1
+      fi
+      UNIVERSE_BASE_OVERRIDE="$2"
+      UNIVERSE_BASE_OVERRIDE_SET=true
+      shift 2
       ;;
     --baud|--speed)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
@@ -339,6 +364,32 @@ if [[ ${#DEVICE_NAME_OVERRIDE} -gt 17 ]]; then
   exit 1
 fi
 
+if [[ "$RECEIVE_MODE_OVERRIDE_SET" == true ]]; then
+  case "$RECEIVE_MODE_OVERRIDE" in
+    split)
+      RECEIVE_MODE_DEFINE="RECEIVE_MODE_SPLIT"
+      ;;
+    combined)
+      RECEIVE_MODE_DEFINE="RECEIVE_MODE_COMBINED"
+      ;;
+    *)
+      err "Receive mode override must be split or combined."
+      exit 1
+      ;;
+  esac
+fi
+
+if [[ "$UNIVERSE_BASE_OVERRIDE_SET" == true ]]; then
+  if [[ ! "$UNIVERSE_BASE_OVERRIDE" =~ ^[0-9]+$ ]]; then
+    err "Universe base must be a non-negative integer."
+    exit 1
+  fi
+  if (( UNIVERSE_BASE_OVERRIDE < 0 || UNIVERSE_BASE_OVERRIDE > 32767 )); then
+    err "Universe base must be between 0 and 32767."
+    exit 1
+  fi
+fi
+
 validate_ipv4() {
   local label="$1"
   local value="$2"
@@ -392,7 +443,7 @@ c_string_literal() {
 }
 
 create_build_override_header() {
-  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true ]]; then
+  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true && "$RECEIVE_MODE_OVERRIDE_SET" != true && "$UNIVERSE_BASE_OVERRIDE_SET" != true ]]; then
     return
   fi
 
@@ -422,6 +473,12 @@ create_build_override_header() {
     fi
     if [[ "$DHCP_OVERRIDE_SET" == true ]]; then
       printf '#define PRIMUSV3_FORCE_DHCP_OVERRIDE 1\n'
+    fi
+    if [[ "$RECEIVE_MODE_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUS_DEFAULT_RECEIVE_MODE %s\n' "$RECEIVE_MODE_DEFINE"
+    fi
+    if [[ "$UNIVERSE_BASE_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUS_DEFAULT_UNIVERSE_BASE %s\n' "$UNIVERSE_BASE_OVERRIDE"
     fi
   } > "$BUILD_OVERRIDE_HEADER"
 
