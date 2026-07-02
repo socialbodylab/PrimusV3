@@ -64,18 +64,15 @@ If you cannot connect over BLE at all:
 
 ## Behaviour
 
-| Gesture | Output |
-|---|---|
-| Button press | `btn/press` over BLE UART |
-| Button release | `btn/release` over BLE UART |
-| Button held | `accel x y z` at 12.5 Hz over BLE UART |
-| Triple tap | `btn/sleep` then `NRF.sleep()` — BLE radio off, CPU stays on |
-| Press after sleep | `NRF.wake()` — BLE restarts and advertises; no cue is fired |
+See `MARIUS_REFERENCE.md` for the full BLE message format and sleep/wake details.
 
-**Sleep/wake detail**: `NRF.sleep()` turns off the BLE radio but keeps the CPU and `setWatch`
-running. The next button press calls `NRF.wake()` to restore advertising, then returns without
-firing a cue. The Radius receives `btn/sleep` and immediately disconnects and starts scanning
-so it is ready before the user wakes the Puck.
+| Gesture | Message sent |
+|---|---|
+| Button press | `btn/press` |
+| Button release | `btn/release` |
+| Button held | `accel x y z` at 12.5 Hz |
+| Triple tap | `btn/sleep` then BLE radio off |
+| Press after sleep | BLE radio back on; no cue fired |
 
 ---
 
