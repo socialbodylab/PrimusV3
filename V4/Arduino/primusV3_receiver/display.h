@@ -14,6 +14,8 @@
 
 #if BOARD_HAS_TFT_DISPLAY
 
+#include "receive_mode.h"
+
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
@@ -31,10 +33,11 @@ enum ScreenMode {
   SCREEN_CONNECTION = 1,
   SCREEN_STATUS     = 2,
   SCREEN_ERROR      = 3,
-  SCREEN_TEST       = 4
+  SCREEN_RECEIVE    = 4,
+  SCREEN_TEST       = 5
 };
 
-#define NUM_INFO_SCREENS 3
+#define NUM_INFO_SCREENS 4
 ScreenMode currentScreen = SCREEN_STARTUP;
 
 const uint16_t portColors[MAX_OUTPUTS] = { ST77XX_RED, ST77XX_GREEN };
@@ -147,6 +150,18 @@ void displayConnection(const char* ssid, IPAddress ip, bool connected, int rssi,
   tft.setTextSize(1);
   tft.setTextColor(0x7BEF);
   tft.print(ssid);
+
+  tft.setCursor(4, 92);
+  tft.setTextColor(ST77XX_YELLOW);
+  tft.print(receiveModeLabel(currentReceiveMode));
+  tft.print(" U");
+  if (currentReceiveMode == RECEIVE_MODE_COMBINED) {
+    tft.print(currentUniverseBase);
+  } else {
+    tft.print(currentUniverseBase);
+    tft.print("/");
+    tft.print(currentUniverseBase + 1);
+  }
 
   // ── FPS + footer ──
   tft.drawFastHLine(0, 105, 240, 0x4208);
@@ -262,6 +277,49 @@ void displayError(const char* errorMsg, const char* detail) {
   tft.setTextSize(1);
   tft.setTextColor(ST77XX_WHITE);
   tft.println("Check serial for details");
+}
+
+// =====================================================================
+//  Receive Mode Screen
+// =====================================================================
+void displayReceiveSettings(OutputConfig outputs[NUM_OUTPUTS], const char* errorMsg = nullptr) {
+  currentScreen = SCREEN_RECEIVE;
+  tft.fillScreen(ST77XX_BLACK);
+
+  tft.setCursor(4, 4);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.print(headerName());
+  tft.print(" | Receive");
+  tft.drawFastHLine(0, 14, 240, ST77XX_CYAN);
+
+  tft.setCursor(10, 28);
+  tft.setTextSize(2);
+  tft.setTextColor(ST77XX_CYAN);
+  tft.println(receiveModeLabel(currentReceiveMode));
+
+  tft.setCursor(10, 52);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.print("Base universe: ");
+  tft.println(currentUniverseBase);
+
+  uint16_t totalPx = totalActivePixels(outputs);
+  tft.setCursor(10, 66);
+  tft.print("Pixels: ");
+  tft.print(totalPx);
+  tft.print(" / ");
+  tft.print(RECEIVE_MODE_COMBINED_MAX_PIXELS);
+
+  if (errorMsg && errorMsg[0]) {
+    tft.setCursor(10, 84);
+    tft.setTextColor(ST77XX_RED);
+    tft.println(errorMsg);
+  }
+
+  tft.setCursor(10, 108);
+  tft.setTextColor(0x7BEF);
+  tft.println("D1: Toggle Split/Combined");
 }
 
 // =====================================================================
@@ -423,6 +481,14 @@ void displayUpdateOutputActive(uint8_t outputIndex, bool active, OutputType type
   Serial.print(" ");
   Serial.print(typeName(type));
   Serial.println(active ? " active" : " idle");
+}
+
+void displayReceiveSettings(OutputConfig outputs[NUM_OUTPUTS], const char* errorMsg = nullptr) {
+  (void)outputs;
+  if (errorMsg && errorMsg[0]) {
+    Serial.print("Receive mode error: ");
+    Serial.println(errorMsg);
+  }
 }
 
 #endif
