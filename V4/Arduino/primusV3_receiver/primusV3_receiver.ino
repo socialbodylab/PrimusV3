@@ -18,6 +18,7 @@
 #include <WiFiUdp.h>
 #include <Preferences.h>
 #include "config.h"
+#include "receive_mode.h"
 
 #if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8
   #include <Adafruit_NeoPXL8.h>
@@ -65,20 +66,14 @@ static const uint8_t ARTNET_MAGIC[ARTNET_HEADER_LEN] =
   { 'A', 'r', 't', '-', 'N', 'e', 't', '\0' };
 
 // ── Per-output buffers ───────────────────────────────────────────────
-#define MAX_BUFFER_SIZE (MAX_LEDS_PER_PORT * 4)
 uint8_t outputBuffers[NUM_OUTPUTS][MAX_BUFFER_SIZE];
 bool    outputDataReady[NUM_OUTPUTS]  = {};
 bool    outputActive[NUM_OUTPUTS]     = {};
 unsigned long outputLastPacket[NUM_OUTPUTS] = {};
 
 // ── Frame assembly ───────────────────────────────────────────────────
-// Track which universes have arrived for the current sequence.
-// Apply to LEDs once all active outputs have data, or on timeout.
-uint8_t  frameSequence    = 0;
-uint8_t  frameUnivCount   = 0;        // how many universes received this frame
+FrameAssemblyState frameState = {};
 uint8_t  activeOutputCount = 0;       // cached count of non-OFF outputs
-unsigned long frameFirstArrival = 0;  // millis() of first packet in frame
-bool     frameReady       = false;
 
 // ── WiFi ─────────────────────────────────────────────────────────────
 bool wifiConnected = false;
@@ -224,6 +219,10 @@ void printStartupConnectionData() {
     Serial.print(" universe ");
     Serial.println(outputs[i].universe);
   }
+  Serial.print("  Receive mode: ");
+  Serial.print(receiveModeLabel(currentReceiveMode));
+  Serial.print(" base ");
+  Serial.println(currentUniverseBase);
 }
 
 void printConnectedNetworkData() {
@@ -548,6 +547,7 @@ void sendArtPollReply(IPAddress dest) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|IP:%c", useStaticIP ? 'S' : 'D');
   }
+  reportPos = buildReceiveModeCapabilityToken(reportBuf, sizeof(reportBuf), reportPos);
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|F:%s", BOARD_BATTERY_FEATURES);
@@ -687,6 +687,12 @@ void handleArtOutputConfig(uint8_t* data, uint16_t len) {
 
   if (changed) {
     activeOutputCount = countActiveOutputs(outputs);
+    if (!validateReceiveMode(currentReceiveMode, outputs)) {
+      applyReceiveMode(outputs, RECEIVE_MODE_SPLIT, currentUniverseBase);
+      saveReceiveMode(prefs);
+    } else {
+      applyReceiveMode(outputs, currentReceiveMode, currentUniverseBase);
+    }
     saveOutputConfig();
     // Broadcast updated ArtPollReply so sender sees new config
     broadcastArtPollReply();
@@ -772,6 +778,14 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     return;
   }
 
+  if (opcode == ARTNET_OPCODE_RECEIVE_CONFIG) {
+    if (handleArtReceiveConfig(prefs, outputs, outputBuffers, outputDataReady, data, len)) {
+      activeOutputCount = countActiveOutputs(outputs);
+      broadcastArtPollReply();
+    }
+    return;
+  }
+
   if (opcode != ARTNET_OPCODE_DMX) return;
 
   // ── ArtDmx handling (unchanged) ──────────────────────────────────
@@ -793,39 +807,9 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   unsigned long now = millis();
   packetCount++;
 
-  // Find which output matches this universe
-  for (uint8_t o = 0; o < NUM_OUTPUTS; o++) {
-    if (outputs[o].type == OUTPUT_OFF) continue;
-    if (outputs[o].universe != universe) continue;
-
-    uint16_t needed = outputs[o].pixelCount * outputs[o].bytesPerPixel;
-    if (needed > MAX_BUFFER_SIZE) needed = MAX_BUFFER_SIZE;
-    uint16_t toCopy = (dataLen < needed) ? dataLen : needed;
-    memcpy(outputBuffers[o], pixelData, toCopy);
-    if (toCopy < needed) {
-      memset(outputBuffers[o] + toCopy, 0, needed - toCopy);
-    }
-    outputDataReady[o] = true;
-    outputActive[o]    = true;
-    outputLastPacket[o] = now;
-
-    // Frame assembly tracking
-    if (seq != frameSequence || frameReady) {
-      // New frame starting
-      frameSequence    = seq;
-      frameUnivCount   = 1;
-      frameFirstArrival = now;
-      frameReady       = false;
-    } else {
-      frameUnivCount++;
-    }
-
-    if (frameUnivCount >= activeOutputCount) {
-      frameReady = true;
-    }
-
-    break;  // universe matched — done
-  }
+  handleArtDmxForReceiveMode(outputs, outputBuffers, outputDataReady, outputActive,
+                             outputLastPacket, frameState, universe, seq,
+                             pixelData, dataLen, now);
 
   newDataSinceLastShow = true;
 }
@@ -968,8 +952,29 @@ void handleScreenCycle() {
       else
         displayError("No Errors", "System running normally");
       break;
+#if BOARD_HAS_TFT_DISPLAY
+    case 3:
+      displayReceiveSettings(outputs, nullptr);
+      break;
+#endif
   }
 }
+
+#if BOARD_HAS_TFT_DISPLAY && BOARD_HAS_BUTTONS
+void handleReceiveModeToggle() {
+  ReceiveMode next = (currentReceiveMode == RECEIVE_MODE_SPLIT)
+    ? RECEIVE_MODE_COMBINED : RECEIVE_MODE_SPLIT;
+  if (!validateReceiveMode(next, outputs)) {
+    displayReceiveSettings(outputs, "Combined limit exceeded");
+    return;
+  }
+  if (setReceiveMode(prefs, outputs, outputBuffers, outputDataReady,
+                      next, currentUniverseBase)) {
+    broadcastArtPollReply();
+    displayReceiveSettings(outputs, nullptr);
+  }
+}
+#endif
 
 void handleTestToggle() {
   if (!testModeActive) {
@@ -1026,6 +1031,7 @@ void setup() {
   // Load output config
   loadDefaultConfig(outputs);
   loadStoredOutputConfig();
+  loadStoredReceiveMode(prefs, outputs);
   activeOutputCount = countActiveOutputs(outputs);
 
   Serial.println("Output configuration:");
@@ -1130,7 +1136,15 @@ void loop() {
   buttonsPoll();
 
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
+#if BOARD_HAS_TFT_DISPLAY && BOARD_HAS_BUTTONS
+  if (btnTestToggle)  {
+    btnTestToggle = false;
+    if (infoScreenIndex == 3) handleReceiveModeToggle();
+    else handleTestToggle();
+  }
+#elif BOARD_HAS_BUTTONS
   if (btnTestToggle)  { btnTestToggle  = false; handleTestToggle();  }
+#endif
 
   if (testModeActive) {
     runTestAnimations();
@@ -1161,13 +1175,13 @@ void loop() {
   }
 
   // ── Frame assembly timeout ───────────────────────────────────────
-  if (!frameReady && frameUnivCount > 0 &&
-      (now - frameFirstArrival >= FRAME_ASSEMBLY_TIMEOUT)) {
-    frameReady = true;  // partial frame — show what we have
+  if (!frameState.ready && frameState.univCount > 0 &&
+      (now - frameState.firstArrival >= FRAME_ASSEMBLY_TIMEOUT)) {
+    frameState.ready = true;  // partial frame — show what we have
   }
 
   // ── Apply data + adaptive-rate show ──────────────────────────────
-  if (newDataSinceLastShow && frameReady &&
+  if (newDataSinceLastShow && frameState.ready &&
       (now - lastShowTime >= showInterval)) {
     applyBufferedData();
 
@@ -1179,8 +1193,8 @@ void loop() {
 
     lastShowTime = now;
     newDataSinceLastShow = false;
-    frameReady   = false;
-    frameUnivCount = 0;
+    frameState.ready = false;
+    frameState.univCount = 0;
     frameCount++;
   }
 
