@@ -136,6 +136,9 @@
                     <span class="device-fw-version"
                           x-show="$store.conn.firmwareLabel(dev) !== '—'"
                           x-text="'FW ' + $store.conn.firmwareLabel(dev)"></span>
+                    <span class="device-receive-mode"
+                          :title="$store.conn.receiveModeHint(dev)"
+                          x-text="$store.conn.receiveModeLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                 </div>
                 <div class="btn-group device-actions device-actions-primary">
@@ -170,6 +173,40 @@
                     </div>
                     <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
                     <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Primus will rescan.</div>
+                </div>
+                <div class="device-receive-config">
+                    <div class="flex justify-between items-center" style="margin-top:8px">
+                        <span class="form-label" style="margin:0">Receive Mode</span>
+                        <button class="btn btn-sm"
+                                :disabled="!$store.conn.canConfigureReceiveMode(dev) && !$store.conn.receiveModeLabel(dev)"
+                                @click="$store.conn.receiveConfigDevice === di ? $store.conn.closeReceiveConfig() : $store.conn.openReceiveConfig(di)"
+                                x-text="$store.conn.receiveConfigDevice === di ? 'Close' : 'Configure'"></button>
+                    </div>
+                    <div class="device-ip-config" x-show="$store.conn.receiveConfigDevice === di" x-cloak>
+                        <div class="form-group compact">
+                            <label class="form-label">Mode</label>
+                            <select class="form-input form-input-sm"
+                                    :disabled="!$store.conn.canConfigureReceiveMode(dev)"
+                                    x-model="$store.conn.receiveConfigMode">
+                                <option value="split">Split (one universe per output)</option>
+                                <option value="combined" :disabled="!$store.conn.canUseCombinedMode(dev)">
+                                    Combined (single universe)
+                                </option>
+                            </select>
+                        </div>
+                        <div class="form-group compact">
+                            <label class="form-label">Base Universe</label>
+                            <input class="form-input form-input-sm" type="number" min="0" max="32767"
+                                   :disabled="!$store.conn.canConfigureReceiveMode(dev)"
+                                   x-model.number="$store.conn.receiveConfigBase">
+                        </div>
+                        <div class="device-ip-config-note" x-text="$store.conn.receiveModeHint(dev)"></div>
+                        <div class="btn-group" style="margin-top:4px">
+                            <button class="btn btn-sm btn-primary"
+                                    :disabled="!$store.conn.canConfigureReceiveMode(dev)"
+                                    @click="$store.conn.setDeviceReceiveMode(di)">Apply Receive Mode</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="device-outputs" :title="$store.conn.outputConfigHint(dev)">
                     <template x-for="(o, oi) in dev.outputs" :key="oi">

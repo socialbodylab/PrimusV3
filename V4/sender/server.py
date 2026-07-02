@@ -543,6 +543,28 @@ class Handler(BaseHTTPRequestHandler):
                 code = 400 if "invalid" in error.lower() or "unknown" in error.lower() else 409
                 self._json_error(code, error)
 
+        elif path == "/api/set_device_receive_mode":
+            self._sync_artnet_source()
+            di = data.get("device", -1)
+            receive_mode = str(data.get("receive_mode", "")).strip().lower()
+            base_universe = data.get("base_universe", 0)
+            if receive_mode not in ("split", "combined"):
+                self._json_error(400, "receive_mode must be split or combined")
+                return
+            try:
+                di = int(di)
+            except (TypeError, ValueError):
+                self._json_error(400, "invalid device index")
+                return
+            result = self._device_state().set_device_receive_mode(
+                di, receive_mode, base_universe)
+            if result.get("ok"):
+                self._ok()
+            else:
+                error = result.get("error", "receive mode update failed")
+                code = 400 if "invalid" in error.lower() else 409
+                self._json_error(code, error)
+
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
             try:

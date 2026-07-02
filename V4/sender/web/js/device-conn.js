@@ -26,6 +26,9 @@ document.addEventListener("alpine:init", () => {
         ipConfigIp: "",
         ipConfigGateway: "",
         ipConfigSubnet: "255.255.255.0",
+        receiveConfigDevice: -1,
+        receiveConfigMode: "split",
+        receiveConfigBase: 0,
         _ipRediscoveryTimer: null,
         _ipRediscoveryUntil: 0,
         sidebarCollapsed: false,
@@ -56,6 +59,38 @@ document.addEventListener("alpine:init", () => {
 
         canConfigureOutputs(dev) {
             return connProduct() === "primus" && !!dev?.capabilities?.output_config;
+        },
+
+        canConfigureReceiveMode(dev) {
+            return connProduct() === "primus" && !!dev?.capabilities?.receive_config;
+        },
+
+        receiveModeLabel(dev) {
+            const mode = dev?.receive_mode || "split";
+            const base = dev?.base_universe ?? 0;
+            if (mode === "combined") {
+                return `Combined · U${base}`;
+            }
+            return `Split · U${base}/${base + 1}`;
+        },
+
+        receiveModeHint(dev) {
+            if (this.canConfigureReceiveMode(dev)) {
+                return "Configure how this receiver expects Art-Net universes";
+            }
+            if (dev?.receive_mode) {
+                return "Receive mode reported from device discovery";
+            }
+            return "Flash firmware v3.8+ to change receive mode remotely";
+        },
+
+        combinedPixelTotal(dev) {
+            return (dev?.outputs || []).reduce(
+                (sum, output) => sum + (output?.count || 0), 0);
+        },
+
+        canUseCombinedMode(dev) {
+            return this.combinedPixelTotal(dev) <= 170;
         },
 
         deviceOutputTypes() {
@@ -97,6 +132,7 @@ document.addEventListener("alpine:init", () => {
                 items.splice(1, 0,
                     { key: "hello", label: "Hello", supported: !!caps.hello },
                     { key: "output_config", label: "Outputs", supported: !!caps.output_config },
+                    { key: "receive_config", label: "Receive", supported: !!caps.receive_config },
                     { key: "battery", label: "Battery", supported: !!caps.battery },
                 );
             }
@@ -350,6 +386,47 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").showNotice("Output configuration updated", "success", 2200);
             } catch (e) {
                 Alpine.store("app").showApiError("Output update failed", e);
+            } finally {
+                await Alpine.store("app").fetchState();
+            }
+        },
+
+        openReceiveConfig(di) {
+            const dev = this.devices[di];
+            if (!dev) return;
+            this.receiveConfigDevice = di;
+            this.receiveConfigMode = dev.receive_mode || "split";
+            this.receiveConfigBase = dev.base_universe ?? 0;
+        },
+
+        closeReceiveConfig() {
+            this.receiveConfigDevice = -1;
+        },
+
+        async setDeviceReceiveMode(di) {
+            const dev = this.devices[di];
+            if (!dev) return;
+            const receiveMode = this.receiveConfigMode || "split";
+            const baseUniverse = Number(this.receiveConfigBase);
+            if (!Number.isFinite(baseUniverse) || baseUniverse < 0 || baseUniverse > 32767) {
+                Alpine.store("app").showNotice("Base universe must be 0–32767", "error");
+                return;
+            }
+            if (receiveMode === "combined" && !this.canUseCombinedMode(dev)) {
+                Alpine.store("app").showNotice(
+                    "Combined mode requires at most 170 pixels across outputs", "error");
+                return;
+            }
+            try {
+                await api("POST", "/api/set_device_receive_mode", {
+                    device: di,
+                    receive_mode: receiveMode,
+                    base_universe: baseUniverse,
+                });
+                Alpine.store("app").showNotice("Receive mode updated", "success", 2200);
+                this.closeReceiveConfig();
+            } catch (e) {
+                Alpine.store("app").showApiError("Receive mode update failed", e);
             } finally {
                 await Alpine.store("app").fetchState();
             }
