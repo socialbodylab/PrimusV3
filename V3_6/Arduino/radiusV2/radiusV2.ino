@@ -625,9 +625,18 @@ void handleD1Press() {
                       audioIsPlaying() && sdSelectedFile[0] != '\0' &&
                       strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
       break;
-    case 5:  // Marius screen — D1 reverts BLE for this session
-      if (mariusIsActive()) mariusRevert();
-      displayMariusStatus(MARIUS_DISPLAY_REVERTED, mariusPuckName(), mariusLastEvent());
+    case 5:  // Marius screen — D1 simulates PRESS
+      mariusSimulateEvent(MARIUS_EVENT_PRESS);
+      break;
+    default:
+      break;
+  }
+}
+
+void handleD1Release() {
+  switch (infoScreenIndex) {
+    case 5:  // Marius screen — D1 release simulates RELEASE
+      mariusSimulateEvent(MARIUS_EVENT_RELEASE);
       break;
     default:
       break;
@@ -643,6 +652,10 @@ void handleD2Press() {
                         audioIsPlaying() && sdSelectedFile[0] != '\0' &&
                         strcasecmp(audioCurrentFile(), sdSelectedFile) == 0);
       }
+      break;
+    case 5:  // Marius screen — D2 reverts BLE for this session
+      if (mariusIsActive()) mariusRevert();
+      displayMariusStatus(MARIUS_DISPLAY_REVERTED, mariusPuckName(), mariusLastEvent());
       break;
     default:
       break;
@@ -721,6 +734,7 @@ void loop() {
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1          = false; handleD1Press();     }
+  if (btnD1Release)   { btnD1Release   = false; handleD1Release();   }
   if (btnD2)          { btnD2          = false; handleD2Press();     }
 
   // ── FTP update ───────────────────────────────────────────────────

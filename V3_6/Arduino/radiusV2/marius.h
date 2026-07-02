@@ -96,9 +96,13 @@ static char        _mariusLastEvent[16]   = {0};  // "PRESS" / "RELEASE" / ""
 static NimBLEAddress     _mariusFoundAddress;
 static volatile bool     _mariusFoundDevice = false;
 
-// Pending event — written by notify callback (BLE task), read by mariusUpdate() (main task).
-static char              _mariusEventLine[64]    = {0};
-static volatile bool     _mariusEventPending     = false;
+// Pending events — written by notify callback (BLE task), read by mariusUpdate() (main task).
+// Separate flags per event type so press+release in the same BLE packet are both handled.
+static volatile bool _mariusPressEventPending   = false;
+static volatile bool _mariusReleaseEventPending = false;
+static volatile bool _mariusSleepEventPending   = false;
+static char          _mariusAccelLine[64]       = {0};
+static volatile bool _mariusAccelEventPending   = false;
 
 // Incoming byte buffer for assembling newline-delimited lines
 static char     _mariusLineBuf[128] = {0};
@@ -112,8 +116,14 @@ static uint8_t      _mariusPressCount   = 0;
 static MariusAction _mariusReleaseActions[MARIUS_ACTIONS_MAX];
 static uint8_t      _mariusReleaseCount = 0;
 
-// mtime-based reload: check every 5 s; skip if SD is busy with audio
-static uint32_t _mariusJsonMtime   = 0;
+// press_cycle: one action per press, round-robin
+static MariusAction _mariusPressCycleActions[MARIUS_ACTIONS_MAX];
+static uint8_t      _mariusPressCycleCount = 0;
+static uint8_t      _mariusPressCycleIndex = 0;
+
+// reload check every 5 s; skip if SD is busy with audio
+// uses file size because ESP32 has no RTC — FAT mtime stays at epoch after FTP writes
+static uint32_t _mariusJsonSize    = 0;
 static uint32_t _mariusMtimeLastMs = 0;
 
 // =====================================================================
@@ -126,10 +136,18 @@ static void _mariusOnNotify(NimBLERemoteCharacteristic*, uint8_t* data, size_t l
         if (c == '\n' || c == '\r') {
             if (_mariusLineBufLen > 0) {
                 _mariusLineBuf[_mariusLineBufLen] = '\0';
-                strncpy(_mariusEventLine, _mariusLineBuf, sizeof(_mariusEventLine) - 1);
-                _mariusEventLine[sizeof(_mariusEventLine) - 1] = '\0';
-                _mariusEventPending = true;
-                _mariusLineBufLen   = 0;
+                if (strcmp(_mariusLineBuf, "btn/press") == 0) {
+                    _mariusPressEventPending = true;
+                } else if (strcmp(_mariusLineBuf, "btn/release") == 0) {
+                    _mariusReleaseEventPending = true;
+                } else if (strcmp(_mariusLineBuf, "btn/sleep") == 0) {
+                    _mariusSleepEventPending = true;
+                } else if (strncmp(_mariusLineBuf, "accel ", 6) == 0) {
+                    strncpy(_mariusAccelLine, _mariusLineBuf, sizeof(_mariusAccelLine) - 1);
+                    _mariusAccelLine[sizeof(_mariusAccelLine) - 1] = '\0';
+                    _mariusAccelEventPending = true;
+                }
+                _mariusLineBufLen = 0;
             }
         } else if (_mariusLineBufLen < sizeof(_mariusLineBuf) - 1) {
             _mariusLineBuf[_mariusLineBufLen++] = c;
@@ -351,7 +369,34 @@ void mariusRevert() {
 }
 
 // =====================================================================
-//  mariusFireActions() — dispatch audio actions for an event
+//  _mariusFireOneAction() — dispatch a single action
+// =====================================================================
+
+static void _mariusFireOneAction(const MariusAction& a) {
+    switch (a.type) {
+        case MARIUS_ACTION_AUDIO_PLAY: {
+            uint8_t vol = (a.volume != MARIUS_VOLUME_UNSET) ? a.volume : _audioVolume;
+            if (a.loop) audioLoop(a.file, vol, 0);
+            else        audioPlay(a.file, vol, 0);
+            break;
+        }
+        case MARIUS_ACTION_AUDIO_STOP:
+            audioStop();
+            break;
+        case MARIUS_ACTION_OSC:
+            _mariusSendOsc(a);
+            break;
+        case MARIUS_ACTION_ARTNET_AUDIO:
+            _mariusSendArtAudio(a);
+            break;
+        case MARIUS_ACTION_ARTNET_DMX:
+            _mariusSendArtDmx(a);
+            break;
+    }
+}
+
+// =====================================================================
+//  mariusFireActions() — dispatch actions for an event
 // =====================================================================
 
 void mariusFireActions(uint8_t event) {
@@ -361,30 +406,28 @@ void mariusFireActions(uint8_t event) {
                             ? _mariusPressCount    : _mariusReleaseCount;
 
     for (uint8_t i = 0; i < count; i++) {
-        switch (actions[i].type) {
-            case MARIUS_ACTION_AUDIO_PLAY: {
-                uint8_t vol = (actions[i].volume != MARIUS_VOLUME_UNSET)
-                              ? actions[i].volume : _audioVolume;
-                if (actions[i].loop)
-                    audioLoop(actions[i].file, vol, 0);
-                else
-                    audioPlay(actions[i].file, vol, 0);
-                break;
-            }
-            case MARIUS_ACTION_AUDIO_STOP:
-                audioStop();
-                break;
-            case MARIUS_ACTION_OSC:
-                _mariusSendOsc(actions[i]);
-                break;
-            case MARIUS_ACTION_ARTNET_AUDIO:
-                _mariusSendArtAudio(actions[i]);
-                break;
-            case MARIUS_ACTION_ARTNET_DMX:
-                _mariusSendArtDmx(actions[i]);
-                break;
-        }
+        _mariusFireOneAction(actions[i]);
     }
+
+    // press_cycle: fire one action per press, advancing round-robin
+    if (event == MARIUS_EVENT_PRESS && _mariusPressCycleCount > 0) {
+        uint8_t idx = _mariusPressCycleIndex % _mariusPressCycleCount;
+        _mariusPressCycleIndex++;
+        _mariusFireOneAction(_mariusPressCycleActions[idx]);
+    }
+}
+
+// Simulate a button event for testing without a Puck connected.
+void mariusSimulateEvent(uint8_t event) {
+    if (!_mariusConfigured) {
+        Serial.println("[Marius] simulateEvent: no marius.json loaded");
+        return;
+    }
+    const char* label = (event == MARIUS_EVENT_PRESS) ? "PRESS" : "RELEASE";
+    strncpy(_mariusLastEvent, label, sizeof(_mariusLastEvent) - 1);
+    _mariusLastEvent[sizeof(_mariusLastEvent) - 1] = '\0';
+    Serial.print("[Marius] Simulate "); Serial.println(label);
+    mariusFireActions(event);
 }
 
 // =====================================================================
@@ -498,11 +541,13 @@ static void _mariusParseActionArray(JsonArray arr, MariusAction* actions, uint8_
 // =====================================================================
 
 void mariusLoad() {
-    _mariusConfigured  = false;
-    _mariusActive      = false;
-    _mariusPuckName[0] = '\0';
-    _mariusPressCount  = 0;
-    _mariusReleaseCount = 0;
+    _mariusConfigured      = false;
+    _mariusActive          = false;
+    _mariusPuckName[0]     = '\0';
+    _mariusPressCount      = 0;
+    _mariusReleaseCount    = 0;
+    _mariusPressCycleCount = 0;
+    _mariusPressCycleIndex = 0;
 
     File f = SD.open("/marius.json");
     if (!f) {
@@ -510,7 +555,7 @@ void mariusLoad() {
         return;
     }
 
-    _mariusJsonMtime = (uint32_t)f.getLastWrite();
+    _mariusJsonSize = (uint32_t)f.size();
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, f);
@@ -537,8 +582,11 @@ void mariusLoad() {
     Serial.println("[Marius] release actions:");
     _mariusParseActionArray(doc["actions"]["release"].as<JsonArray>(),
                             _mariusReleaseActions, &_mariusReleaseCount);
-    Serial.printf("[Marius] press:%d release:%d action(s) loaded\n",
-                  _mariusPressCount, _mariusReleaseCount);
+    Serial.println("[Marius] press_cycle actions:");
+    _mariusParseActionArray(doc["actions"]["press_cycle"].as<JsonArray>(),
+                            _mariusPressCycleActions, &_mariusPressCycleCount);
+    Serial.printf("[Marius] press:%d release:%d cycle:%d action(s) loaded\n",
+                  _mariusPressCount, _mariusReleaseCount, _mariusPressCycleCount);
 
     _mariusConfigured = true;
     _mariusActive     = true;
@@ -573,36 +621,45 @@ void mariusUpdate() {
         _mariusMtimeLastMs = now;
         File fChk = SD.open("/marius.json");
         if (fChk) {
-            uint32_t mtime = (uint32_t)fChk.getLastWrite();
+            uint32_t sz = (uint32_t)fChk.size();
             fChk.close();
-            if (mtime != _mariusJsonMtime) {
+            if (sz != _mariusJsonSize) {
                 Serial.println("[Marius] /marius.json updated — reloading");
                 mariusLoad();
             }
         }
     }
 
-    // ── Dispatch pending event (written by BLE task, read here) ──────
-    if (_mariusEventPending) {
-        _mariusEventPending = false;
-        char line[64];
-        strncpy(line, _mariusEventLine, sizeof(line) - 1);
-        line[sizeof(line) - 1] = '\0';
-
-        if (strcmp(line, "btn/press") == 0) {
-            Serial.println("[Marius] PRESS");
-            strncpy(_mariusLastEvent, "PRESS", sizeof(_mariusLastEvent) - 1);
-            mariusFireActions(MARIUS_EVENT_PRESS);
-        } else if (strcmp(line, "btn/release") == 0) {
-            Serial.println("[Marius] RELEASE");
-            strncpy(_mariusLastEvent, "RELEASE", sizeof(_mariusLastEvent) - 1);
-            mariusFireActions(MARIUS_EVENT_RELEASE);
-        } else if (strncmp(line, "accel ", 6) == 0) {
-            // Phase 5: parse floats and dispatch accel actions
-            Serial.printf("[Marius] accel: %s\n", line + 6);
-        } else {
-            Serial.printf("[Marius] unknown line: %s\n", line);
+    // ── Dispatch pending events (written by BLE task, read here) ─────
+    // Each event type has its own flag so press+release in the same
+    // BLE packet are both processed rather than one overwriting the other.
+    if (_mariusPressEventPending) {
+        _mariusPressEventPending = false;
+        Serial.println("[Marius] PRESS");
+        strncpy(_mariusLastEvent, "PRESS", sizeof(_mariusLastEvent) - 1);
+        mariusFireActions(MARIUS_EVENT_PRESS);
+    }
+    if (_mariusReleaseEventPending) {
+        _mariusReleaseEventPending = false;
+        Serial.println("[Marius] RELEASE");
+        strncpy(_mariusLastEvent, "RELEASE", sizeof(_mariusLastEvent) - 1);
+        mariusFireActions(MARIUS_EVENT_RELEASE);
+    }
+    if (_mariusSleepEventPending) {
+        _mariusSleepEventPending = false;
+        // Puck is about to sleep — disconnect now so we are already scanning
+        // when the user wakes it, rather than waiting for supervision timeout
+        Serial.println("[Marius] Puck sleeping — restarting scan");
+        _mariusState = MARIUS_SCANNING;
+        if (_mariusClient && _mariusClient->isConnected()) {
+            _mariusClient->disconnect();
         }
+        NimBLEDevice::getScan()->start(0);
+    }
+    if (_mariusAccelEventPending) {
+        _mariusAccelEventPending = false;
+        // Phase 5: parse floats and dispatch accel actions
+        Serial.printf("[Marius] accel: %s\n", _mariusAccelLine + 6);
     }
 
     // ── Display update on state or event change ───────────────────────

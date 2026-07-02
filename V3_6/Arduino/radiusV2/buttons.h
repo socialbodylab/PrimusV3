@@ -22,6 +22,7 @@ static const uint8_t btnPins[3] = { BTN_D0, BTN_D1, BTN_D2 };
 // =====================================================================
 volatile bool btnScreenCycle = false;   // D0 pressed
 volatile bool btnD1          = false;   // D1 pressed — context action
+volatile bool btnD1Release   = false;   // D1 released — context action
 volatile bool btnD2          = false;   // D2 pressed — context action
 
 // =====================================================================
@@ -60,6 +61,7 @@ void buttonsPoll() {
       else if (i == 1) btnD1          = true;
       else             btnD2          = true;
     }
+    if (!pressed && lastBtnState[i] && i == 1) btnD1Release = true;
     lastBtnState[i] = pressed;
   }
 }

@@ -1,0 +1,9 @@
+{
+    "puck_name": "Puck.js d8c8",
+    "actions": {
+        "press_cycle": [
+            { "type": "osc", "address": "/cue/1" },
+            { "type": "osc", "address": "/cue/3" }
+        ]
+    }
+}
