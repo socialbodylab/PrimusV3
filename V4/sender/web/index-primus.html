@@ -136,9 +136,6 @@
                     <span class="device-fw-version"
                           x-show="$store.conn.firmwareLabel(dev) !== '—'"
                           x-text="'FW ' + $store.conn.firmwareLabel(dev)"></span>
-                    <span class="device-receive-mode"
-                          :title="$store.conn.receiveModeHint(dev)"
-                          x-text="$store.conn.receiveModeLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                 </div>
                 <div class="btn-group device-actions device-actions-primary">
@@ -174,46 +171,42 @@
                     <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
                     <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Primus will rescan.</div>
                 </div>
-                <div class="device-receive-config">
-                    <div class="flex justify-between items-center" style="margin-top:8px">
-                        <span class="form-label" style="margin:0">Receive Mode</span>
-                        <button class="btn btn-sm"
-                                :disabled="!$store.conn.canConfigureReceiveMode(dev) && !$store.conn.receiveModeLabel(dev)"
-                                @click="$store.conn.receiveConfigDevice === di ? $store.conn.closeReceiveConfig() : $store.conn.openReceiveConfig(di)"
-                                x-text="$store.conn.receiveConfigDevice === di ? 'Close' : 'Configure'"></button>
-                    </div>
-                    <div class="device-ip-config" x-show="$store.conn.receiveConfigDevice === di" x-cloak>
-                        <div class="form-group compact">
-                            <label class="form-label">Mode</label>
-                            <select class="form-input form-input-sm"
-                                    :disabled="!$store.conn.canConfigureReceiveMode(dev)"
-                                    x-model="$store.conn.receiveConfigMode">
-                                <option value="split">Split (one universe per output)</option>
-                                <option value="combined" :disabled="!$store.conn.canUseCombinedMode(dev)">
-                                    Combined (single universe)
-                                </option>
-                            </select>
-                        </div>
-                        <div class="form-group compact">
-                            <label class="form-label">Base Universe</label>
-                            <input class="form-input form-input-sm" type="number" min="0" max="32767"
-                                   :disabled="!$store.conn.canConfigureReceiveMode(dev)"
-                                   x-model.number="$store.conn.receiveConfigBase">
-                        </div>
-                        <div class="device-ip-config-note" x-text="$store.conn.receiveModeHint(dev)"></div>
-                        <div class="btn-group" style="margin-top:4px">
-                            <button class="btn btn-sm btn-primary"
-                                    :disabled="!$store.conn.canConfigureReceiveMode(dev)"
-                                    @click="$store.conn.setDeviceReceiveMode(di)">Apply Receive Mode</button>
-                        </div>
-                    </div>
-                </div>
                 <div class="device-outputs" :title="$store.conn.outputConfigHint(dev)">
+                    <label class="device-output-row" :title="$store.conn.receiveModeHint(dev)">
+                        <span class="device-config-label">Receive</span>
+                        <select class="form-input form-input-sm device-output-select"
+                                :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'mode'))"
+                                :disabled="!$store.conn.canConfigureReceiveMode(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'mode'))"
+                                x-effect="$el.value = dev.receive_mode || 'split'"
+                                @change="$store.conn.setDeviceReceiveModeValue(di, $event.target.value)">
+                            <option value="split">Split</option>
+                            <option value="combined" :disabled="!$store.conn.canUseCombinedMode(dev)">Combined</option>
+                        </select>
+                        <span class="device-config-status"
+                              :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'mode'))"
+                              x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'mode'))"
+                              x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'mode'))"></span>
+                    </label>
+                    <label class="device-output-row" :title="$store.conn.receiveModeHint(dev)">
+                        <span class="device-config-label">Base U</span>
+                        <input class="form-input form-input-sm device-output-select device-config-input"
+                               type="number" min="0" max="32767"
+                               :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'base'))"
+                               :disabled="!$store.conn.canConfigureReceiveMode(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'base'))"
+                               :value="dev.base_universe ?? 0"
+                               @change="$store.conn.setDeviceBaseUniverse(di, $event.target.value)"
+                               @keydown.enter="$event.target.blur()">
+                        <span class="device-config-status"
+                              :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'base'))"
+                              x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'base'))"
+                              x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'base'))"></span>
+                    </label>
                     <template x-for="(o, oi) in dev.outputs" :key="oi">
                         <label class="device-output-row">
                             <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
                             <select class="form-input form-input-sm device-output-select"
-                                    :disabled="!$store.conn.canConfigureOutputs(dev)"
+                                    :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'output', oi))"
+                                    :disabled="!$store.conn.canConfigureOutputs(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'output', oi))"
                                     x-effect="$el.value = o.type || 'none'"
                                     @change="$store.conn.setDeviceOutputType(di, oi, $event.target.value)">
                                 <template x-for="type in $store.conn.deviceOutputTypesFor(dev, oi)" :key="type">
@@ -221,6 +214,10 @@
                                             x-text="$store.app.outputTypeLabel(type)"></option>
                                 </template>
                             </select>
+                            <span class="device-config-status"
+                                  :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'output', oi))"
+                                  x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"
+                                  x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"></span>
                         </label>
                     </template>
                 </div>
@@ -1392,6 +1389,33 @@
                         <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
                     </div>
                 </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Default receive mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: receiveModeMode === 'keep' }"
+                            :disabled="running"
+                            @click="receiveModeMode = 'keep'">Keep Receive Default</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: receiveModeMode === 'split' }"
+                            :disabled="running"
+                            @click="receiveModeMode = 'split'">Split</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: receiveModeMode === 'combined' }"
+                            :disabled="running"
+                            @click="receiveModeMode = 'combined'">Combined</button>
+                </div>
+                <div class="form-group" x-show="receiveModeMode !== 'keep'" x-cloak>
+                    <label class="form-label">Base Universe</label>
+                    <input class="form-input" type="number" min="0" max="32767"
+                           x-model.number="receiveBaseUniverse" :disabled="running"
+                           placeholder="0">
+                    <div class="text-sm text-muted" style="margin-top:4px"
+                         x-show="receiveModeMode === 'combined'">
+                        Combined mode supports at most 170 pixels across both outputs.
+                    </div>
+                    <div class="text-sm text-muted" style="margin-top:4px">
+                        Baked into NVS at flash time. Remote changes remain available after firmware v3.8+.
+                    </div>
+                </div>
                 <div class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></div>
             </div>
 
@@ -1413,12 +1437,39 @@
                 <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
             </div>
             <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
-            <div class="firmware-log" x-show="activeJob" x-cloak>
+            <div class="firmware-log" x-show="activeJob" x-ref="firmwareLog" x-cloak>
+                <div class="firmware-log-line firmware-log-waiting text-muted"
+                     x-show="showJobWaitingPlaceholder">Job running — waiting for output...</div>
                 <template x-for="(line, idx) in outputLines" :key="idx">
                     <div class="firmware-log-line" x-text="line"></div>
                 </template>
             </div>
             <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
+        </div>
+
+        <div class="output-section firmware-log-section">
+            <div class="output-header">
+                <span class="output-name">Serial Monitor</span>
+                <span class="text-sm text-muted" x-text="serialActive ? ('Monitoring ' + serialPort) : monitorPortLabel"></span>
+            </div>
+            <div class="firmware-actions">
+                <select class="form-input form-input-sm firmware-monitor-port"
+                        x-model="monitorPort"
+                        :disabled="serialActive || running">
+                    <option value="">Select port...</option>
+                    <template x-for="port in candidatePorts" :key="port.address">
+                        <option :value="port.address" x-text="port.address"></option>
+                    </template>
+                </select>
+                <button class="btn btn-sm" @click="startSerialMonitor()" :disabled="!canStartSerial">Start</button>
+                <button class="btn btn-sm" @click="stopSerialMonitor()" :disabled="!serialActive">Stop</button>
+            </div>
+            <div class="firmware-log firmware-serial-log" x-ref="serialLog" x-show="serialOutputLines.length" x-cloak>
+                <template x-for="(line, idx) in serialOutputLines" :key="'serial-' + idx">
+                    <div class="firmware-log-line" x-text="line"></div>
+                </template>
+            </div>
+            <div class="firmware-empty-state" x-show="!serialOutputLines.length">Connect a device over USB and start the monitor to view serial output.</div>
         </div>
     </div>
 

@@ -38,6 +38,11 @@ document.addEventListener("alpine:init", () => {
         filterText: "",
         filterGroupId: "",
 
+        get brandLabel() {
+            const version = this.runtime?.app_version;
+            return version ? `Device Manager v${version}` : "Device Manager";
+        },
+
         get deviceGroups() {
             return this.state?.device_groups || [];
         },
@@ -105,6 +110,9 @@ document.addEventListener("alpine:init", () => {
             try {
                 this.runtime = await api("GET", "/api/runtime");
                 this.product = this.runtime?.product || "primus";
+                if (this.runtime?.app_version) {
+                    document.title = `Device Manager v${this.runtime.app_version}`;
+                }
             } catch (e) {
                 /* ignore */
             }

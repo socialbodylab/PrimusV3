@@ -26,9 +26,7 @@ document.addEventListener("alpine:init", () => {
         ipConfigIp: "",
         ipConfigGateway: "",
         ipConfigSubnet: "255.255.255.0",
-        receiveConfigDevice: -1,
-        receiveConfigMode: "split",
-        receiveConfigBase: 0,
+        configFeedback: {},
         _ipRediscoveryTimer: null,
         _ipRediscoveryUntil: 0,
         sidebarCollapsed: false,
@@ -114,6 +112,40 @@ document.addEventListener("alpine:init", () => {
             return this.canConfigureOutputs(dev)
                 ? "Configure physical output types on this receiver"
                 : "Remote output configuration is not advertised for this node";
+        },
+
+        configFeedbackKey(di, kind, oi) {
+            if (kind === "output") return `${di}:output:${oi}`;
+            return `${di}:receive:${kind}`;
+        },
+
+        setConfigFeedback(key, state, message) {
+            this.configFeedback[key] = { state, message };
+            if (state === "ok" || state === "error") {
+                setTimeout(() => {
+                    if (this.configFeedback[key]?.state === state) {
+                        delete this.configFeedback[key];
+                    }
+                }, 3000);
+            }
+        },
+
+        configFeedbackClass(key) {
+            const fb = this.configFeedback[key];
+            if (!fb) return "";
+            return `device-config-${fb.state}`;
+        },
+
+        configFeedbackMessage(key) {
+            return this.configFeedback[key]?.message || "";
+        },
+
+        isConfigPending(key) {
+            return this.configFeedback[key]?.state === "pending";
+        },
+
+        receiveModeSelectLabel(mode) {
+            return mode === "combined" ? "Combined" : "Split";
         },
 
         hardwareLabel(entity) {
@@ -367,7 +399,8 @@ document.addEventListener("alpine:init", () => {
                     body.volume = Alpine.store("audio")?.getVolume?.(di) ?? 80;
                 }
                 await api("POST", "/api/hello_device", body);
-                Alpine.store("app").requestLookPreviewFromHello?.(di);
+                const name = this.devices[di]?.name || "device";
+                Alpine.store("app").showNotice("Identify flash sent to " + name + ".", "success", 2200);
             } catch (e) {
                 Alpine.store("app").showApiError("Hello failed", e);
             }
@@ -377,55 +410,66 @@ document.addEventListener("alpine:init", () => {
             const dev = this.devices[di];
             const priorType = dev?.outputs?.[oi]?.type;
             if (!priorType || priorType === outputType) return;
+            const key = this.configFeedbackKey(di, "output", oi);
+            this.setConfigFeedback(key, "pending", "");
             try {
-                await api("POST", "/api/set_device_output", {
+                const result = await api("POST", "/api/set_device_output", {
                     device: di,
                     output: oi,
                     output_type: outputType,
                 });
-                Alpine.store("app").showNotice("Output configuration updated", "success", 2200);
+                this.setConfigFeedback(key, "ok", result?.message || "Applied");
             } catch (e) {
+                this.setConfigFeedback(key, "error", e.message || "Update failed");
                 Alpine.store("app").showApiError("Output update failed", e);
             } finally {
                 await Alpine.store("app").fetchState();
             }
         },
 
-        openReceiveConfig(di) {
+        async setDeviceReceiveModeValue(di, receiveMode) {
             const dev = this.devices[di];
             if (!dev) return;
-            this.receiveConfigDevice = di;
-            this.receiveConfigMode = dev.receive_mode || "split";
-            this.receiveConfigBase = dev.base_universe ?? 0;
-        },
-
-        closeReceiveConfig() {
-            this.receiveConfigDevice = -1;
-        },
-
-        async setDeviceReceiveMode(di) {
-            const dev = this.devices[di];
-            if (!dev) return;
-            const receiveMode = this.receiveConfigMode || "split";
-            const baseUniverse = Number(this.receiveConfigBase);
-            if (!Number.isFinite(baseUniverse) || baseUniverse < 0 || baseUniverse > 32767) {
-                Alpine.store("app").showNotice("Base universe must be 0–32767", "error");
-                return;
-            }
+            const priorMode = dev.receive_mode || "split";
+            if (priorMode === receiveMode) return;
             if (receiveMode === "combined" && !this.canUseCombinedMode(dev)) {
                 Alpine.store("app").showNotice(
                     "Combined mode requires at most 170 pixels across outputs", "error");
                 return;
             }
+            await this._applyReceiveMode(di, receiveMode, dev.base_universe ?? 0, "mode");
+        },
+
+        async setDeviceBaseUniverse(di, baseUniverse) {
+            const dev = this.devices[di];
+            if (!dev) return;
+            const base = Number(baseUniverse);
+            if (!Number.isFinite(base) || base < 0 || base > 32767) {
+                Alpine.store("app").showNotice("Base universe must be 0–32767", "error");
+                return;
+            }
+            if ((dev.base_universe ?? 0) === base) return;
+            const mode = dev.receive_mode || "split";
+            if (mode === "combined" && !this.canUseCombinedMode(dev)) {
+                Alpine.store("app").showNotice(
+                    "Combined mode requires at most 170 pixels across outputs", "error");
+                return;
+            }
+            await this._applyReceiveMode(di, mode, base, "base");
+        },
+
+        async _applyReceiveMode(di, receiveMode, baseUniverse, feedbackKind) {
+            const key = this.configFeedbackKey(di, feedbackKind);
+            this.setConfigFeedback(key, "pending", "");
             try {
-                await api("POST", "/api/set_device_receive_mode", {
+                const result = await api("POST", "/api/set_device_receive_mode", {
                     device: di,
                     receive_mode: receiveMode,
                     base_universe: baseUniverse,
                 });
-                Alpine.store("app").showNotice("Receive mode updated", "success", 2200);
-                this.closeReceiveConfig();
+                this.setConfigFeedback(key, "ok", result?.message || "Applied");
             } catch (e) {
+                this.setConfigFeedback(key, "error", e.message || "Update failed");
                 Alpine.store("app").showApiError("Receive mode update failed", e);
             } finally {
                 await Alpine.store("app").fetchState();

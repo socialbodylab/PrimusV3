@@ -22,9 +22,16 @@ document.addEventListener("alpine:init", () => {
         staticIp: "",
         gateway: "",
         subnet: "255.255.255.0",
+        receiveModeMode: "keep",
+        receiveBaseUniverse: 0,
         activeJob: null,
         polling: null,
         notifiedJobId: null,
+        serialActive: false,
+        serialPort: "",
+        serialOutput: [],
+        serialPolling: null,
+        monitorPort: "",
 
         init() {
             this.nameEnabled = false;
@@ -36,12 +43,20 @@ document.addEventListener("alpine:init", () => {
             this.staticIp = "";
             this.gateway = "";
             this.subnet = "255.255.255.0";
+            this.receiveModeMode = "keep";
+            this.receiveBaseUniverse = 0;
             this.refreshStatus();
+            this.refreshSerialStatus();
             document.addEventListener("primus:mode-changed", event => {
                 if (event.detail?.mode === "firmware") {
                     this.refreshStatus();
+                    this.refreshSerialStatus();
                 }
             });
+        },
+
+        get serialMonitorActive() {
+            return this.serialActive;
         },
 
         get running() {
@@ -64,6 +79,23 @@ document.addEventListener("alpine:init", () => {
             return this.activeJob?.output || [];
         },
 
+        get showJobWaitingPlaceholder() {
+            return this.running && this.outputLines.length <= 2;
+        },
+
+        get serialOutputLines() {
+            return this.serialOutput || [];
+        },
+
+        get monitorPortLabel() {
+            if (this.monitorPort) return this.monitorPort;
+            return this.selectedPort || "No device selected";
+        },
+
+        get canStartSerial() {
+            return this.available && !this.running && !this.serialActive && !!this.monitorPort;
+        },
+
         get candidatePorts() {
             return this.ports.filter(port => port.candidate);
         },
@@ -75,14 +107,14 @@ document.addEventListener("alpine:init", () => {
         },
 
         get canUpload() {
-            if (!this.available || this.running) return false;
+            if (!this.available || this.running || this.serialMonitorActive) return false;
             if (!this.overridesValid) return false;
             if (this.portMode === "all") return this.candidatePorts.length > 0;
             return !!this.selectedPort;
         },
 
         get canCompile() {
-            return this.available && !this.running && this.overridesValid;
+            return this.available && !this.running && !this.serialMonitorActive && this.overridesValid;
         },
 
         get deviceNameOverride() {
@@ -122,6 +154,12 @@ document.addEventListener("alpine:init", () => {
                 if (!this.isIpv4(this.gatewayOverride)) return "Gateway is not a valid IPv4 address.";
                 if (!this.isIpv4(this.subnetOverride)) return "Subnet is not a valid IPv4 address.";
             }
+            if (this.receiveModeMode !== "keep") {
+                const base = Number(this.receiveBaseUniverse);
+                if (!Number.isFinite(base) || base < 0 || base > 32767) {
+                    return "Base universe must be 0–32767.";
+                }
+            }
             return "";
         },
 
@@ -132,7 +170,7 @@ document.addEventListener("alpine:init", () => {
         get overrideSummaryClass() {
             return {
                 "firmware-override-summary-error": !!this.overrideValidationMessage,
-                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.wifiEnabled || this.ipMode !== "keep"),
+                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.wifiEnabled || this.ipMode !== "keep" || this.receiveModeMode !== "keep"),
             };
         },
 
@@ -156,6 +194,11 @@ document.addEventListener("alpine:init", () => {
             } else if (this.ipMode === "dhcp") {
                 parts.push("IP: DHCP");
             }
+            if (this.receiveModeMode === "split") {
+                parts.push("Receive: Split · U" + this.receiveBaseUniverse + "/" + (Number(this.receiveBaseUniverse) + 1));
+            } else if (this.receiveModeMode === "combined") {
+                parts.push("Receive: Combined · U" + this.receiveBaseUniverse);
+            }
             return parts.length ? "This job will use " + parts.join("; ") + "." : "Using firmware defaults from config.h.";
         },
 
@@ -170,6 +213,11 @@ document.addEventListener("alpine:init", () => {
                 parts.push("Static IP: " + overrides.static_ip + " / " + overrides.gateway + " / " + overrides.subnet);
             } else if (overrides.ip_mode === "dhcp") {
                 parts.push("IP: DHCP");
+            }
+            if (overrides.receive_mode_mode === "split") {
+                parts.push("Receive: Split · U" + (overrides.base_universe ?? 0));
+            } else if (overrides.receive_mode_mode === "combined") {
+                parts.push("Receive: Combined · U" + (overrides.base_universe ?? 0));
             }
             return parts.length ? "Overrides used: " + parts.join("; ") : "Overrides used: firmware defaults";
         },
@@ -288,6 +336,7 @@ document.addEventListener("alpine:init", () => {
                 this.addDeviceNameField(body);
                 this.addWifiFields(body);
                 this.addIpFields(body);
+                this.addReceiveModeFields(body);
             }
             if (action === "upload") {
                 body.port_mode = this.portMode;
@@ -328,6 +377,12 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
+        addReceiveModeFields(body) {
+            body.receive_mode_mode = this.receiveModeMode || "keep";
+            if (this.receiveModeMode === "keep") return;
+            body.base_universe = Number(this.receiveBaseUniverse) || 0;
+        },
+
         startPolling() {
             if (this.polling || !this.activeJob) return;
             this.polling = setInterval(() => this.pollJob(), 250);
@@ -346,6 +401,7 @@ document.addEventListener("alpine:init", () => {
                 const job = await api("GET", "/api/firmware/jobs/" + this.activeJob.id);
                 this.activeJob = job;
                 this.consumeJobResult(job);
+                this.$nextTick(() => this.scrollFirmwareLog());
                 if (["succeeded", "failed"].includes(job.status)) {
                     this.stopPolling();
                     this.notifyFinished(job);
@@ -368,6 +424,9 @@ document.addEventListener("alpine:init", () => {
             if (this.portMode === "all" && this.candidatePorts.length === 0) {
                 this.portMode = "selected";
             }
+            if (!this.monitorPort && this.selectedPort) {
+                this.monitorPort = this.selectedPort;
+            }
         },
 
         notifyFinished(job) {
@@ -381,6 +440,91 @@ document.addEventListener("alpine:init", () => {
                 if (job.action === "setup_tools") this.refreshStatus();
             } else {
                 Alpine.store("app").showNotice(job.error || "Firmware job failed.", "error", 5000);
+            }
+        },
+
+        scrollFirmwareLog() {
+            const log = this.$refs.firmwareLog;
+            if (log) log.scrollTop = log.scrollHeight;
+        },
+
+        scrollSerialLog() {
+            const log = this.$refs.serialLog;
+            if (log) log.scrollTop = log.scrollHeight;
+        },
+
+        async refreshSerialStatus() {
+            try {
+                const status = await api("GET", "/api/serial/status");
+                this.serialActive = !!status.active;
+                this.serialPort = status.port || "";
+                this.serialOutput = status.output || [];
+                if (this.serialActive) {
+                    this.startSerialPolling();
+                } else {
+                    this.stopSerialPolling();
+                }
+                this.$nextTick(() => this.scrollSerialLog());
+            } catch (e) {
+                this.serialActive = false;
+            }
+        },
+
+        startSerialPolling() {
+            if (this.serialPolling) return;
+            this.serialPolling = setInterval(() => this.pollSerial(), 250);
+        },
+
+        stopSerialPolling() {
+            if (this.serialPolling) {
+                clearInterval(this.serialPolling);
+                this.serialPolling = null;
+            }
+        },
+
+        async pollSerial() {
+            try {
+                const status = await api("GET", "/api/serial/status");
+                this.serialActive = !!status.active;
+                this.serialPort = status.port || "";
+                this.serialOutput = status.output || [];
+                this.$nextTick(() => this.scrollSerialLog());
+                if (!this.serialActive) {
+                    this.stopSerialPolling();
+                }
+            } catch (e) {
+                this.stopSerialPolling();
+            }
+        },
+
+        async startSerialMonitor() {
+            const port = (this.monitorPort || this.selectedPort || "").trim();
+            if (!port) {
+                Alpine.store("app").showNotice("Select a serial port for the monitor.", "warn");
+                return;
+            }
+            try {
+                const status = await api("POST", "/api/serial/monitor/start", { port });
+                this.serialActive = !!status.active;
+                this.serialPort = status.port || port;
+                this.serialOutput = status.output || [];
+                this.monitorPort = port;
+                this.startSerialPolling();
+                this.$nextTick(() => this.scrollSerialLog());
+            } catch (e) {
+                Alpine.store("app").showApiError("Serial monitor failed", e);
+            }
+        },
+
+        async stopSerialMonitor() {
+            try {
+                const status = await api("POST", "/api/serial/monitor/stop");
+                this.serialActive = !!status.active;
+                this.serialPort = status.port || "";
+                this.serialOutput = status.output || [];
+                this.stopSerialPolling();
+            } catch (e) {
+                Alpine.store("app").showApiError("Serial monitor stop failed", e);
             }
         },
     }));

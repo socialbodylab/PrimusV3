@@ -100,6 +100,7 @@ class SetDeviceReceiveModeTests(unittest.TestCase):
         send_receive_config.return_value = None
         result = self.state.set_device_receive_mode(0, "combined", 5)
         self.assertTrue(result["ok"])
+        self.assertTrue(result["applied_to_device"])
         dev = self.state.devices[0]
         self.assertEqual(dev["receive_mode"], "combined")
         self.assertEqual(dev["base_universe"], 5)

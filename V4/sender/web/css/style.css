@@ -618,13 +618,52 @@ body {
     border: 1px dashed var(--border);
 }
 
-.device-receive-mode {
+.device-config-label {
+    flex: 0 0 52px;
     font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.device-config-input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 4px;
+    font-size: 11px;
+}
+
+.device-config-status {
+    flex: 0 1 auto;
+    font-size: 10px;
     font-weight: 600;
-    color: var(--accent);
-    padding: 1px 6px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    line-height: 1.2;
+    max-width: 110px;
+}
+
+.device-config-ok,
+.device-output-select.device-config-ok,
+.device-config-input.device-config-ok {
+    border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+}
+
+.device-config-status.device-config-ok {
+    color: var(--success);
+}
+
+.device-config-error,
+.device-output-select.device-config-error,
+.device-config-input.device-config-error {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.device-config-status.device-config-error {
+    color: var(--danger);
+}
+
+.device-config-pending,
+.device-output-select.device-config-pending,
+.device-config-input.device-config-pending {
+    opacity: 0.65;
 }
 
 .device-profile {
@@ -2040,6 +2079,19 @@ input[type="color"] {
     color: var(--text-muted);
     font-size: 12px;
     padding: 8px 0;
+}
+
+.firmware-log-waiting {
+    font-style: italic;
+}
+
+.firmware-monitor-port {
+    min-width: 180px;
+    max-width: 280px;
+}
+
+.firmware-serial-log {
+    margin-top: 8px;
 }
 
 @media (max-width: 900px) {

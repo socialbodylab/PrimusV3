@@ -60,6 +60,25 @@ class FirmwareProfileTests(unittest.TestCase):
         self.assertEqual(len(status["profiles"]), 1)
         self.assertTrue(status["can_install_tools"])
 
+    def test_build_command_includes_receive_mode_override(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            manager = firmware.FirmwareJobManager()
+            cmd = manager.build_command({
+                "action": "compile",
+                "profile": "v3",
+                "receive_mode_mode": "combined",
+                "base_universe": 12,
+            })
+            self.assertIn("--receivemode", cmd.command)
+            self.assertIn("combined", cmd.command)
+            self.assertIn("--universe", cmd.command)
+            self.assertIn("12", cmd.command)
+            self.assertEqual(cmd.metadata["overrides"]["receive_mode_mode"], "combined")
+            self.assertEqual(cmd.metadata["overrides"]["base_universe"], 12)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
 
 if __name__ == "__main__":
     unittest.main()

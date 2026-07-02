@@ -19,6 +19,7 @@ import clips
 from cue_boards import delete_cue_board, list_cue_boards, load_cue_board, save_cue_board
 from controller import normalize_cue
 from firmware import FirmwareRequestError, firmware_jobs
+from serial_monitor import SerialMonitorError, serial_monitor
 import mixer
 import sharing
 from artnet import (
@@ -182,6 +183,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/firmware/status":
             self._json_response(firmware_jobs.status())
+            return
+        if path == "/api/serial/status":
+            self._json_response(serial_monitor.status())
             return
         if path.startswith("/api/firmware/jobs/"):
             job_id = path.split("/api/firmware/jobs/")[1]
@@ -554,7 +558,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             result = self._device_state().set_device_output_type(di, oi, output_type)
             if result.get("ok"):
-                self._ok()
+                self._json_response(result)
             else:
                 error = result.get("error", "output update failed")
                 code = 400 if "invalid" in error.lower() or "unknown" in error.lower() else 409
@@ -576,7 +580,7 @@ class Handler(BaseHTTPRequestHandler):
             result = self._device_state().set_device_receive_mode(
                 di, receive_mode, base_universe)
             if result.get("ok"):
-                self._ok()
+                self._json_response(result)
             else:
                 error = result.get("error", "receive mode update failed")
                 code = 400 if "invalid" in error.lower() else 409
@@ -868,6 +872,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response(firmware_jobs.start_job(data))
             except FirmwareRequestError as exc:
                 self._json_error(exc.code, exc.message)
+
+        elif path == "/api/serial/monitor/start":
+            port = str(data.get("port", "")).strip()
+            try:
+                baud = int(data.get("baud", 115200))
+            except (TypeError, ValueError):
+                baud = 115200
+            try:
+                self._json_response(serial_monitor.start(port, baud=baud))
+            except SerialMonitorError as exc:
+                self._json_error(exc.code, exc.message)
+
+        elif path == "/api/serial/monitor/stop":
+            self._json_response(serial_monitor.stop())
 
         elif path == "/api/network/preferred_interface":
             try:

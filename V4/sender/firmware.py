@@ -325,6 +325,9 @@ class FirmwareJobManager:
             running = self._running_job_locked()
             if running:
                 raise FirmwareRequestError(409, "Firmware job already running")
+            from serial_monitor import serial_monitor
+            if serial_monitor.is_active():
+                raise FirmwareRequestError(409, "Serial monitor is running")
             job = FirmwareJob(
                 id=str(uuid.uuid4()),
                 action=command.action,
@@ -372,6 +375,7 @@ class FirmwareJobManager:
         wifi_ssid = ""
         wifi_password_set = False
         ip_override = None
+        receive_override = None
         port_mode = None
         port = ""
 
@@ -384,11 +388,13 @@ class FirmwareJobManager:
             device_name = self._append_device_name_arg(command, data)
             wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
             ip_override = self._append_ip_args(command, data)
+            receive_override = self._append_receive_mode_args(command, data, profile)
         elif action == "upload":
             port_mode = self._validate_choice(data.get("port_mode", "auto"), PORT_MODES, "port_mode")
             device_name = self._append_device_name_arg(command, data)
             wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
             ip_override = self._append_ip_args(command, data)
+            receive_override = self._append_receive_mode_args(command, data, profile)
             if port_mode == "selected":
                 port = self._validate_string(data.get("port", ""), "port", required=True, max_length=256)
                 command.append(port)
@@ -405,6 +411,7 @@ class FirmwareJobManager:
             wifi_ssid=wifi_ssid,
             wifi_password_set=wifi_password_set,
             ip_override=ip_override,
+            receive_override=receive_override,
             port_mode=port_mode,
             port=port,
         )
@@ -454,8 +461,28 @@ class FirmwareJobManager:
             "subnet": subnet,
         }
 
+    def _append_receive_mode_args(self, command, data, profile):
+        if FIRMWARE_PROFILES.get(profile, {}).get("family") != "primus":
+            return None
+        mode = self._validate_choice(
+            data.get("receive_mode_mode", "keep"),
+            {"keep", "split", "combined"},
+            "receive_mode_mode",
+        )
+        if mode == "keep":
+            return None
+        command.extend(["--receivemode", mode])
+        try:
+            base_universe = int(data.get("base_universe", 0))
+        except (TypeError, ValueError):
+            raise FirmwareRequestError(400, "base_universe must be an integer")
+        if base_universe < 0 or base_universe > 32767:
+            raise FirmwareRequestError(400, "base_universe must be 0-32767")
+        command.extend(["--universe", str(base_universe)])
+        return {"mode": mode, "base_universe": base_universe}
+
     def _build_metadata(self, action, profile, device_name="", wifi_ssid="", wifi_password_set=False,
-                        ip_override=None, port_mode=None, port=""):
+                        ip_override=None, receive_override=None, port_mode=None, port=""):
         overrides = {
             "device_name": device_name or None,
             "wifi_ssid": wifi_ssid or None,
@@ -464,6 +491,8 @@ class FirmwareJobManager:
             "static_ip": (ip_override or {}).get("static_ip"),
             "gateway": (ip_override or {}).get("gateway"),
             "subnet": (ip_override or {}).get("subnet"),
+            "receive_mode_mode": (receive_override or {}).get("mode", "keep"),
+            "base_universe": (receive_override or {}).get("base_universe"),
         }
         metadata = {
             "profile": profile,
@@ -474,6 +503,7 @@ class FirmwareJobManager:
                 or overrides["wifi_ssid"]
                 or overrides["wifi_password_set"]
                 or overrides["ip_mode"] != "keep"
+                or overrides["receive_mode_mode"] != "keep"
             ),
         }
         if action == "upload":
@@ -503,6 +533,14 @@ class FirmwareJobManager:
                     + " subnet " + overrides.get("subnet", ""))
             elif overrides.get("ip_mode") == "dhcp":
                 parts.append("DHCP enabled")
+            if overrides.get("receive_mode_mode") == "split":
+                parts.append(
+                    "receive mode split, base universe "
+                    + str(overrides.get("base_universe", 0)))
+            elif overrides.get("receive_mode_mode") == "combined":
+                parts.append(
+                    "receive mode combined, base universe "
+                    + str(overrides.get("base_universe", 0)))
             lines.append("Overrides: " + "; ".join(parts))
         else:
             lines.append("Overrides: firmware defaults from config.h")
@@ -553,6 +591,10 @@ class FirmwareJobManager:
             if firmware_command.action == "setup_tools":
                 self._run_setup_tools_job(job)
                 return
+            if firmware_command.action in ("compile", "upload"):
+                job.append_output("Launching upload script...")
+                job.append_output(
+                    "Waiting for compiler output (this may take 10–30 seconds)...")
             proc = self.popen_factory(
                 firmware_command.command,
                 cwd=os.path.dirname(firmware_command.command[1]),
@@ -635,6 +677,10 @@ class FirmwareJobManager:
             if job.status in RUNNING_STATES:
                 return job
         return None
+
+    def has_running_job(self):
+        with self._lock:
+            return self._running_job_locked() is not None
 
     def _trim_jobs_locked(self):
         while len(self._jobs) > self.max_jobs:

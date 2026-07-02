@@ -486,6 +486,7 @@ create_build_override_header() {
 }
 
 check_cli() {
+  info "Checking Arduino CLI..."
   if ! command -v arduino-cli &>/dev/null; then
     err "arduino-cli not found. Install Arduino CLI: https://arduino.github.io/arduino-cli/latest/installation/"
     exit 1
@@ -714,6 +715,10 @@ install_libs() {
 
 check_cli
 
+if [[ "$LIST_PORTS" == false && "$LIST_PORTS_JSON" == false && "$INSTALL_ONLY" == false ]]; then
+  info "Starting firmware build pipeline..."
+fi
+
 if [[ "$LIST_PORTS" == true ]]; then
   list_ports
   exit 0
@@ -758,6 +763,8 @@ fi
 if ! arduino-cli core list 2>/dev/null | grep -q "esp32:esp32"; then
   info "Installing ESP32 board core..."
   arduino-cli core install esp32:esp32
+else
+  info "ESP32 board core is installed."
 fi
 
 install_libs
@@ -766,6 +773,7 @@ if [[ "$INSTALL_ONLY" == true ]]; then
   exit 0
 fi
 
+info "Preparing build overrides..."
 create_build_override_header
 
 if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
@@ -792,11 +800,12 @@ else
 fi
 info "Board profile: $BOARD_PROFILE"
 info "Board: $FQBN_WITH_OPTIONS"
+info "Running arduino-cli compile (verbose)..."
 arduino-cli compile \
   --fqbn "$FQBN_WITH_OPTIONS" \
   --build-property "compiler.cpp.extra_flags=$EXTRA_FLAGS" \
   --build-property "compiler.c.extra_flags=$EXTRA_FLAGS" \
-  "$SKETCH_DIR" --warnings default
+  "$SKETCH_DIR" --warnings default --verbose
 ok "Compilation successful"
 
 if [[ "$COMPILE_ONLY" == true ]]; then

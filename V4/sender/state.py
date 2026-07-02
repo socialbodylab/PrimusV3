@@ -589,6 +589,22 @@ def _queue_device_frame_sends(send_queue, di, dev, frame_buffers):
         send_queue.append((di, sender, outputs[oi]["universe"], data))
 
 
+def _config_apply_result(applied_to_device):
+    if applied_to_device:
+        return {
+            "ok": True,
+            "applied_to_device": True,
+            "requires_restart": False,
+            "message": "Applied immediately — no restart required",
+        }
+    return {
+        "ok": True,
+        "applied_to_device": False,
+        "requires_restart": False,
+        "message": "Saved locally — connect device to apply",
+    }
+
+
 def _device_flash_entries(dev, rgb_triplet):
     """Build (universe, bytes) entries for a solid-color flash."""
     outputs = dev.get("outputs", [])
@@ -1197,8 +1213,10 @@ class ControllerState:
                         "ok": False,
                         "error": config_error or "output configuration failed",
                     }
+                _save_devices(self.devices)
+                return _config_apply_result(True)
             _save_devices(self.devices)
-            return {"ok": True}
+            return _config_apply_result(False)
 
     def set_device_receive_mode(self, di, receive_mode, base_universe):
         with self.lock:
@@ -1243,8 +1261,10 @@ class ControllerState:
                     dev["base_universe"] = prior_base
                     _apply_output_universes(dev["outputs"], prior_mode, prior_base)
                     return {"ok": False, "error": self._transport_error_text(error)}
+                _save_devices(self.devices)
+                return _config_apply_result(True)
             _save_devices(self.devices)
-            return {"ok": True}
+            return _config_apply_result(False)
 
     # ------------------------------------------------------------------
     #  Device management
@@ -1620,26 +1640,8 @@ class ControllerState:
                 return False
             if not self._ensure_sender_connected_unlocked(dev):
                 return False
-            flash_on = _device_flash_entries(dev, bytes([255, 0, 0]))
-            blackout_on = _device_flash_entries(dev, bytes([0, 0, 0]))
-            sender = dev["sender"]
-
-        # Flash red then black (outside lock to avoid blocking animation)
-        ok = True
-        for universe, data in flash_on:
-            ok = sender.send_output(universe, data) and ok
-        sender.advance_sequence()
-        time.sleep(1.0)
-        for universe, data in blackout_on:
-            ok = sender.send_output(universe, data) and ok
-        sender.advance_sequence()
-        if ok:
+            dev["_hello_until"] = time.monotonic() + 1.0
             return True
-        with self.lock:
-            if 0 <= di < len(self.devices) and self.devices[di]["sender"] is sender:
-                self._record_device_send_result_unlocked(
-                    self.devices[di], False)
-        return False
 
     # ------------------------------------------------------------------
     #  Override pixels (for mixer / controller playback)
@@ -1887,6 +1889,15 @@ class ControllerState:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
                     continue
+                hello_until = dev.get("_hello_until", 0)
+                if hello_until:
+                    if now < hello_until:
+                        for universe, data in _device_flash_entries(
+                                dev, bytes([255, 0, 0])):
+                            send_queue.append((di, dev["sender"], universe, data))
+                        devices_sent.add(di)
+                        continue
+                    dev["_hello_until"] = 0
                 if device_frames_active:
                     frames = None
                     if self._override_frames_by_device is not None:

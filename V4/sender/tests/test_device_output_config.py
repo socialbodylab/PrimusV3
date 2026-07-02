@@ -49,6 +49,8 @@ class DeviceOutputConfigTests(unittest.TestCase):
         result = state.set_device_output_type(0, 1, "long_strip")
 
         self.assertTrue(result["ok"])
+        self.assertTrue(result["applied_to_device"])
+        self.assertFalse(result["requires_restart"])
         self.assertEqual(dev["outputs"][1]["type"], "long_strip")
         self.assertEqual(dev["outputs"][1]["count"], 72)
         self.assertTrue(dev["connected"])
@@ -80,6 +82,7 @@ class DeviceOutputConfigTests(unittest.TestCase):
         result = state.set_device_output_type(0, 0, "small_grid")
 
         self.assertTrue(result["ok"])
+        self.assertFalse(result["applied_to_device"])
         self.assertEqual(state.devices[0]["outputs"][0]["type"], "small_grid")
         self.assertEqual(state.devices[0]["outputs"][0]["count"], 32)
         save_devices.assert_called_once()
