@@ -102,6 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         # API routes
         if path == "/api/runtime":
             self._json_response({
+                "product": "primus",
                 "ui_lifecycle": bool(getattr(self.server, "ui_lifecycle_enabled", False)),
             })
             return

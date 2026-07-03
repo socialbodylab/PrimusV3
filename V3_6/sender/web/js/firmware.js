@@ -179,6 +179,7 @@ document.addEventListener("alpine:init", () => {
         async refreshStatus() {
             try {
                 const status = await api("GET", "/api/firmware/status");
+                this.syncProfilesFromStatus(status);
                 this.available = !!status.available;
                 this.availabilityMessage = status.message || "Firmware upload status unknown.";
                 this.sourceOnly = status.source_only !== false;
@@ -209,6 +210,14 @@ document.addEventListener("alpine:init", () => {
 
         profileDetail() {
             return this.profiles.find(item => item.id === this.profile)?.detail || "Receiver";
+        },
+
+        syncProfilesFromStatus(status) {
+            if (!Array.isArray(status?.profiles) || !status.profiles.length) return;
+            this.profiles = status.profiles;
+            if (!this.profiles.some(item => item.id === this.profile)) {
+                this.profile = this.profiles[0].id;
+            }
         },
 
         profileLabel() {
