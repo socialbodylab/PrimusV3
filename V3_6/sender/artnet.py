@@ -774,7 +774,8 @@ def ftp_list_dir(ip, path="/"):
     return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
 
 
-_FTP_BLOCKSIZE = 65536   # larger blocks → fewer recv() calls per file
+_FTP_BLOCKSIZE        = 65536  # downloads: large blocks reduce recv() calls
+_FTP_UPLOAD_BLOCKSIZE = 8192   # uploads: small blocks give frequent progress callbacks
 
 
 def _ftp_retrbinary(ftp, path, progress_callback=None):
@@ -806,22 +807,29 @@ def ftp_download(ip, path, progress_callback=None):
         return _ftp_retrbinary(ftp, path, progress_callback)
 
 
+def _ftp_storbinary(ftp, path, data, progress_callback=None):
+    """Upload bytes to path using an existing ftplib.FTP session."""
+    total = len(data)
+    if progress_callback:
+        transferred = [0]
+        def _cb(block):
+            transferred[0] += len(block)
+            progress_callback(transferred[0], total)
+        ftp.storbinary(f"STOR {path}", io.BytesIO(data),
+                       blocksize=_FTP_UPLOAD_BLOCKSIZE, callback=_cb)
+    else:
+        ftp.storbinary(f"STOR {path}", io.BytesIO(data),
+                       blocksize=_FTP_UPLOAD_BLOCKSIZE)
+
+
 def ftp_upload(ip, path, data, progress_callback=None):
     """Upload bytes to path on the SD card.
 
     progress_callback: optional callable(bytes_sent, bytes_total).
     """
-    total = len(data)
     with _ftp_session(ip) as ftp:
-        if progress_callback:
-            transferred = [0]
-            def _cb(block):
-                transferred[0] += len(block)
-                progress_callback(transferred[0], total)
-            ftp.storbinary(f"STOR {path}", io.BytesIO(data), callback=_cb)
-        else:
-            ftp.storbinary(f"STOR {path}", io.BytesIO(data))
-    netlog.log("OUT", "ftp_upload", f"FTP upload {path} ({total} bytes) → {ip}")
+        _ftp_storbinary(ftp, path, data, progress_callback)
+    netlog.log("OUT", "ftp_upload", f"FTP upload {path} ({len(data)} bytes) → {ip}")
 
 
 def ftp_rename(ip, src, dst):

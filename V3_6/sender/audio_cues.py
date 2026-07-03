@@ -154,6 +154,9 @@ def derive_device_cue_map(cues, ip):
         duration = action.get("duration")
         if duration:
             entry["duration"] = int(duration)
+        delay = action.get("delay")
+        if delay:
+            entry["delay"] = int(delay)
         result[str(number)] = entry
     return result
 

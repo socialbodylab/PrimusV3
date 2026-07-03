@@ -506,6 +506,17 @@ window.PAGE_CONFIG = {
                             </div>
                         </template>
 
+                        <template x-if="getAction(idx, dev.ip).cmd !== 'none'">
+                            <div class="flex items-center gap-1">
+                                <span class="text-muted" style="font-size:11px">Dly</span>
+                                <input type="number" class="form-input" min="0" max="65535" style="width:68px"
+                                       :value="getAction(idx, dev.ip).delay"
+                                       @input="setActionField(idx, dev.ip, 'delay', parseInt($event.target.value) || 0)"
+                                       placeholder="0">
+                                <span class="text-muted" style="font-size:11px">ms</span>
+                            </div>
+                        </template>
+
                     </div>
                 </template>
 

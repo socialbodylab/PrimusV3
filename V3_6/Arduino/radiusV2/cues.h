@@ -16,6 +16,7 @@
  *   file:     WAV filename on SD (required for play/loop)
  *   volume:   0–100 (optional; omit to use device current volume)
  *   duration: seconds, 0 = play full file (optional)
+ *   delay:    milliseconds before executing (optional; default 0)
  *
  * Cue numbers: 1–255. Max 64 cues loaded.
  */
@@ -41,6 +42,7 @@ struct AudioCue {
   char     filename[33];  // empty for stop / volume
   uint8_t  volume;        // 0–100, or CUE_VOLUME_UNSET
   uint16_t duration;      // seconds; 0 = full file
+  uint16_t delay;         // milliseconds before executing; 0 = immediate
 };
 
 static AudioCue _cueMap[CUES_MAX];
@@ -77,6 +79,7 @@ void cuesLoad() {
     cue.filename[0] = '\0';
     cue.volume     = CUE_VOLUME_UNSET;
     cue.duration   = 0;
+    cue.delay      = 0;
 
     if (kv.value().is<const char*>()) {
       // Shorthand: "1": "file.wav" → play with device default volume
@@ -107,6 +110,7 @@ void cuesLoad() {
       }
 
       cue.duration = obj["duration"] | 0;
+      cue.delay    = obj["delay"]    | 0;
 
     } else {
       continue;
@@ -123,7 +127,8 @@ void cuesLoad() {
     Serial.printf("[Cues] %d -> %s", num, _cmdNames[cue.cmd < 4 ? cue.cmd : 0]);
     if (cue.filename[0])     { Serial.print(" \""); Serial.print(cue.filename); Serial.print("\""); }
     if (cue.volume != CUE_VOLUME_UNSET) Serial.printf(" vol=%d", cue.volume);
-    if (cue.duration > 0)    Serial.printf(" %ds", cue.duration);
+    if (cue.duration > 0)    Serial.printf(" dur=%ds", cue.duration);
+    if (cue.delay > 0)       Serial.printf(" delay=%dms", cue.delay);
     Serial.println();
   }
 

@@ -20,7 +20,7 @@ import netlog
 import sharing
 from artnet import (
     discover_artnet_nodes, ftp_list_dir, ftp_upload, ftp_download, send_audio_cmd,
-    _ftp_session, _ftp_retrbinary, _parse_list_line,
+    _ftp_session, _ftp_retrbinary, _ftp_storbinary, _parse_list_line,
 )
 from network_settings import (
     NetworkSettingsError,
@@ -1289,81 +1289,107 @@ def _run_sync_job(job, state, cues_data):
                     })
                 continue
 
-            # FTP list the device
+            # Single FTP session for list + all uploads to this device
+            device_items = []
             try:
-                entries   = ftp_list_dir(ip, "/")
-                on_device = {e["name"] for e in entries if not e["is_dir"]}
-                entries_by_ip[ip] = sorted(on_device)
-            except Exception as e:
-                for fname in sorted(needed):
-                    with _sync_lock:
-                        job["items"].append({
+                with _ftp_session(ip) as ftp:
+                    # List files already on the device
+                    try:
+                        lines = []
+                        try:
+                            ftp.retrlines("LIST /", lines.append)
+                        except Exception:
+                            ftp.retrlines("LIST", lines.append)
+                        entries   = [e for ln in lines
+                                     for e in [_parse_list_line(ln)]
+                                     if e and e["name"] not in (".", "..")]
+                        on_device = {e["name"] for e in entries if not e["is_dir"]}
+                        entries_by_ip[ip] = sorted(on_device)
+                    except Exception as e:
+                        for fname in sorted(needed):
+                            with _sync_lock:
+                                job["items"].append({
+                                    "device_ip":   ip,
+                                    "device_name": dev_name,
+                                    "filename":    fname,
+                                    "bytes_total": project_files.get(fname, {}).get("size", 0),
+                                    "bytes_sent":  0,
+                                    "status":      "error",
+                                    "error":       f"FTP list failed: {e}",
+                                })
+                        continue  # exits `with` cleanly, moves to next device
+
+                    # Build per-file plan items for this device
+                    for fname in sorted(needed):
+                        if fname in on_device:
+                            continue  # already present
+                        item = {
                             "device_ip":   ip,
                             "device_name": dev_name,
                             "filename":    fname,
                             "bytes_total": project_files.get(fname, {}).get("size", 0),
                             "bytes_sent":  0,
-                            "status":      "error",
-                            "error":       f"FTP list failed: {e}",
-                        })
-                continue
+                            "status":      "pending",
+                            "error":       None,
+                        }
+                        if fname not in project_files:
+                            item["status"] = "skipped"
+                            item["error"]  = "not in project library"
+                        device_items.append(item)
 
-            # Build per-file plan items for this device
-            device_items = []
-            for fname in sorted(needed):
-                if fname in on_device:
-                    continue  # already present
-                item = {
-                    "device_ip":   ip,
-                    "device_name": dev_name,
-                    "filename":    fname,
-                    "bytes_total": project_files.get(fname, {}).get("size", 0),
-                    "bytes_sent":  0,
-                    "status":      "pending",
-                    "error":       None,
-                }
-                if fname not in project_files:
-                    item["status"] = "skipped"
-                    item["error"]  = "not in project library"
-                device_items.append(item)
+                    with _sync_lock:
+                        job["items"].extend(device_items)
 
-            with _sync_lock:
-                job["items"].extend(device_items)
+                    # Upload pending items using the same session
+                    for item in device_items:
+                        if item["status"] != "pending":
+                            continue
+                        fname = item["filename"]
+                        path  = _audio_cues_mod.get_project_audio_path(fname)
+                        if not path:
+                            item["status"] = "error"
+                            item["error"]  = "file missing from project library"
+                            continue
+                        try:
+                            with open(path, "rb") as f:
+                                data = f.read()
+                        except OSError as e:
+                            item["status"] = "error"
+                            item["error"]  = str(e)
+                            continue
 
-            # Upload pending items for this device
-            for item in device_items:
-                if item["status"] != "pending":
-                    continue
-                fname = item["filename"]
-                path  = _audio_cues_mod.get_project_audio_path(fname)
-                if not path:
-                    item["status"] = "error"
-                    item["error"]  = "file missing from project library"
-                    continue
-                try:
-                    with open(path, "rb") as f:
-                        data = f.read()
-                except OSError as e:
-                    item["status"] = "error"
-                    item["error"]  = str(e)
-                    continue
+                        item["status"]      = "uploading"
+                        item["bytes_total"] = len(data)
+                        item["bytes_sent"]  = 0
 
-                item["status"]      = "uploading"
-                item["bytes_total"] = len(data)
-                item["bytes_sent"]  = 0
+                        def _progress(sent, total, _item=item):
+                            _item["bytes_sent"] = sent
 
-                def _progress(sent, total, _item=item):
-                    _item["bytes_sent"] = sent
+                        try:
+                            _ftp_storbinary(ftp, f"/{fname}", data,
+                                            progress_callback=_progress)
+                            item["bytes_sent"] = len(data)
+                            item["status"]     = "done"
+                        except Exception as e:
+                            item["status"] = "error"
+                            item["error"]  = str(e)
+                            netlog.log("OUT", "ftp_sync",
+                                       f"sync failed {fname} → {ip}: {e}")
 
-                try:
-                    ftp_upload(ip, f"/{fname}", data, progress_callback=_progress)
-                    item["bytes_sent"] = len(data)
-                    item["status"]     = "done"
-                except Exception as e:
-                    item["status"] = "error"
-                    item["error"]  = str(e)
-                    netlog.log("OUT", "ftp_sync",
-                               f"sync failed {fname} → {ip}: {e}")
+            except Exception as e:
+                # Session connect failed before any items were added
+                if not device_items:
+                    for fname in sorted(needed):
+                        with _sync_lock:
+                            job["items"].append({
+                                "device_ip":   ip,
+                                "device_name": dev_name,
+                                "filename":    fname,
+                                "bytes_total": project_files.get(fname, {}).get("size", 0),
+                                "bytes_sent":  0,
+                                "status":      "error",
+                                "error":       f"FTP connect failed: {e}",
+                            })
 
         _update_inventory(radius_devs, entries_by_ip)
 

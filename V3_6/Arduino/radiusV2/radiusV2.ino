@@ -93,6 +93,13 @@ uint8_t infoScreenIndex = 0;
 char     sdSelectedFile[33] = {0};
 uint16_t sdCachedFileCount  = 0;
 
+// ── Pending cue (non-blocking delay) ─────────────────────────────────
+static struct {
+  bool          active;
+  unsigned long fireAt;  // millis() target
+  AudioCue      cue;
+} _pendingCue = { false, 0, {} };
+
 // =====================================================================
 //  NVS helpers
 // =====================================================================
@@ -342,15 +349,14 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
     case 7: {
       AudioCue cue;
       if (cueLookup(volume, &cue)) {
-        uint8_t vol = (cue.volume != CUE_VOLUME_UNSET) ? cue.volume : _audioVolume;
-        if (cmd == 6) audioPlay(cue.filename, vol, cue.duration);
-        else          audioLoop(cue.filename, vol, cue.duration);
+        if (cmd == 7) cue.cmd = AUDIO_CUE_CMD_LOOP;
+        dispatchCue(&cue);
       } else {
         Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
       break;
     }
-    default: audioStop(); break;
+    default: _pendingCue.active = false; audioStop(); break;
   }
 
   if (infoScreenIndex == 2)
@@ -399,7 +405,7 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
 //  OSC /cue/N, /stop, /hello
 // =====================================================================
 
-void dispatchCue(const AudioCue* cue) {
+void executeCue(const AudioCue* cue) {
   uint8_t vol = (cue->volume != CUE_VOLUME_UNSET) ? cue->volume : _audioVolume;
   switch (cue->cmd) {
     case AUDIO_CUE_CMD_PLAY:   audioPlay(cue->filename, vol, cue->duration); break;
@@ -410,6 +416,18 @@ void dispatchCue(const AudioCue* cue) {
   if (infoScreenIndex == 2)
     displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
   sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
+}
+
+void dispatchCue(const AudioCue* cue) {
+  if (cue->delay > 0) {
+    _pendingCue.cue    = *cue;
+    _pendingCue.cue.delay = 0;  // clear so executeCue doesn't re-schedule
+    _pendingCue.fireAt = millis() + (unsigned long)cue->delay;
+    _pendingCue.active = true;
+    Serial.printf("[Cue] Scheduled in %dms\n", cue->delay);
+    return;
+  }
+  executeCue(cue);
 }
 
 void handleOscPacket() {
@@ -424,6 +442,7 @@ void handleOscPacket() {
   Serial.print("[OSC] "); Serial.println(addr);
 
   if (strcmp(addr, "/stop") == 0) {
+    _pendingCue.active = false;
     audioStop();
     if (infoScreenIndex == 2)
       displayAudioUpdate(audioCurrentFile(), _audioVolume, audioIsPlaying());
@@ -745,6 +764,12 @@ void loop() {
 
   // ── Audio update ─────────────────────────────────────────────────
   audioUpdate();
+
+  // ── Pending cue timer ────────────────────────────────────────────
+  if (_pendingCue.active && millis() >= _pendingCue.fireAt) {
+    _pendingCue.active = false;
+    executeCue(&_pendingCue.cue);
+  }
 
   // ── Detect natural end-of-file: report stopped status to sender ──
   {
