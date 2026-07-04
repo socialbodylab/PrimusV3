@@ -28,7 +28,7 @@ macOS release built from the V4 unified sender (`--product primus` and `--produc
 ## SHA-256
 
 ```text
-TBD  PrimusCentral-0.92-macOS-arm64.dmg
-TBD  DeviceManager-0.92-macOS-arm64.dmg
-TBD  PrimusReceiverFirmware-3.9.0.zip
+79241e46a02cb1322e0c3565f80f061e06b5fdb3ca5ddbd688284a34bcd6625d  PrimusCentral-0.92-macOS-arm64.dmg
+87090c6100754bcf9a8e6171d93e375086721d177cf5b792d33c8ac24b090cce  DeviceManager-0.92-macOS-arm64.dmg
+cbbef7a64feff3c9a309a54879303e83ef2dc64487cf129f80c908254c7353cc  PrimusReceiverFirmware-3.9.0.zip
 ```
