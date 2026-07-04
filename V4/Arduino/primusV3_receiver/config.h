@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.8.0"
+#define FIRMWARE_VERSION "3.9.0"
 
 // =====================================================================
 //  Board Profile
@@ -100,15 +100,26 @@ enum OutputType {
   #define BOARD_PROFILE_ID        "v3_1_reverse_tft"
   #define BOARD_PROFILE_CODE      "v31"
   #define BOARD_PROFILE_LABEL     "V3.1 Reverse TFT"
-  #define BOARD_OUTPUT_DRIVER     PRIMUS_DRIVER_NEOPXL8
+  #define BOARD_OUTPUT_DRIVER     PRIMUS_DRIVER_DIRECT
   #define BOARD_HAS_TFT_DISPLAY   1
   #define BOARD_HAS_BUTTONS       1
-  #define OUTPUT0_PIN             14
-  #define OUTPUT1_PIN             15
-  #define OUTPUT0_PHYSICAL_PORT   6
-  #define OUTPUT1_PHYSICAL_PORT   7
+  #define OUTPUT0_PIN             A0   // GPIO17 — custom PCB output 0
+  #define OUTPUT1_PIN             A1   // GPIO18 — custom PCB output 1
+  #define OUTPUT0_PHYSICAL_PORT   0
+  #define OUTPUT1_PHYSICAL_PORT   1
   #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SHORT_STRIP
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
+  #define BOARD_OUTPUT_WIFI_GATED 1
+  #define BOARD_BATTERY_MONITOR   1
+  #define BOARD_BATTERY_PIN       A4   // GPIO14 — 5V rail via 100k/100k divider
+  #define BOARD_BATTERY_FEATURES  "RIOHBM"
+  #define BOARD_BATTERY_TYPE_RAIL 1
+  #define BOARD_BATTERY_ADC_SCALE_NUM  2
+  #define BOARD_BATTERY_ADC_SCALE_DEN  1
+  #define BOARD_BATTERY_MV_REGULATED   4980
+  #define BOARD_BATTERY_MV_FULL        5000
+  #define BOARD_BATTERY_MV_WARN        4600
+  #define BOARD_BATTERY_MV_EMPTY       4300
 #endif
 
 #ifndef BOARD_BATTERY_MONITOR
@@ -116,6 +127,30 @@ enum OutputType {
 #endif
 #ifndef BOARD_BATTERY_FEATURES
   #define BOARD_BATTERY_FEATURES  "RIOHM"
+#endif
+#ifndef BOARD_OUTPUT_WIFI_GATED
+  #define BOARD_OUTPUT_WIFI_GATED 0
+#endif
+#ifndef BOARD_BATTERY_TYPE_RAIL
+  #define BOARD_BATTERY_TYPE_RAIL 0
+#endif
+#ifndef BOARD_BATTERY_ADC_SCALE_NUM
+  #define BOARD_BATTERY_ADC_SCALE_NUM  2
+#endif
+#ifndef BOARD_BATTERY_ADC_SCALE_DEN
+  #define BOARD_BATTERY_ADC_SCALE_DEN  1
+#endif
+#ifndef BOARD_BATTERY_MV_REGULATED
+  #define BOARD_BATTERY_MV_REGULATED 4980
+#endif
+#ifndef BOARD_BATTERY_MV_FULL
+  #define BOARD_BATTERY_MV_FULL 5000
+#endif
+#ifndef BOARD_BATTERY_MV_WARN
+  #define BOARD_BATTERY_MV_WARN 4600
+#endif
+#ifndef BOARD_BATTERY_MV_EMPTY
+  #define BOARD_BATTERY_MV_EMPTY 4300
 #endif
 
 #ifndef BOARD_HAS_STATUS_LED
@@ -178,7 +213,7 @@ inline LayoutType   typeLayout(OutputType t)      { return isValidOutputType(t) 
 //  Per-Output Configuration
 // =====================================================================
 #define NUM_OUTPUTS 2
-#define MAX_OUTPUTS 2   // two outputs via FeatherWing fixed outputs 6 and 7
+#define MAX_OUTPUTS 2
 
 struct OutputConfig {
   OutputType  type;
@@ -229,14 +264,13 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // =====================================================================
 //  LED Hardware
 // =====================================================================
-// Pin mapping: ESP32-S3 GPIO → NeoPXL8 strand index
-// Using FeatherWing (M0) outputs 6 and 7 — hardwired PCB traces, no solder bridges.
-// A4 (GPIO14) and A3 (GPIO15) have no conflicts with any other peripheral.
-// Connect LED strips to the physical output 6 and 7 connectors on the FeatherWing.
-#define PIN_PORT_6  14   // A4 / GPIO14 — FeatherWing output 6 (fixed trace)
-#define PIN_PORT_7  15   // A3 / GPIO15 — FeatherWing output 7 (fixed trace)
+#if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8
+// Legacy NeoPXL8 FeatherWing mapping (not used on current V3 custom PCB).
+#define PIN_PORT_6  14
+#define PIN_PORT_7  15
+#endif
 
-// Direct NeoPixel profiles use the legacy V1/V2 pins.
+// Direct NeoPixel profiles (V1/V2/V3 custom PCB).
 #define PIN_DIRECT_GRID   32
 #define PIN_DIRECT_STRIP  12
 
@@ -280,7 +314,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 8
+#define FIRMWARE_VERSION_L 9
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 

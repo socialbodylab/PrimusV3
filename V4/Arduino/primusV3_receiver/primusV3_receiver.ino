@@ -9,7 +9,7 @@
  * Hardware profiles:
  *   - V1 Huzzah32 direct NeoPixel outputs
  *   - V2 ESP32 Feather direct NeoPixel outputs
- *   - V3.1 ESP32-S3 Reverse TFT Feather + NeoPXL8 FeatherWing outputs 6/7
+ *   - V3.1 ESP32-S3 Reverse TFT Feather + custom PCB (A0/A1 direct NeoPixel)
  *
  * Build profiles are selected by V3_6/Arduino/upload.sh.
  */
@@ -77,7 +77,16 @@ uint8_t  activeOutputCount = 0;       // cached count of non-OFF outputs
 
 // ── WiFi ─────────────────────────────────────────────────────────────
 bool wifiConnected = false;
+bool wifiReconnecting = false;
 unsigned long lastReconnectAttempt = 0;
+
+#if BOARD_OUTPUT_WIFI_GATED
+bool outputsPowerEnabled = false;
+bool ledDriverInitialized = false;
+#else
+bool outputsPowerEnabled = true;
+bool ledDriverInitialized = false;
+#endif
 
 // No-screen board connection indicator. V1 uses LED_BUILTIN; V2 uses
 // the onboard NeoPixel. V3.1 keeps using the TFT display.
@@ -272,10 +281,101 @@ bool     wipeDone[NUM_OUTPUTS]   = {};
 
 // ── Screen cycling ───────────────────────────────────────────────────
 uint8_t infoScreenIndex = 0;
+#if BOARD_HAS_TFT_DISPLAY
+uint8_t editFocus = 0;  // 0=Out0, 1=Out1, 2=Receive
+#endif
 
 // =====================================================================
 //  LED Output Helpers
 // =====================================================================
+
+bool initLedDriver() {
+  if (ledDriverInitialized) return true;
+
+#if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8
+  bool needsRGBW = false;
+  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
+    if (outputs[i].bytesPerPixel == 4) { needsRGBW = true; break; }
+  }
+  neoPixelType pixelType = needsRGBW
+    ? (NEO_GRBW + NEO_KHZ800) : (NEO_GRB + NEO_KHZ800);
+  leds = new Adafruit_NeoPXL8(MAX_LEDS_PER_PORT, pxl8Pins, pixelType);
+
+  if (!leds->begin()) {
+    Serial.println("ERROR: NeoPXL8 begin() failed!");
+    displayError("PXL8 FAIL", "NeoPXL8 initialization failed");
+    return false;
+  }
+
+  leds->setBrightness(255);
+  leds->fill(0);
+  leds->show();
+  Serial.println("NeoPXL8 OK — hardware brightness locked to 255");
+#else
+  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
+    uint8_t port = outputs[i].pxl8Port;
+    directLeds[port] = new Adafruit_NeoPixel(MAX_LEDS_PER_PORT, outputs[i].dataPin, NEO_GRB + NEO_KHZ800);
+    directLeds[port]->begin();
+    directLeds[port]->setBrightness(255);
+    directLeds[port]->clear();
+    directLeds[port]->show();
+    Serial.print("Direct NeoPixel output ");
+    Serial.print(i);
+    Serial.print(" on pin ");
+    Serial.println(outputs[i].dataPin);
+  }
+  Serial.println("Direct NeoPixel outputs OK — hardware brightness locked to 255");
+#endif
+
+  ledDriverInitialized = true;
+  return true;
+}
+
+void enableOutputs() {
+#if BOARD_OUTPUT_WIFI_GATED
+  if (outputsPowerEnabled) return;
+  if (!initLedDriver()) return;
+
+  for (uint8_t o = 0; o < NUM_OUTPUTS; o++) {
+    memset(outputBuffers[o], 0, MAX_BUFFER_SIZE);
+    outputDataReady[o] = false;
+    outputActive[o] = false;
+    if (outputs[o].type != OUTPUT_OFF) {
+      clearPort(outputs[o].pxl8Port, outputs[o].pixelCount);
+    }
+  }
+
+  outputsPowerEnabled = true;
+  showOutputs();
+
+  Serial.println("LED outputs enabled (WiFi connected, power rail ready)");
+  displayUpdateOutputPower(outputs, outputsPowerEnabled);
+#endif
+}
+
+void disableOutputs() {
+#if BOARD_OUTPUT_WIFI_GATED
+  if (!outputsPowerEnabled && !ledDriverInitialized) return;
+
+  for (uint8_t o = 0; o < NUM_OUTPUTS; o++) {
+    memset(outputBuffers[o], 0, MAX_BUFFER_SIZE);
+    outputDataReady[o] = false;
+    outputActive[o] = false;
+    if (ledDriverInitialized && outputs[o].type != OUTPUT_OFF) {
+      clearPort(outputs[o].pxl8Port, outputs[o].pixelCount);
+    }
+  }
+  if (ledDriverInitialized) {
+    outputsPowerEnabled = true;  // allow final dark latch
+    showOutputs();
+  }
+
+  outputsPowerEnabled = false;
+  testModeActive = false;
+  Serial.println("LED outputs disabled (WiFi lost or boot wait)");
+  displayUpdateOutputPower(outputs, outputsPowerEnabled);
+#endif
+}
 
 inline void setStripPixel(uint8_t port, uint16_t pixel, uint32_t color) {
 #if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8
@@ -294,6 +394,7 @@ void clearPort(uint8_t port, uint16_t count) {
 }
 
 void showOutputs() {
+  if (!outputsPowerEnabled) return;
 #if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8
   if (leds) leds->show();
 #else
@@ -322,6 +423,63 @@ void saveOutputConfig() {
     prefs.putUChar(key.c_str(), (uint8_t)outputs[i].type);
   }
 }
+
+OutputType nextValidOutputType(OutputType current) {
+  for (uint8_t step = 1; step <= NUM_OUTPUT_TYPES; step++) {
+    uint8_t candidateId = ((uint8_t)current + step) % NUM_OUTPUT_TYPES;
+    OutputType candidate = (OutputType)candidateId;
+    if (profileSupportsOutputType(candidate)) {
+      return candidate;
+    }
+  }
+  return OUTPUT_OFF;
+}
+
+bool applyOutputTypeChange(uint8_t outputIndex, OutputType newType) {
+  if (outputIndex >= NUM_OUTPUTS) return false;
+  if (!profileSupportsOutputType(newType)) return false;
+  if (outputs[outputIndex].type == newType) return false;
+
+  outputs[outputIndex].type = newType;
+  deriveFromType(outputs[outputIndex]);
+  memset(outputBuffers[outputIndex], 0, MAX_BUFFER_SIZE);
+  outputDataReady[outputIndex] = false;
+  outputActive[outputIndex] = false;
+
+  activeOutputCount = countActiveOutputs(outputs);
+  if (!validateReceiveMode(currentReceiveMode, outputs)) {
+    applyReceiveMode(outputs, RECEIVE_MODE_SPLIT, currentUniverseBase);
+    saveReceiveMode(prefs);
+  } else {
+    applyReceiveMode(outputs, currentReceiveMode, currentUniverseBase);
+  }
+  saveOutputConfig();
+  broadcastArtPollReply();
+
+  Serial.print("Output ");
+  Serial.print(outputIndex);
+  Serial.print(" -> ");
+  Serial.println(typeName(newType));
+  return true;
+}
+
+#if BOARD_HAS_TFT_DISPLAY
+void refreshCurrentInfoScreen() {
+  switch (infoScreenIndex) {
+    case 0:
+      displayDashboard(DEFAULT_WIFI_SSID, WiFi.localIP(), wifiConnected, wifiReconnecting,
+                       wifiConnected ? WiFi.RSSI() : 0, activeStaticIP, outputs, outputsPowerEnabled);
+      break;
+    case 1:
+      displayInfo(DEFAULT_WIFI_SSID, wifiConnected,
+                  wifiConnected ? WiFi.RSSI() : 0, activeStaticIP);
+      break;
+    case 2:
+      displayEditSettings(outputs, editFocus, nullptr);
+      break;
+  }
+}
+#endif
 
 // =====================================================================
 //  WiFi
@@ -402,6 +560,7 @@ bool connectWifi() {
 #endif
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
 
   if (useStaticIP) {
     IPAddress localIP(storedIP[0], storedIP[1], storedIP[2], storedIP[3]);
@@ -446,25 +605,47 @@ bool connectWifi() {
 
 void checkWifiConnection() {
   unsigned long now = millis();
+  bool linkUp = (WiFi.status() == WL_CONNECTED);
 
-  unsigned long newest = 0;
-  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
-    if (outputLastPacket[i] > newest) newest = outputLastPacket[i];
-  }
-
-  if (now - newest > CONNECTION_TIMEOUT && newest > 0) {
-    if (WiFi.status() != WL_CONNECTED) {
+  if (!linkUp) {
+    if (wifiConnected) {
       wifiConnected = false;
       setConnectionIndicator(false);
-      if (now - lastReconnectAttempt > RECONNECT_INTERVAL) {
-        Serial.println("Reconnecting WiFi...");
-        lastReconnectAttempt = now;
-        wifiConnected = connectWifi();
-        if (wifiConnected) {
-          setConnectionIndicator(true);
-          udp.begin(ARTNET_PORT);
-        }
+      disableOutputs();
+#if BOARD_HAS_TFT_DISPLAY
+      displayUpdateConnectionBanner(false, wifiReconnecting);
+#endif
+    }
+
+    if (now - lastReconnectAttempt > RECONNECT_INTERVAL) {
+      wifiReconnecting = true;
+#if BOARD_HAS_TFT_DISPLAY
+      displayUpdateConnectionBanner(false, true);
+#endif
+      Serial.println("Reconnecting WiFi...");
+      lastReconnectAttempt = now;
+      if (connectWifi()) {
+        wifiConnected = true;
+        setConnectionIndicator(true);
+        udp.begin(ARTNET_PORT);
+        enableOutputs();
+#if BOARD_HAS_TFT_DISPLAY
+        refreshCurrentInfoScreen();
+#endif
       }
+      wifiReconnecting = false;
+#if BOARD_HAS_TFT_DISPLAY
+      displayUpdateConnectionBanner(wifiConnected, false);
+#endif
+    }
+  } else {
+    if (!wifiConnected) {
+      wifiConnected = true;
+      setConnectionIndicator(true);
+      enableOutputs();
+#if BOARD_HAS_TFT_DISPLAY
+      displayUpdateConnectionBanner(true, false);
+#endif
     }
   }
 
@@ -667,35 +848,15 @@ void handleArtOutputConfig(uint8_t* data, uint16_t len) {
     uint8_t typeId = data[13 + i];
     if (typeId >= NUM_OUTPUT_TYPES) continue;
     OutputType newType = (OutputType)typeId;
-    if (!profileSupportsOutputType(newType)) continue;
-    if (outputs[i].type != newType) {
-      outputs[i].type = newType;
-      deriveFromType(outputs[i]);
-      // Clear the buffer for this output
-      memset(outputBuffers[i], 0, MAX_BUFFER_SIZE);
-      outputDataReady[i] = false;
+    if (applyOutputTypeChange(i, newType)) {
       changed = true;
-      Serial.print("Output ");
-      Serial.print(i);
-      Serial.print(" -> ");
-      Serial.print(typeName(newType));
-      Serial.print(" (");
-      Serial.print(outputs[i].pixelCount);
-      Serial.println("px)");
     }
   }
 
   if (changed) {
-    activeOutputCount = countActiveOutputs(outputs);
-    if (!validateReceiveMode(currentReceiveMode, outputs)) {
-      applyReceiveMode(outputs, RECEIVE_MODE_SPLIT, currentUniverseBase);
-      saveReceiveMode(prefs);
-    } else {
-      applyReceiveMode(outputs, currentReceiveMode, currentUniverseBase);
-    }
-    saveOutputConfig();
-    // Broadcast updated ArtPollReply so sender sees new config
-    broadcastArtPollReply();
+#if BOARD_HAS_TFT_DISPLAY
+    displayUpdateOutputPower(outputs, outputsPowerEnabled);
+#endif
   }
 }
 
@@ -819,6 +980,7 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
 // =====================================================================
 
 void applyBufferedData() {
+  if (!outputsPowerEnabled) return;
   for (uint8_t o = 0; o < NUM_OUTPUTS; o++) {
     if (!outputDataReady[o]) continue;
 
@@ -938,45 +1100,60 @@ void resetTestState() {
 
 void handleScreenCycle() {
   infoScreenIndex = (infoScreenIndex + 1) % NUM_INFO_SCREENS;
-  switch (infoScreenIndex) {
-    case 0:
-      displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), wifiConnected,
-                        wifiConnected ? WiFi.RSSI() : 0, activeStaticIP);
-      break;
-    case 1:
-      displayStatus(outputs, currentFps, outputActive);
-      break;
-    case 2:
-      if (!wifiConnected)
-        displayError("WiFi Lost", "Attempting reconnection...");
-      else
-        displayError("No Errors", "System running normally");
-      break;
 #if BOARD_HAS_TFT_DISPLAY
-    case 3:
-      displayReceiveSettings(outputs, nullptr);
-      break;
+  refreshCurrentInfoScreen();
+#else
+  infoScreenIndex = infoScreenIndex; // unused without TFT
 #endif
-  }
 }
 
 #if BOARD_HAS_TFT_DISPLAY && BOARD_HAS_BUTTONS
+void handleEditValueChange() {
+  if (infoScreenIndex != 2) return;
+
+  if (editFocus == 0) {
+    OutputType nextType = nextValidOutputType(outputs[0].type);
+    if (applyOutputTypeChange(0, nextType)) {
+      displayEditSettings(outputs, editFocus, nullptr);
+      displayUpdateOutputPower(outputs, outputsPowerEnabled);
+    }
+  } else if (editFocus == 1) {
+    OutputType nextType = nextValidOutputType(outputs[1].type);
+    if (applyOutputTypeChange(1, nextType)) {
+      displayEditSettings(outputs, editFocus, nullptr);
+      displayUpdateOutputPower(outputs, outputsPowerEnabled);
+    }
+  } else {
+    ReceiveMode next = (currentReceiveMode == RECEIVE_MODE_SPLIT)
+      ? RECEIVE_MODE_COMBINED : RECEIVE_MODE_SPLIT;
+    if (!validateReceiveMode(next, outputs)) {
+      displayEditSettings(outputs, editFocus, "Combined limit exceeded");
+      return;
+    }
+    if (setReceiveMode(prefs, outputs, outputBuffers, outputDataReady,
+                        next, currentUniverseBase)) {
+      broadcastArtPollReply();
+      displayEditSettings(outputs, editFocus, nullptr);
+    }
+  }
+}
+
+void handleEditFocusCycle() {
+  if (infoScreenIndex != 2) return;
+  editFocus = (editFocus + 1) % 3;
+  displayEditSettings(outputs, editFocus, nullptr);
+}
+#endif
+
+#if BOARD_HAS_TFT_DISPLAY && BOARD_HAS_BUTTONS
 void handleReceiveModeToggle() {
-  ReceiveMode next = (currentReceiveMode == RECEIVE_MODE_SPLIT)
-    ? RECEIVE_MODE_COMBINED : RECEIVE_MODE_SPLIT;
-  if (!validateReceiveMode(next, outputs)) {
-    displayReceiveSettings(outputs, "Combined limit exceeded");
-    return;
-  }
-  if (setReceiveMode(prefs, outputs, outputBuffers, outputDataReady,
-                      next, currentUniverseBase)) {
-    broadcastArtPollReply();
-    displayReceiveSettings(outputs, nullptr);
-  }
+  editFocus = 2;
+  handleEditValueChange();
 }
 #endif
 
 void handleTestToggle() {
+  if (!outputsPowerEnabled) return;
   if (!testModeActive) {
     testModeActive = true;
     testModeIndex = 1;
@@ -1001,12 +1178,12 @@ void handleTestToggle() {
 // =====================================================================
 
 void checkOutputTimeouts() {
+  if (!outputsPowerEnabled) return;
   unsigned long now = millis();
   for (uint8_t o = 0; o < NUM_OUTPUTS; o++) {
     if (outputs[o].type == OUTPUT_OFF) continue;
     if (outputActive[o] && (now - outputLastPacket[o] > CONNECTION_TIMEOUT)) {
       outputActive[o] = false;
-      displayUpdateOutputActive(o, false, outputs[o].type);
     }
   }
 }
@@ -1054,40 +1231,11 @@ void setup() {
   displayStartup();
   initConnectionIndicator();
 
-  // Init LED output driver
-#if BOARD_OUTPUT_DRIVER == PRIMUS_DRIVER_NEOPXL8
-  bool needsRGBW = false;
-  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
-    if (outputs[i].bytesPerPixel == 4) { needsRGBW = true; break; }
-  }
-  neoPixelType pixelType = needsRGBW
-    ? (NEO_GRBW + NEO_KHZ800) : (NEO_GRB + NEO_KHZ800);
-  leds = new Adafruit_NeoPXL8(MAX_LEDS_PER_PORT, pxl8Pins, pixelType);
-
-  if (!leds->begin()) {
-    Serial.println("ERROR: NeoPXL8 begin() failed!");
-    displayError("PXL8 FAIL", "NeoPXL8 initialization failed");
+  // Init LED output driver (immediate unless WiFi-gated for buck/boost spin-up)
+#if !BOARD_OUTPUT_WIFI_GATED
+  if (!initLedDriver()) {
     while (1) { delay(100); }
   }
-
-  leds->setBrightness(255);  // locked to max; sender scales RGB for show brightness
-  leds->fill(0);
-  leds->show();
-  Serial.println("NeoPXL8 OK — hardware brightness locked to 255");
-#else
-  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
-    uint8_t port = outputs[i].pxl8Port;
-    directLeds[port] = new Adafruit_NeoPixel(MAX_LEDS_PER_PORT, outputs[i].dataPin, NEO_GRB + NEO_KHZ800);
-    directLeds[port]->begin();
-    directLeds[port]->setBrightness(255);  // locked to max; sender scales RGB
-    directLeds[port]->clear();
-    directLeds[port]->show();
-    Serial.print("Direct NeoPixel output ");
-    Serial.print(i);
-    Serial.print(" on GPIO");
-    Serial.println(outputs[i].dataPin);
-  }
-  Serial.println("Direct NeoPixel outputs OK — hardware brightness locked to 255");
 #endif
 
   // Connect WiFi
@@ -1102,9 +1250,12 @@ void setup() {
 
   wifiConnected = connectWifi();
   if (wifiConnected) {
-    displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), true, WiFi.RSSI(), activeStaticIP);
+    enableOutputs();
+    displayDashboard(DEFAULT_WIFI_SSID, WiFi.localIP(), true, false, WiFi.RSSI(),
+                    activeStaticIP, outputs, outputsPowerEnabled);
   } else {
-    displayError("WiFi Fail", "Could not connect. Retrying...");
+    displayDashboard(DEFAULT_WIFI_SSID, WiFi.localIP(), false, false, 0,
+                    activeStaticIP, outputs, outputsPowerEnabled);
   }
 
   // Init UDP sockets
@@ -1120,6 +1271,7 @@ void setup() {
 
   lastFpsTime  = millis();
   lastShowTime = millis();
+  lastReconnectAttempt = millis();
 
   Serial.println("Setup complete. D0=Screen D1=Test");
   Serial.println();
@@ -1137,9 +1289,13 @@ void loop() {
 
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
 #if BOARD_HAS_TFT_DISPLAY && BOARD_HAS_BUTTONS
+  if (btnEditFocusCycle) {
+    btnEditFocusCycle = false;
+    handleEditFocusCycle();
+  }
   if (btnTestToggle)  {
     btnTestToggle = false;
-    if (infoScreenIndex == 3) handleReceiveModeToggle();
+    if (infoScreenIndex == 2) handleEditValueChange();
     else handleTestToggle();
   }
 #elif BOARD_HAS_BUTTONS
@@ -1147,9 +1303,13 @@ void loop() {
 #endif
 
   if (testModeActive) {
+    if (!outputsPowerEnabled) {
+      testModeActive = false;
+    } else {
     runTestAnimations();
     delay(33);
     return;
+    }
   }
 
   // ── WiFi health ──────────────────────────────────────────────────
@@ -1181,7 +1341,7 @@ void loop() {
   }
 
   // ── Apply data + adaptive-rate show ──────────────────────────────
-  if (newDataSinceLastShow && frameState.ready &&
+  if (outputsPowerEnabled && newDataSinceLastShow && frameState.ready &&
       (now - lastShowTime >= showInterval)) {
     applyBufferedData();
 
@@ -1203,6 +1363,7 @@ void loop() {
 
 #if BOARD_BATTERY_MONITOR
   batteryTelemetryTick(udpFps, senderIP, senderKnown, wifiConnected);
+  displayUpdateBattery();
 #endif
 
   // ── FPS reporting (once per second) ──────────────────────────────
@@ -1225,8 +1386,6 @@ void loop() {
 
     // Send FPS telemetry back to sender
     sendFpsTelemetry((uint16_t)currentFps, (uint16_t)packetFps);
-
-    displayUpdateFooter(currentFps, senderKnown ? senderIP : IPAddress(0,0,0,0));
 
     frameCount  = 0;
     packetCount = 0;

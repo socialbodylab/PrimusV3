@@ -1,4 +1,6 @@
 document.addEventListener("alpine:init", () => {
+    const FIRMWARE_UPDATE_INTERVAL_MS = 30 * 60 * 1000;
+
     Alpine.data("firmwareUploader", () => ({
         profile: "radius_v1",
         profiles: [
@@ -32,6 +34,12 @@ document.addEventListener("alpine:init", () => {
         serialOutput: [],
         serialPolling: null,
         monitorPort: "",
+        firmwareVersion: null,
+        firmwareSource: "bundled",
+        updateInfo: null,
+        checkingUpdates: false,
+        updateCheckInterval: null,
+        firmwareTabActive: false,
 
         init() {
             this.nameEnabled = false;
@@ -48,11 +56,28 @@ document.addEventListener("alpine:init", () => {
             this.refreshStatus();
             this.refreshSerialStatus();
             document.addEventListener("primus:mode-changed", event => {
-                if (event.detail?.mode === "firmware") {
+                const isFirmware = event.detail?.mode === "firmware";
+                this.firmwareTabActive = isFirmware;
+                if (isFirmware) {
                     this.refreshStatus();
                     this.refreshSerialStatus();
+                    this.startUpdatePolling();
+                } else {
+                    this.stopUpdatePolling();
                 }
             });
+            if (Alpine.store("app")?.mode === "firmware") {
+                this.firmwareTabActive = true;
+                this.startUpdatePolling();
+            }
+        },
+
+        get updateAvailable() {
+            return !!this.updateInfo?.update_available;
+        },
+
+        get updateError() {
+            return this.updateInfo?.error || "";
         },
 
         get serialMonitorActive() {
@@ -232,6 +257,7 @@ document.addEventListener("alpine:init", () => {
                 this.toolStatus = status.tool_status || "unknown";
                 this.canInstallTools = !!status.can_install_tools;
                 this.toolsDir = status.tools_dir || "";
+                this.syncFirmwareUpdateFromStatus(status);
                 if (status.current_job) {
                     this.activeJob = status.current_job;
                     this.startPolling();
@@ -243,6 +269,80 @@ document.addEventListener("alpine:init", () => {
                 this.available = false;
                 this.availabilityMessage = e.message || "Firmware status unavailable.";
                 this.canInstallTools = false;
+            }
+        },
+
+        syncFirmwareUpdateFromStatus(status) {
+            const firmware = status?.firmware || {};
+            this.firmwareVersion = firmware.version || null;
+            this.firmwareSource = firmware.source || "bundled";
+            if (status?.update) {
+                this.updateInfo = status.update;
+            }
+        },
+
+        installedFirmwareLabel() {
+            if (!this.firmwareVersion) return "Unknown";
+            const source = this.firmwareSource === "downloaded" ? "downloaded" : "bundled";
+            return "v" + this.firmwareVersion + " (" + source + ")";
+        },
+
+        remoteFirmwareLabel() {
+            if (this.checkingUpdates) return "Checking…";
+            const version = this.updateInfo?.remote_version;
+            if (!version) return this.updateInfo?.error ? "Unavailable" : "—";
+            return "v" + version;
+        },
+
+        updateStatusLabel() {
+            if (this.checkingUpdates) return "Checking";
+            if (this.updateInfo?.error) return "Check failed";
+            if (this.updateAvailable) return "Update available";
+            if (this.updateInfo?.remote_version) return "Up to date";
+            return "Unknown";
+        },
+
+        updateStatusClass() {
+            if (this.checkingUpdates) return "firmware-status-running";
+            if (this.updateInfo?.error) return "firmware-status-error";
+            if (this.updateAvailable) return "firmware-status-running";
+            if (this.updateInfo?.remote_version) return "firmware-status-success";
+            return "firmware-status-idle";
+        },
+
+        async checkForUpdates(force = true) {
+            if (this.running || this.checkingUpdates) return;
+            this.checkingUpdates = true;
+            try {
+                const update = await api("POST", "/api/firmware/updates/check", { force: !!force });
+                this.updateInfo = update;
+            } catch (e) {
+                this.updateInfo = {
+                    ...(this.updateInfo || {}),
+                    error: e.message || "Firmware update check failed.",
+                };
+                Alpine.store("app").showApiError("Firmware update check failed", e);
+            } finally {
+                this.checkingUpdates = false;
+            }
+        },
+
+        downloadFirmware() {
+            return this.startJob("download_firmware");
+        },
+
+        startUpdatePolling() {
+            this.stopUpdatePolling();
+            this.updateCheckInterval = setInterval(() => {
+                if (!this.firmwareTabActive || this.running) return;
+                this.checkForUpdates(false);
+            }, FIRMWARE_UPDATE_INTERVAL_MS);
+        },
+
+        stopUpdatePolling() {
+            if (this.updateCheckInterval) {
+                clearInterval(this.updateCheckInterval);
+                this.updateCheckInterval = null;
             }
         },
 
@@ -305,6 +405,7 @@ document.addEventListener("alpine:init", () => {
         jobLabel() {
             if (!this.activeJob) return "Ready";
             if (this.activeJob.action === "setup_tools") return "Firmware tools - " + this.activeJob.status;
+            if (this.activeJob.action === "download_firmware") return "Firmware download - " + this.activeJob.status;
             const action = this.activeJob.action.replace("_", " ");
             return action + " - " + this.activeJob.status;
         },
@@ -435,9 +536,15 @@ document.addEventListener("alpine:init", () => {
             if (job.status === "succeeded") {
                 const label = job.action === "list_ports"
                     ? "Port scan"
-                    : (job.action === "setup_tools" ? "Firmware tools setup" : "Firmware job");
+                    : (job.action === "setup_tools"
+                        ? "Firmware tools setup"
+                        : (job.action === "download_firmware"
+                            ? "Firmware download"
+                            : "Firmware job"));
                 Alpine.store("app").showNotice(label + " complete.", "success");
-                if (job.action === "setup_tools") this.refreshStatus();
+                if (job.action === "setup_tools" || job.action === "download_firmware") {
+                    this.refreshStatus();
+                }
             } else {
                 Alpine.store("app").showNotice(job.error || "Firmware job failed.", "error", 5000);
             }

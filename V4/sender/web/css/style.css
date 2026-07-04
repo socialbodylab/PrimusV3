@@ -1828,6 +1828,50 @@ input[type="color"] {
 .firmware-status-error { border-color: var(--danger); color: var(--danger); }
 .firmware-status-idle { border-color: var(--border); color: var(--text-secondary); }
 
+.firmware-version-section .output-header {
+    align-items: center;
+}
+
+.firmware-version-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.firmware-version-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.firmware-version-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.firmware-version-label {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.firmware-version-value {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.firmware-version-status {
+    align-self: flex-start;
+}
+
+.firmware-version-note {
+    margin-top: 10px;
+}
+
 .firmware-tools-path {
     margin-top: 4px;
     color: var(--text-muted);

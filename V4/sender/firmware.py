@@ -20,6 +20,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import paths
+import firmware_source
 
 
 BOARD_PROFILES = {"v1", "v2", "v3", "radius_v1"}
@@ -67,7 +68,7 @@ def default_profile():
     if "v3" in profiles:
         return "v3"
     return next(iter(sorted(profiles)))
-ACTIONS = {"setup_tools", "list_ports", "install", "compile", "upload"}
+ACTIONS = {"setup_tools", "list_ports", "install", "compile", "upload", "download_firmware"}
 PORT_MODES = {"auto", "selected", "all"}
 RUNNING_STATES = {"queued", "running"}
 MAX_OUTPUT_LINES = 800
@@ -145,10 +146,18 @@ class FirmwareJob:
             }
 
 
+def arduino_root():
+    if paths.is_primus_product():
+        return firmware_source.active_firmware_root()
+    return os.path.dirname(paths.resource_path("Arduino", "upload.sh"))
+
+
 def upload_script_path(profile):
     meta = FIRMWARE_PROFILES.get(profile)
     if not meta:
         raise FirmwareRequestError(400, "invalid profile")
+    if meta["family"] == "primus":
+        return os.path.abspath(os.path.join(arduino_root(), meta["script"]))
     return os.path.abspath(paths.resource_path("Arduino", meta["script"]))
 
 
@@ -306,7 +315,16 @@ class FirmwareJobManager:
                 status["tool_status"] = "installing"
                 status["can_install_tools"] = False
                 status["message"] = "Installing firmware tools..."
+            if paths.is_primus_product():
+                status["firmware"] = firmware_source.local_firmware_info()
+                update_info = firmware_source.check_github_updates(force=False)
+                status["update"] = update_info
             return status
+
+    def check_firmware_updates(self, force=False):
+        if not paths.is_primus_product():
+            return {"enabled": False, "error": "Firmware updates are Primus-only."}
+        return firmware_source.check_github_updates(force=force)
 
     def get_job(self, job_id):
         with self._lock:
@@ -318,7 +336,7 @@ class FirmwareJobManager:
     def start_job(self, data):
         command = self.build_command(data or {})
         availability = self.availability()
-        if command.action != "setup_tools" and not availability.get("available"):
+        if command.action not in ("setup_tools", "download_firmware") and not availability.get("available"):
             raise FirmwareRequestError(503, availability.get("message", "Firmware upload tools are unavailable."))
 
         with self._lock:
@@ -367,6 +385,33 @@ class FirmwareJobManager:
                 command=command,
                 redacted_command=command,
                 metadata=self._build_metadata(action, profile),
+            )
+        if action == "download_firmware":
+            if not paths.is_primus_product():
+                raise FirmwareRequestError(400, "download_firmware is Primus-only")
+            update_info = firmware_source.check_github_updates(force=True)
+            if update_info.get("error"):
+                raise FirmwareRequestError(502, update_info["error"])
+            if not update_info.get("update_available"):
+                raise FirmwareRequestError(409, "No firmware update available")
+            if not update_info.get("asset_url") or not update_info.get("sha256"):
+                raise FirmwareRequestError(502, "Firmware release asset or checksum is unavailable")
+            command = ["firmware-download"]
+            return FirmwareCommand(
+                action=action,
+                profile=profile,
+                command=command,
+                redacted_command=command,
+                metadata={
+                    **self._build_metadata(action, profile),
+                    "update": {
+                        "remote_version": update_info.get("remote_version"),
+                        "release_tag": update_info.get("release_tag"),
+                        "asset_name": update_info.get("asset_name"),
+                        "asset_url": update_info.get("asset_url"),
+                        "sha256": update_info.get("sha256"),
+                    },
+                },
             )
 
         command = ["bash", script_path, "--board", profile]
@@ -591,6 +636,9 @@ class FirmwareJobManager:
             if firmware_command.action == "setup_tools":
                 self._run_setup_tools_job(job)
                 return
+            if firmware_command.action == "download_firmware":
+                self._run_download_firmware_job(job, firmware_command)
+                return
             if firmware_command.action in ("compile", "upload"):
                 job.append_output("Launching upload script...")
                 job.append_output(
@@ -650,6 +698,32 @@ class FirmwareJobManager:
             result=result,
             error="",
         )
+
+    def _run_download_firmware_job(self, job, firmware_command):
+        update = (firmware_command.metadata or {}).get("update") or {}
+        try:
+            result = firmware_source.install_firmware_bundle(
+                asset_url=update.get("asset_url"),
+                expected_sha256=update.get("sha256"),
+                release_tag=update.get("release_tag"),
+                asset_name=update.get("asset_name"),
+                job=job,
+            )
+            job.set_status(
+                "succeeded",
+                finished_at=time.time(),
+                returncode=0,
+                result=result,
+                error="",
+            )
+        except Exception as exc:
+            job.append_output(str(exc))
+            job.set_status(
+                "failed",
+                finished_at=time.time(),
+                returncode=None,
+                error=str(exc),
+            )
 
     def _run_streamed_command(self, job, command, cwd=None, env=None, check=True):
         job.append_output("$ " + " ".join(redact_command(command)))

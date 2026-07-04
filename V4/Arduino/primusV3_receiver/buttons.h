@@ -2,9 +2,7 @@
  * buttons.h — PrimusV3 Button Handler
  * ===========================================
  * D0 (active-LOW):  Cycle TFT info screens
- * D1 (active-HIGH): Toggle test mode
- *
- * D2 / brightness cycling has been removed — brightness is locked to 255.
+ * D1 (active-HIGH): Short = action, Long (>600ms) = edit focus cycle (pg3)
  */
 
 #ifndef BUTTONS_H
@@ -14,44 +12,57 @@
 
 #if BOARD_HAS_BUTTONS
 
-// =====================================================================
-//  State
-// =====================================================================
 static bool lastBtnState[2] = { false, false };
 static const uint8_t btnPins[2] = { BTN_D0, BTN_D1 };
 
-// =====================================================================
-//  Actions — set by button presses, consumed by main loop
-// =====================================================================
-volatile bool btnScreenCycle = false;   // D0 pressed
-volatile bool btnTestToggle  = false;   // D1 pressed
+#ifndef BTN_LONG_PRESS_MS
+#define BTN_LONG_PRESS_MS 600
+#endif
 
-// =====================================================================
-//  Init
-// =====================================================================
+volatile bool btnScreenCycle = false;
+volatile bool btnTestToggle  = false;
+volatile bool btnEditFocusCycle = false;
+
+static bool btn1Held = false;
+static unsigned long btn1PressStart = 0;
+static bool btn1LongFired = false;
+
 void buttonsInit() {
-  pinMode(BTN_D0, INPUT_PULLUP);     // D0: active-LOW
-  pinMode(BTN_D1, INPUT_PULLDOWN);   // D1: active-HIGH
+  pinMode(BTN_D0, INPUT_PULLUP);
+  pinMode(BTN_D1, INPUT_PULLDOWN);
 }
 
-// =====================================================================
-//  Read with polarity handling
-// =====================================================================
 static bool readButton(uint8_t index) {
   bool raw = digitalRead(btnPins[index]);
-  // D0 is active-LOW → invert; D1 is active-HIGH → use as-is
   return (index == 0) ? !raw : raw;
 }
 
-// =====================================================================
-//  Poll — call once per loop iteration
-// =====================================================================
 void buttonsPoll() {
   for (uint8_t i = 0; i < 2; i++) {
     bool pressed = readButton(i);
+
+    if (i == 1) {
+      if (pressed && !lastBtnState[i]) {
+        btn1Held = true;
+        btn1PressStart = millis();
+        btn1LongFired = false;
+      } else if (pressed && btn1Held && !btn1LongFired &&
+                 (millis() - btn1PressStart >= BTN_LONG_PRESS_MS)) {
+        btn1LongFired = true;
+        btnEditFocusCycle = true;
+      } else if (!pressed && lastBtnState[i]) {
+        if (btn1Held && !btn1LongFired) {
+          btnTestToggle = true;
+        }
+        btn1Held = false;
+        btn1LongFired = false;
+      }
+      lastBtnState[i] = pressed;
+      continue;
+    }
+
     if (pressed && !lastBtnState[i]) {
-      if (i == 0) btnScreenCycle = true;
-      else        btnTestToggle  = true;
+      btnScreenCycle = true;
     }
     lastBtnState[i] = pressed;
   }
@@ -61,6 +72,7 @@ void buttonsPoll() {
 
 volatile bool btnScreenCycle = false;
 volatile bool btnTestToggle  = false;
+volatile bool btnEditFocusCycle = false;
 
 void buttonsInit() {}
 void buttonsPoll() {}

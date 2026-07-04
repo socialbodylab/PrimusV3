@@ -227,6 +227,37 @@ def ensure_tools_data():
     os.makedirs(arduino_user_dir(), exist_ok=True)
 
 
+def firmware_dir():
+    if uses_app_data_dir():
+        return os.path.join(_default_app_root_dir(), "firmware")
+    return os.path.join(repo_root(), ".firmware")
+
+
+def firmware_active_dir():
+    return os.path.join(firmware_dir(), "active")
+
+
+def firmware_manifest_path():
+    return os.path.join(firmware_dir(), "manifest.json")
+
+
+def firmware_update_cache_path():
+    return os.path.join(firmware_dir(), "update_cache.json")
+
+
+def firmware_downloads_dir():
+    return os.path.join(firmware_dir(), "downloads")
+
+
+def bundled_arduino_dir():
+    return os.path.dirname(resource_path("Arduino", "upload.sh"))
+
+
+def ensure_firmware_data():
+    os.makedirs(firmware_dir(), exist_ok=True)
+    os.makedirs(firmware_downloads_dir(), exist_ok=True)
+
+
 def clips_dir():
     return data_path("clips")
 

@@ -873,6 +873,10 @@ class Handler(BaseHTTPRequestHandler):
             except FirmwareRequestError as exc:
                 self._json_error(exc.code, exc.message)
 
+        elif path == "/api/firmware/updates/check":
+            force = bool(data.get("force", False))
+            self._json_response(firmware_jobs.check_firmware_updates(force=force))
+
         elif path == "/api/serial/monitor/start":
             port = str(data.get("port", "")).strip()
             try:

@@ -2,17 +2,39 @@
 
 Canonical firmware for **both** Primus LED receivers and Radius audio receivers lives under `V4/Arduino/`. Upload profiles are selected in the sender Firmware panel or via the upload scripts below.
 
+Packaged PrimusCentral apps bundle this source as a bootstrap fallback. On PrimusCentral,
+the Firmware page can check GitHub releases for `PrimusReceiverFirmware-<version>.zip`
+assets and install newer receiver source into app data without upgrading the sender app.
+
 ## Primus LED (`primusV3_receiver/`)
 
 | Profile | Hardware | Upload |
 |---------|----------|--------|
 | `v1` | Adafruit HUZZAH32 (2022 RUR) | `./upload.sh --board v1` |
 | `v2` | ESP32 Feather (2025 Make) | `./upload.sh --board v2` |
-| `v3` | Reverse TFT Feather + NeoPXL8 (2026 PCB) | `./upload.sh --board v3` |
+| `v3` | ESP32-S3 Reverse TFT + custom PCB (A0/A1 NeoPixel, A4 battery) | `./upload.sh --board v3` |
 
-Discovery capability tag: `PV3CAP1|B:v1|IP:D|F:RIOHBM` (V1 battery adds `B` in features; firmware 3.8+ adds `M` for receive-mode config and `U:S:0` or `U:C:N` universe tokens).
+Discovery capability tag: `PV3CAP1|B:v1|IP:D|F:RIOHBM` (V1 and V3 add `B` in features for battery; firmware 3.8+ adds `M` for receive-mode config and `U:S:0` or `U:C:N` universe tokens).
 
-Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtReceiveConfig (`0x8110`), ArtIPConfig (`0x8200`), UDP 6455 back-channel (`PFP` FPS, `PBT` battery on V1).
+Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtReceiveConfig (`0x8110`), ArtIPConfig (`0x8200`), UDP 6455 back-channel (`PFP` FPS, `PBT` battery on V1 and V3).
+
+### V3 custom PCB (profile `v3`)
+
+| Signal | Pin | Notes |
+|--------|-----|-------|
+| Output 0 | A0 (GPIO17) | Direct NeoPixel |
+| Output 1 | A1 (GPIO18) | Direct NeoPixel |
+| Battery sense | A4 (GPIO14) | 5V buck/boost output via 100k/100k divider (×2 scale) |
+
+**Output power gating:** LED outputs stay disabled until WiFi connects (buck/boost spin-up). Strips clear and disable again on WiFi loss.
+
+**TFT screens (D0 cycles):**
+
+| Screen | Content |
+|--------|---------|
+| pg1 Dashboard | Connection banner, IP, battery % + time estimate, name, receive mode, output types with ON/OFF badges |
+| pg2 Info | SSID, DHCP/static, RSSI, firmware version |
+| pg3 Edit | D1 short = change value; D1 hold = next field (Out0 / Out1 / Receive mode) |
 
 ### Receive mode (`receive_mode.h`)
 
@@ -21,7 +43,7 @@ Protocol highlights: ArtDmx pixel output, ArtOutputConfig (`0x8100`), ArtReceive
 | Split (default) | One universe per active output |
 | Combined | Single universe; port A bytes then port B bytes (≤170 px total) |
 
-NVS keys: `recvMode`, `univBase`. Runtime changes via ArtReceiveConfig or V3 TFT (D1 on Receive screen).
+NVS keys: `recvMode`, `univBase`. Runtime changes via ArtReceiveConfig or V3 TFT edit screen (pg3).
 
 Upload flags: `--receivemode split|combined`, `--universe N`.
 
@@ -31,9 +53,13 @@ Upload flags: `--receivemode split|combined`, `--universe N`.
 ./V4/Arduino/upload.sh -v3 -ssid "MyRouter" -pw "secret" --auto
 ```
 
-### V1 battery telemetry (`PBT`)
+### Battery telemetry (`PBT`)
 
-V1 Huzzah32 boards read LiPo voltage on **A13** (GPIO35, onboard VBAT divider). The HUZZAH32 has no VBUS sense pin, so firmware reports **voltage and percent only** (`power_mode` 0 when valid). Modes 3–5 cover switch-off, fault, and unavailable readings. Reports every **5 s** on UDP 6455.
+**V1:** HUZZAH32 LiPo on **A13** (GPIO35, onboard VBAT divider). No VBUS sense — reports voltage and percent only (`power_mode` 0 when valid). Modes 3–5 cover switch-off, fault, and unavailable readings.
+
+**V3:** 5V buck/boost rail on **A4** via 100k/100k divider. Firmware scales ADC ×2, maps regulated-rail droop to percent, and shows a **time-remaining estimate on the TFT only** (not sent in PBT).
+
+Both profiles report every **5 s** on UDP 6455.
 
 | Offset | Field | Description |
 |--------|-------|-------------|

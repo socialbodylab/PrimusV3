@@ -373,7 +373,8 @@ The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a 
 | `GET /api/looks/:id/export` | Download a portable Look bundle JSON file, including referenced Clips when available |
 | `GET /api/cues` | Get cue list state (cues, current index, playing flag) |
 | `GET /api/integrations/osc` | OSC listener settings, bound endpoint, recent message history, examples, and per-cue trigger hints |
-| `GET /api/firmware/status` | Source-checkout firmware upload availability plus current/last job state |
+| `GET /api/firmware/status` | Firmware upload availability, installed receiver firmware version/source, GitHub update info, and current/last job state |
+| `POST /api/firmware/updates/check` | `{force?: true}` — refresh GitHub firmware release scan (15-minute cache unless `force` is true) |
 | `GET /api/firmware/jobs/:id` | Poll a firmware upload job, including redacted output and structured results |
 
 ### Sender Performance Diagnostics
@@ -641,6 +642,7 @@ These endpoints are local sender helpers for firmware tool setup, compile, and u
 | `POST /api/firmware/jobs` | `{action:"install", profile:"v3"}` | Run `upload.sh --board <profile> --install`. |
 | `POST /api/firmware/jobs` | `{action:"compile", profile:"v3", device_name?, wifi_ssid?, wifi_password?, ip_mode?, static_ip?, gateway?, subnet?}` | Run compile-only verification with optional default device-name, WiFi credential, and static/DHCP IP overrides. |
 | `POST /api/firmware/jobs` | `{action:"upload", profile:"v3", port_mode:"auto"\|"selected"\|"all", port?, device_name?, wifi_ssid?, wifi_password?, ip_mode?, static_ip?, gateway?, subnet?}` | Compile, then upload by auto-detected port, explicit selected port, or all detected ESP32-like ports. |
+| `POST /api/firmware/jobs` | `{action:"download_firmware", profile:"v3"}` | Download the latest `PrimusReceiverFirmware-*.zip` GitHub release asset, verify SHA-256, and install it into app-data firmware storage (Primus only). |
 
 For firmware jobs, `ip_mode` is optional and defaults to `"keep"`. Use `"static"`
 with `static_ip`, `gateway`, and `subnet` to store static IP settings on receiver

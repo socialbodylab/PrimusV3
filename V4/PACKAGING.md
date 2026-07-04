@@ -22,6 +22,24 @@ Packaged apps use product-specific app data:
 
 Firmware tools install on demand to the matching product root under `…/V4/tools/`.
 
+Primus receiver firmware can also be updated independently of the sender app. Downloaded
+firmware source is stored under `…/V4/firmware/active/` with a `manifest.json`. The
+bundled `V4/Arduino/` tree in the app remains the offline bootstrap fallback.
+
+## Primus receiver firmware release assets
+
+Receiver firmware can ship on GitHub without a new PrimusCentral build. Build assets with:
+
+```bash
+python3 V4/build_firmware_bundle.py
+```
+
+Default output: `V4/dist/firmware/PrimusReceiverFirmware-<version>.zip` plus a matching
+`.sha256` sidecar, where `<version>` comes from `V4/Arduino/primusV3_receiver/config.h`.
+
+Attach both files to a GitHub release. PrimusCentral checks releases for the highest
+semver asset named `PrimusReceiverFirmware-*.zip`.
+
 Overrides: `RADIUSV4_DATA_DIR`, `PRIMUSV3_DATA_DIR`, `RADIUSV4_USE_APP_DATA`, `PRIMUSV3_USE_APP_DATA`, `RADIUSV4_TOOLS_DIR`, `PRIMUSV3_TOOLS_DIR`.
 
 Set product at runtime with `PRIMUSV3_SENDER_PRODUCT=primus|radius` (packaged apps set this from the executable name).

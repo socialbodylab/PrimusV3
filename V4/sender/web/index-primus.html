@@ -1278,6 +1278,36 @@
             <p class="text-sm text-muted">Download Arduino CLI, install ESP32 board support, and prepare the receiver firmware libraries before compiling or uploading.</p>
         </div>
 
+        <div class="output-section firmware-version-section mb-4">
+            <div class="output-header">
+                <span class="output-name">Receiver Firmware</span>
+                <div class="firmware-version-actions">
+                    <button class="btn btn-sm"
+                            @click="checkForUpdates(true)"
+                            :disabled="running || checkingUpdates">Check for Updates</button>
+                    <button class="btn btn-sm btn-primary"
+                            x-show="updateAvailable"
+                            @click="downloadFirmware()"
+                            :disabled="running || checkingUpdates">Download &amp; Install</button>
+                </div>
+            </div>
+            <div class="firmware-version-grid">
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Installed</span>
+                    <span class="firmware-version-value" x-text="installedFirmwareLabel()"></span>
+                </div>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Latest on GitHub</span>
+                    <span class="firmware-version-value" x-text="remoteFirmwareLabel()"></span>
+                </div>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Status</span>
+                    <span class="firmware-status-pill firmware-version-status" :class="updateStatusClass()" x-text="updateStatusLabel()"></span>
+                </div>
+            </div>
+            <div class="firmware-version-note text-sm text-muted" x-show="updateError" x-text="updateError"></div>
+        </div>
+
         <div class="firmware-grid firmware-workflow-grid">
             <div class="output-section firmware-section">
                 <div class="output-header">
