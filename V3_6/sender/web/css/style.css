@@ -3162,6 +3162,7 @@ input[type="color"] {
 .cues-header-cols {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    align-items: start;
     gap: 12px;
     margin-bottom: 16px;
 }
@@ -3203,29 +3204,61 @@ input[type="color"] {
     padding: 1px 4px;
 }
 
-/* Cue cards */
-.cue-card {
+/* Cue cards — audio cues panel resets the look-controller .cue-card base rule */
+.audio-cues-panel .cue-card {
+    display: block;
+    aspect-ratio: unset;
+    justify-content: normal;
+    gap: 0;
+    padding: 0;
+    background: none;
+    cursor: default;
+    box-shadow: none;
+    position: static;
+    width: auto;
+    transition: none;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     margin-bottom: 8px;
     overflow: hidden;
 }
+.audio-cues-panel .cue-card:hover,
+.audio-cues-panel .cue-card:focus-visible {
+    border-color: var(--border);
+    box-shadow: none;
+    outline: none;
+}
+.audio-cues-panel .cue-card:active {
+    transform: none;
+    box-shadow: none;
+}
 .cue-card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 10px;
+    padding: 5px 10px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     gap: 8px;
 }
+.cue-card-header .form-input {
+    padding: 2px 4px;
+    font-size: 12px;
+    height: 26px;
+}
 .cue-action-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    gap: 5px;
+    padding: 4px 10px;
     border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+}
+.cue-action-row .form-input,
+.cue-action-row .form-select {
+    padding: 2px 4px;
+    font-size: 12px;
+    height: 26px;
 }
 .cue-action-row:last-child { border-bottom: none; }
 .cue-action-inactive { opacity: 0.55; }
@@ -3505,4 +3538,49 @@ input[type="color"] {
     border-radius: var(--radius-sm, 3px);
     color: var(--text-primary);
     min-width: 0;
+}
+.audio-fm-upload-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm, 3px);
+    font-size: 11px;
+}
+.audio-fm-upload-name {
+    flex-shrink: 0;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+}
+.audio-fm-upload-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.audio-fm-upload-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.15s ease;
+}
+.audio-fm-upload-sending {
+    width: 100% !important;
+    background: var(--accent);
+    animation: upload-pulse 1s ease-in-out infinite;
+}
+@keyframes upload-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.45; }
+}
+.audio-fm-upload-pct {
+    flex-shrink: 0;
+    font-size: 11px;
+    width: 38px;
+    text-align: right;
+    color: var(--text-muted);
 }

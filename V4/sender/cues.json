@@ -1,0 +1,22 @@
+{
+  "cues": [
+    {
+      "number": 1,
+      "name": "Test Bug Cue",
+      "fade_time": 2.0,
+      "auto_follow": false,
+      "follow_delay": 5.0,
+      "assignments": [
+        {
+          "action": "look",
+          "look_id": "8c4ae7c3-9cf8-464b-a063-a10aa17ddc9c",
+          "target_mode": "group",
+          "device_group_id": "22222222-2222-4222-8222-222222222222"
+        }
+      ],
+      "look_id": "8c4ae7c3-9cf8-464b-a063-a10aa17ddc9c",
+      "target_mode": "group",
+      "device_group_id": "22222222-2222-4222-8222-222222222222"
+    }
+  ]
+}

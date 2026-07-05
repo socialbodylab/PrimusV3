@@ -14,7 +14,7 @@
  *   [10-11] 0x00, 0x0E     — protocol version 14
  *   [12]   command         — 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 6=play cue, 7=loop cue
  *   [13]   volume (0–100) or cue number (cmd 6/7)
- *   [14..N] filename       — null-terminated, max 32 chars (cmd 1/2 only)
+ *   [14..N] filename       — null-terminated, max 64 chars (cmd 1/2 only)
  *   [N+1..N+2] duration   — uint16_t LE, seconds, 0=full file (cmd 1/2, optional)
  *
  * Libraries: Adafruit_ST7789, Adafruit_GFX,
@@ -315,17 +315,21 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
 
   uint8_t cmd    = data[12];
   uint8_t volume = data[13];
-  char filename[33] = {0};
+  char filename[65] = {0};
   uint16_t fnLen = len - 14;
-  if (fnLen > 32) fnLen = 32;
+  if (fnLen > 64) fnLen = 64;
   memcpy(filename, data + 14, fnLen);
 
-  // Optional duration: uint16_t LE in the 2 bytes after the filename null terminator
+  // Optional duration (uint16 LE) and delay (uint16 LE) after filename null terminator
   uint16_t duration = 0;
+  uint16_t delay_ms = 0;
   uint16_t nullPos = 14;
   while (nullPos < len && data[nullPos] != 0) nullPos++;
   if (len >= nullPos + 3) {
     duration = (uint16_t)data[nullPos + 1] | ((uint16_t)data[nullPos + 2] << 8);
+  }
+  if (len >= nullPos + 5) {
+    delay_ms = (uint16_t)data[nullPos + 3] | ((uint16_t)data[nullPos + 4] << 8);
   }
 
   Serial.print("[ArtAudio] cmd=");
@@ -335,13 +339,29 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (cmd == 1 || cmd == 2) {
     Serial.print(" file="); Serial.print(filename);
     if (duration > 0) { Serial.print(" dur="); Serial.print(duration); Serial.print("s"); }
+    if (delay_ms > 0) { Serial.print(" delay="); Serial.print(delay_ms); Serial.print("ms"); }
   }
   if (cmd == 6 || cmd == 7) { Serial.print(" cue="); Serial.print(volume); }
   Serial.println();
 
   switch (cmd) {
-    case 1:  audioPlay(filename, volume, duration); break;
-    case 2:  audioLoop(filename, volume, duration); break;
+    case 1:
+    case 2: {
+      if (delay_ms > 0) {
+        AudioCue cue;
+        cue.cmd      = (cmd == 2) ? AUDIO_CUE_CMD_LOOP : AUDIO_CUE_CMD_PLAY;
+        strncpy(cue.filename, filename, 64); cue.filename[64] = '\0';
+        cue.volume   = volume;
+        cue.duration = duration;
+        cue.delay    = delay_ms;
+        dispatchCue(&cue);
+      } else if (cmd == 1) {
+        audioPlay(filename, volume, duration);
+      } else {
+        audioLoop(filename, volume, duration);
+      }
+      break;
+    }
     case 3:  audioPause();                          break;
     case 4:  audioSetVolume(volume);                break;
     case 5:  audioSetVolume(volume); audioTestTone(); break;
@@ -555,7 +575,7 @@ void sdScreenLoadFile(bool advance) {
 
 void sendAudioStatus(uint8_t status, const char* filename) {
   if (!senderKnown || !wifiConnected) return;
-  uint8_t buf[46];
+  uint8_t buf[78];
   memset(buf, 0, sizeof(buf));
   memcpy(buf, ARTNET_MAGIC, 8);
   buf[8]  = ARTNET_OPCODE_AUDIO_STATUS & 0xFF;
@@ -563,7 +583,7 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   buf[10] = 0x00;
   buf[11] = 0x0E;
   buf[12] = status;
-  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 32);
+  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 64);
   udpReport.beginPacket(senderIP, AUDIO_REPORT_PORT);
   udpReport.write(buf, 46);
   udpReport.endPacket();

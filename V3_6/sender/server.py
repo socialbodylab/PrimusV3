@@ -9,7 +9,7 @@ import mimetypes
 import threading
 import time
 import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import unquote
 
 import audio_cues as _audio_cues_mod
@@ -44,6 +44,9 @@ _sync_job        = None
 
 _inventory_lock  = threading.Lock()
 _device_inventory = {}   # {ip: {name, files: [str], scanned_at: float}}
+
+_upload_progress_lock = threading.Lock()
+_upload_progress = {}   # {di: {bytes_sent, bytes_total, filename}}
 
 
 def _is_audio_file(name):
@@ -248,6 +251,19 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._respond(500, "application/json",
                               json.dumps({"error": str(e)}).encode())
+            return
+        if path == "/api/audio/upload_progress":
+            params = self._query_params()
+            try:
+                di = int(params.get("device", -1))
+            except (TypeError, ValueError):
+                di = -1
+            with _upload_progress_lock:
+                info = _upload_progress.get(di)
+            if info:
+                self._json_response({"active": True, **info})
+            else:
+                self._json_response({"active": False})
             return
         if path == "/api/audio_sync/status":
             with _sync_lock:
@@ -850,6 +866,23 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json_error(500, str(e))
 
+        elif path == "/api/audio_cues/preview_cue_maps":
+            with self.audio_cues_lock:
+                cues = list(self.audio_cues_data.get("cues", []))
+            radius_devs = _snap_audio_devices(self.controller_state)
+            devices = []
+            for dev in radius_devs:
+                ip      = dev["ip"]
+                cue_map = _audio_cues_mod.derive_device_cue_map(cues, ip)
+                devices.append({
+                    "ip":        ip,
+                    "name":      dev.get("name", ip),
+                    "connected": dev.get("connected", False),
+                    "cue_count": len(cue_map),
+                    "cues":      cue_map,
+                })
+            self._json_response({"devices": devices})
+
         elif path == "/api/audio_cues/push_cue_maps":
             with self.audio_cues_lock:
                 cues = list(self.audio_cues_data.get("cues", []))
@@ -861,13 +894,14 @@ class Handler(BaseHTTPRequestHandler):
             results = {}
             for dev in connected:
                 ip      = dev["ip"]
+                name    = dev.get("name", ip)
                 cue_map = _audio_cues_mod.derive_device_cue_map(cues, ip)
                 try:
                     raw = json.dumps(cue_map, indent=2).encode()
                     ftp_upload(ip, "/cues.json", raw)
-                    results[ip] = {"status": "ok", "cue_count": len(cue_map)}
+                    results[ip] = {"status": "ok", "cue_count": len(cue_map), "name": name}
                 except Exception as e:
-                    results[ip] = {"status": "error", "error": str(e)}
+                    results[ip] = {"status": "error", "error": str(e), "name": name}
             self._json_response({"results": results})
 
         elif path == "/api/audio_cues/fire":
@@ -1074,12 +1108,22 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(400, "application/json",
                           b'{"error":"not a WAV file - device requires PCM WAV format"}')
             return
+        filename = ftp_path.split("/")[-1]
+        with _upload_progress_lock:
+            _upload_progress[di] = {"bytes_sent": 0, "bytes_total": len(file_data), "filename": filename}
         try:
-            self.controller_state.ftp_upload(di, ftp_path, file_data)
+            def _progress(sent, total):
+                with _upload_progress_lock:
+                    if di in _upload_progress:
+                        _upload_progress[di]["bytes_sent"] = sent
+            self.controller_state.ftp_upload(di, ftp_path, file_data, progress_callback=_progress)
             self._ok()
         except Exception as e:
             self._respond(500, "application/json",
                           json.dumps({"error": str(e)}).encode())
+        finally:
+            with _upload_progress_lock:
+                _upload_progress.pop(di, None)
 
     def _handle_project_audio_upload(self):
         """POST /api/project_audio  (binary WAV body, ?filename=<name>)"""
@@ -1616,7 +1660,7 @@ def create_server(host, port, controller_state, cue_list, ui_lifecycle_enabled=F
     Handler.controller_state = controller_state
     Handler.cue_list = cue_list
     Handler.audio_cues_data  = _audio_cues_mod.load_audio_cues()
-    server = HTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     server.controller_state = controller_state
     server.cue_list = cue_list
     server.osc_service = osc_service

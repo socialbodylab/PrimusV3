@@ -186,7 +186,7 @@ class FpsListener:
                 opcode = struct.unpack("<H", raw[8:10])[0]
                 if opcode == ARTNET_OPCODE_AUDIO_STATUS:
                     status = raw[12]
-                    filename = raw[13:45].split(b'\x00')[0].decode("ascii", errors="replace") if len(raw) > 13 else ""
+                    filename = raw[13:77].split(b'\x00')[0].decode("ascii", errors="replace") if len(raw) > 13 else ""
                     with self.lock:
                         self.audio_status[addr[0]] = {
                             "status": status, "filename": filename, "ts": time.monotonic()
@@ -317,9 +317,12 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
             except OSError:
                 pass
 
+        known_ip_set = set(known_ips) if known_ips else set()
         nodes = {}
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            if known_ip_set and known_ip_set.issubset(nodes):
+                break
             try:
                 raw, addr = sock.recvfrom(600)
             except socket.timeout:
@@ -654,18 +657,24 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_i
 #  AUDIO COMMAND — ArtAudioCmd (opcode 0x8300)  [V3.2 Radius nodes only]
 # ======================================================================
 
-def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None):
+def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, delay_ms=0, source_ip=None):
     """Send ArtAudioCmd packet to a V3.2 Radius node.
 
     cmd:      AUDIO_CMD_* constant
-    filename: WAV filename on the SD card (e.g. "cue01.wav"), max 32 chars.
+    filename: WAV filename on the SD card (e.g. "cue01.wav"), max 64 chars.
               Ignored for STOP and PAUSE.
     volume:   0–100.
     duration: seconds to play (0 = full file). Appended after filename null
-              terminator as uint16 LE; omitted when 0 for backward compat.
+              terminator as uint16 LE; omitted when 0 and delay_ms is also 0.
+    delay_ms: milliseconds before the device starts playing. Appended as uint16
+              LE after duration (duration is always included as a placeholder when
+              delay_ms > 0). Firmware uses dispatchCue() to schedule the play.
     """
-    name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
-    if duration and duration > 0:
+    name_bytes = filename.encode("ascii", errors="replace")[:64] + b'\x00'
+    if delay_ms and delay_ms > 0:
+        name_bytes += struct.pack("<H", min(int(duration), 65535) if duration else 0)
+        name_bytes += struct.pack("<H", min(int(delay_ms), 65535))
+    elif duration and duration > 0:
         name_bytes += struct.pack("<H", min(int(duration), 65535))
     pkt = bytearray(14 + len(name_bytes))
     pkt[0:8] = ARTNET_HEADER
@@ -676,10 +685,11 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None)
     pkt[14:14 + len(name_bytes)] = name_bytes
     _send_udp_packet(ip, pkt, source_ip=source_ip)
     cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
-    dur_str = f" [{duration}s]" if duration else ""
-    file_str = f" \"{filename}\"" if filename else ""
+    dur_str   = f" [{duration}s]"      if duration else ""
+    dly_str   = f" delay={delay_ms}ms" if delay_ms else ""
+    file_str  = f" \"{filename}\""     if filename else ""
     netlog.log("OUT", "audio_cmd",
-               f"AudioCmd {cmd_name}{file_str} vol={volume}{dur_str} → {ip}")
+               f"AudioCmd {cmd_name}{file_str} vol={volume}{dur_str}{dly_str} → {ip}")
 
 
 # ======================================================================

@@ -708,7 +708,16 @@ def main():
 
     # Restore previously saved devices
     print("Restoring saved devices...")
-    state.restore_devices()
+    discovered_ips = state.restore_devices()
+
+    # Radius Central: auto-connect only nodes confirmed online via ArtPollReply.
+    # Offline devices stay disconnected so the UI reflects actual reachability.
+    if args.mode == "radius":
+        if discovered_ips:
+            print(f"Radius mode: auto-connecting {len(discovered_ips)} discovered node(s)...")
+            state.connect_all(only_ips=discovered_ips)
+        else:
+            print("Radius mode: no nodes responded to ArtPoll at startup.")
 
     ui_lifecycle_enabled = is_bundled() and not args.no_browser
     browser_profile_root = _browser_profile_root() if not args.no_browser else None

@@ -1,0 +1,25 @@
+{
+  "id": "25caa9b0-3696-49fa-a7dc-6f5fa062e108",
+  "name": "Teal Wipe",
+  "group": "Teal Wipe",
+  "output_type": "long_strip",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    200,
+    180
+  ],
+  "speed": 1.0,
+  "playback": "once",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.678423+00:00",
+  "modified": "2026-04-08T18:59:58.678435+00:00"
+}

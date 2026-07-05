@@ -25,13 +25,14 @@ extern bool sdBusy;   // defined in the .ino
 // =====================================================================
 //  Internal state
 // =====================================================================
-char     _audioCurrentFile[33] = {0};
+char     _audioCurrentFile[65] = {0};
 uint8_t  _audioVolume           = 80;
 bool     _audioLooping          = false;
 bool     _audioSdReady          = false;
 bool     _audioHwReady          = false;
 uint16_t _audioDuration         = 0;    // seconds, 0 = play full file
 uint32_t _audioStartMillis      = 0;
+uint32_t _audioSampleRate       = 0;
 
 // =====================================================================
 //  Music Maker FeatherWing (VS1053B) — SPI hardware codec
@@ -69,22 +70,26 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   // start fresh. FTP is protected in the other direction: ftpUpdate() skips
   // handleFTP() while sdBusy is true, so audio always holds the SD bus.
 
-  char trackPath[34];
+  char trackPath[66];
   snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
 
-  // Verify RIFF/WAVE header before committing SD bus
+  // Read WAV header: verify RIFF/WAVE magic and extract sample rate (offset 24)
+  uint32_t incomingSampleRate = 0;
   {
     File f = SD.open(trackPath);
     if (!f) {
       Serial.print("[Audio] ERROR: file not found: "); Serial.println(trackPath);
       return false;
     }
-    uint8_t magic[12] = {0};
-    f.read(magic, 12);
+    uint8_t header[28] = {0};
+    f.read(header, 28);
     f.close();
-    if (memcmp(magic, "RIFF", 4) != 0 || memcmp(magic + 8, "WAVE", 4) != 0) {
+    if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
       Serial.print("[Audio] ERROR: not a WAV file: "); Serial.println(trackPath);
       return false;
+    }
+    if (memcmp(header + 12, "fmt ", 4) == 0) {
+      memcpy(&incomingSampleRate, header + 24, 4);
     }
   }
 
@@ -93,8 +98,18 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
     delay(20);  // let VS1053 fully flush before feeding new file header
   }
 
-  strncpy(_audioCurrentFile, filename, 32);
-  _audioCurrentFile[32] = '\0';
+  // VS1053 holds internal sample-rate state across tracks. A soft reset clears
+  // the decoder's PLL so the next stream header is parsed cleanly. Without this
+  // the chip plays the new file at the wrong pitch or fails to start.
+  if (incomingSampleRate != 0 && incomingSampleRate != _audioSampleRate) {
+    Serial.printf("[Audio] Sample rate change %lu→%lu Hz — soft reset\n",
+                  _audioSampleRate, incomingSampleRate);
+    _musicMaker.softReset();  // resets DSP state; built-in 200ms settle time
+  }
+  _audioSampleRate = incomingSampleRate;
+
+  strncpy(_audioCurrentFile, filename, 64);
+  _audioCurrentFile[64] = '\0';
   _audioVolume    = volume;
   _audioLooping   = false;
   _audioDuration  = duration;
@@ -122,9 +137,10 @@ void audioStop() {
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
   _musicMaker.setVolume(254, 254);
   _audioCurrentFile[0] = '\0';
-  _audioLooping   = false;
-  _audioDuration  = 0;
+  _audioLooping     = false;
+  _audioDuration    = 0;
   _audioStartMillis = 0;
+  _audioSampleRate  = 0;
   sdBusy = false;
   Serial.println("[Audio] Stopped");
 }
@@ -163,7 +179,7 @@ void audioBootTest() {
     return;
   }
 
-  char filename[33] = {0};
+  char filename[65] = {0};
   File root = SD.open("/");
   if (!root) { Serial.println("[Boot] Failed to open SD root"); return; }
   while (true) {
@@ -172,7 +188,7 @@ void audioBootTest() {
     if (!entry.isDirectory()) {
       const char* ext = strrchr(entry.name(), '.');
       if (ext && strcasecmp(ext, ".wav") == 0) {
-        strncpy(filename, entry.name(), 32);
+        strncpy(filename, entry.name(), 64);
         entry.close();
         root.close();
         Serial.print("[Boot] Playing: "); Serial.println(filename);

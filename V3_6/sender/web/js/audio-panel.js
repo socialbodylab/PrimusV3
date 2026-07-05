@@ -136,12 +136,24 @@ document.addEventListener("alpine:init", () => {
         },
 
         async play(di, filename, cmd = "play") {
+            const devices = Alpine.store("app").state?.devices || [];
+            const isConnected = !!devices[di]?.connected;
             await api("POST", "/api/audio/cmd", {
                 device: di, cmd, filename, volume: this.getVolume(di),
             });
-            this.playing        = { ...this.playing,        [di]: { file: filename, cmd } };
-            this._playingExpiry = { ...this._playingExpiry, [di]: Date.now() + 3000 };
-            this.lastPlayed     = { ...this.lastPlayed,     [di]: filename };
+            this.playing    = { ...this.playing,    [di]: { file: filename, cmd } };
+            this.lastPlayed = { ...this.lastPlayed, [di]: filename };
+            if (isConnected) {
+                // Hold optimistic state while waiting for first AudioStatus reply (~3s).
+                // Once the device reports "playing", nowPlaying() switches to device-driven
+                // and will stay lit until the device reports "stopped".
+                this._playingExpiry = { ...this._playingExpiry, [di]: Date.now() + 3000 };
+            } else {
+                // Not connected: command is still sent and logged, but button returns to rest immediately.
+                const expiry = { ...this._playingExpiry };
+                delete expiry[di];
+                this._playingExpiry = expiry;
+            }
         },
 
         async stop(di) {
@@ -319,14 +331,29 @@ document.addEventListener("alpine:init", () => {
                 this.uploadStatus = { ...this.uploadStatus, [di]: { name: file.name, progress } };
             };
             setStatus(0);
+
+            // Poll server-side FTP progress while the XHR is in flight.
+            let pollId = null;
+            const startPolling = () => {
+                pollId = setInterval(async () => {
+                    try {
+                        const r = await fetch(`/api/audio/upload_progress?device=${di}`);
+                        const p = await r.json();
+                        if (p.active && p.bytes_total > 0) {
+                            setStatus(Math.round(p.bytes_sent / p.bytes_total * 100));
+                        } else if (!p.active) {
+                            setStatus(null);
+                        }
+                    } catch (_) {}
+                }, 250);
+            };
+            const stopPolling = () => { if (pollId !== null) { clearInterval(pollId); pollId = null; } };
+
             await new Promise((resolve, reject) => {
                 const params = new URLSearchParams({ device: di, path });
                 const xhr = new XMLHttpRequest();
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) setStatus(Math.round(e.loaded / e.total * 100));
-                };
-                xhr.upload.onload = () => setStatus(null);  // bytes sent; FTP transfer in progress
                 xhr.onload = () => {
+                    stopPolling();
                     if (xhr.status === 200) {
                         resolve();
                     } else {
@@ -335,10 +362,11 @@ document.addEventListener("alpine:init", () => {
                         reject(new Error(msg));
                     }
                 };
-                xhr.onerror = () => reject(new Error("network error"));
+                xhr.onerror = () => { stopPolling(); reject(new Error("network error")); };
                 xhr.open("POST", `/api/audio/upload?${params}`);
                 xhr.setRequestHeader("Content-Type", "application/octet-stream");
                 xhr.send(file);
+                startPolling();
             });
         },
 

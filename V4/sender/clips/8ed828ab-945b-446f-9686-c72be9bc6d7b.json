@@ -1,0 +1,25 @@
+{
+  "id": "8ed828ab-945b-446f-9686-c72be9bc6d7b",
+  "name": "Forest Drift",
+  "group": "Forest Drift",
+  "output_type": "long_strip",
+  "effect": "linear",
+  "start_color": [
+    0,
+    120,
+    30
+  ],
+  "end_color": [
+    60,
+    200,
+    80
+  ],
+  "speed": 0.5,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.682208+00:00",
+  "modified": "2026-04-08T18:59:58.682229+00:00"
+}

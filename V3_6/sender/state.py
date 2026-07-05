@@ -564,6 +564,7 @@ class ControllerState:
         for name in duplicate_node_names:
             nodes_by_name.pop(name, None)
         refreshed = False
+        discovered_ips = set()
         for sd in saved:
             ip = sd["ip"]
             if any(d["ip"] == ip for d in self.devices):
@@ -572,6 +573,7 @@ class ControllerState:
             if node:
                 node["short_name"] = node.get("short_name") or sd.get("name") or "Node"
                 self.add_device_from_node(node, auto_save=False)
+                discovered_ips.add(node["ip"])
                 if node.get("ip") != ip:
                     refreshed = True
             else:
@@ -594,6 +596,7 @@ class ControllerState:
                 }, auto_save=False)
         if refreshed:
             _save_devices(self.devices)
+        return discovered_ips
 
     def discovery_targets(self):
         """Return known receiver IPs worth probing during discovery."""
@@ -1439,11 +1442,11 @@ class ControllerState:
             return None
         return artnet_ftp_list_dir(ip, path)
 
-    def ftp_upload(self, di, path, data):
+    def ftp_upload(self, di, path, data, progress_callback=None):
         ip = self._get_device_ip(di)
         if ip is None:
             return False
-        artnet_ftp_upload(ip, path, data)
+        artnet_ftp_upload(ip, path, data, progress_callback=progress_callback)
         return True
 
     def ftp_rename(self, di, src, dst):
@@ -1506,12 +1509,15 @@ class ControllerState:
                 continue
             volume   = action.get("volume")
             duration = action.get("duration")
+            delay_ms = action.get("delay_ms")
             try:
                 kw = {}
                 if volume is not None:
                     kw["volume"] = int(volume)
                 if duration:
                     kw["duration"] = int(duration)
+                if delay_ms:
+                    kw["delay_ms"] = int(delay_ms)
                 send_audio_cmd(ip, cmd_code, filename=filename, **kw)
                 results[ip] = {"status": "sent", "reason": None}
             except Exception as exc:

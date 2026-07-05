@@ -1,0 +1,25 @@
+{
+  "id": "7ec2f8b8-e329-44a0-b8df-f21f86efd135",
+  "name": "Rose Gold Glow",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "solid",
+  "start_color": [
+    255,
+    110,
+    80
+  ],
+  "end_color": [
+    255,
+    110,
+    80
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-05-08T22:02:11.860900+00:00",
+  "modified": "2026-05-08T22:02:11.860920+00:00"
+}

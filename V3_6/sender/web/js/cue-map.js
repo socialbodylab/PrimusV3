@@ -10,13 +10,14 @@ function cueMap() {
         deviceIdx: null,
         loading: false,
         saving: false,
-        rows: [],          // [{ number, cmd, file, volume, duration }]
+        rows: [],          // [{ number, cmd, file, volume, duration, _editing }]
         deviceFiles: [],   // WAV filenames available on selected device
         error: null,
         success: null,
+        audioDevices: [],  // snapshot taken once on init; never reactively updated
 
-        get audioDevices() {
-            return Alpine.store("conn").devices
+        init() {
+            this.audioDevices = (Alpine.store("conn").devices || [])
                 .map((d, i) => ({ ...d, _di: i }))
                 .filter(d => d.is_audio);
         },
@@ -44,11 +45,12 @@ function cueMap() {
                     api("POST", "/api/audio/files", { device: this.deviceIdx, path: "/" })
                         .catch(() => ({ entries: [] })),
                 ]);
+                // Rows loaded from device start in view mode (_editing: false).
                 this.rows = Object.entries(mapData)
                     .map(([num, val]) => {
                         if (typeof val === "string") {
                             return { number: parseInt(num), cmd: "play", file: val,
-                                     volume: null, duration: 0 };
+                                     volume: null, duration: 0, _editing: false };
                         }
                         return {
                             number:   parseInt(num),
@@ -56,6 +58,7 @@ function cueMap() {
                             file:     val.file || "",
                             volume:   val.volume != null ? val.volume : null,
                             duration: val.duration || 0,
+                            _editing: false,
                         };
                     })
                     .sort((a, b) => a.number - b.number);
@@ -72,8 +75,9 @@ function cueMap() {
 
         addRow() {
             const maxNum = this.rows.reduce((m, r) => Math.max(m, r.number), 0);
+            // New rows start in edit mode so the user can immediately pick a file.
             this.rows.push({ number: Math.min(maxNum + 1, 255), cmd: "play",
-                             file: "", volume: null, duration: 0 });
+                             file: "", volume: null, duration: 0, _editing: true });
         },
 
         removeRow(idx) {
@@ -99,6 +103,7 @@ function cueMap() {
                     if (this.needsFile(cmd) && !row.file) continue;
                     const n = String(parseInt(row.number));
                     const entry = { cmd };
+                    // _editing is local UI state — never written to device
                     if (this.needsFile(cmd)) entry.file = row.file;
                     if (row.volume != null && row.volume !== "") entry.volume = parseInt(row.volume);
                     if (row.duration > 0) entry.duration = parseInt(row.duration);

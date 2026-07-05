@@ -6,12 +6,11 @@ document.addEventListener("alpine:init", () => {
 
     Alpine.data("netLog", () => ({
 
-        entries:    [],
-        lastId:     0,
-        autoScroll: true,
-        showFps:    false,
-        _timer:     null,
-        _polling:   false,
+        entries:  [],   // stored newest-first
+        lastId:   0,
+        showFps:  true,
+        _timer:   null,
+        _polling: false,
 
         TYPE_LABELS: {
             artpoll:       "Poll",
@@ -26,6 +25,12 @@ document.addEventListener("alpine:init", () => {
             ftp_mkdir:     "Mkdir",
             ftp_sync:      "Sync",
             fps_telemetry: "FPS",
+        },
+
+        // Newest-first, with optional FPS filter.
+        get visibleEntries() {
+            if (this.showFps) return this.entries;
+            return this.entries.filter(e => e.type !== "fps_telemetry");
         },
 
         init() {
@@ -44,17 +49,12 @@ document.addEventListener("alpine:init", () => {
                 const res = await fetch(`/api/netlog?since=${this.lastId}`).then(r => r.json());
                 const fresh = res.entries || [];
                 if (fresh.length > 0) {
-                    this.entries = [...this.entries, ...fresh];
+                    // Prepend reversed so the newest entry is always first.
+                    this.entries = [...fresh.slice().reverse(), ...this.entries];
                     if (this.entries.length > 1000) {
-                        this.entries = this.entries.slice(-1000);
+                        this.entries = this.entries.slice(0, 1000);
                     }
                     this.lastId = fresh[fresh.length - 1].id;
-                    if (this.autoScroll) {
-                        this.$nextTick(() => {
-                            const el = this.$refs.logList;
-                            if (el) el.scrollTop = el.scrollHeight;
-                        });
-                    }
                 }
             } catch (_) { /* ignore */ }
             finally {
@@ -69,7 +69,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         download() {
-            const blob = new Blob([JSON.stringify(this.entries, null, 2)],
+            const blob = new Blob([JSON.stringify([...this.entries].reverse(), null, 2)],
                                   { type: "application/json" });
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
@@ -97,8 +97,8 @@ document.addEventListener("alpine:init", () => {
         },
 
         typeClass(type) {
-            if (type === "audio_cmd")   return "log-type-audio";
-            if (type.startsWith("ftp")) return "log-type-ftp";
+            if (type === "audio_cmd")     return "log-type-audio";
+            if (type.startsWith("ftp"))   return "log-type-ftp";
             if (type === "fps_telemetry") return "log-type-fps";
             return "log-type-default";
         },

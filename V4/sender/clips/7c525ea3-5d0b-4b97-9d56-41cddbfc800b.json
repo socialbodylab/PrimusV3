@@ -1,0 +1,25 @@
+{
+  "id": "7c525ea3-5d0b-4b97-9d56-41cddbfc800b",
+  "name": "Ocean Ripple Grid",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "radial",
+  "start_color": [
+    0,
+    220,
+    255
+  ],
+  "end_color": [
+    0,
+    20,
+    120
+  ],
+  "speed": 0.9,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.6,
+  "created": "2026-05-08T22:02:11.851976+00:00",
+  "modified": "2026-05-08T22:02:11.851989+00:00"
+}

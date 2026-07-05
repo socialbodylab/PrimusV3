@@ -1,0 +1,25 @@
+{
+  "id": "819d9d75-463a-44b8-84fd-1c3b1f7c0b44",
+  "name": "Vertical Sweep",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "linear",
+  "start_color": [
+    255,
+    200,
+    0
+  ],
+  "end_color": [
+    0,
+    100,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 90,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.305906+00:00",
+  "modified": "2026-04-08T13:57:40.305934+00:00"
+}

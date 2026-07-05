@@ -16,6 +16,7 @@ document.addEventListener("alpine:init", () => {
         deviceInventory: {},   // {ip: {name, files, scanned_at}}
         inventoryAge: null,    // seconds since last scan
         _saveTimer:   null,
+        audioDevices: [],   // stable snapshot — updated only when IPs/connection changes
 
         // Push sync
         syncModal:    false,
@@ -31,9 +32,13 @@ document.addEventListener("alpine:init", () => {
         // Rescan
         rescanning:   false,
 
-        // Push cue maps
-        pushingMaps:   false,
-        pushMapsResult: null,
+        // Cue maps modal
+        cueMapsModal:      false,
+        cueMapsPreview:    null,   // [{ip, name, connected, cue_count, cues}]
+        cueMapsLoading:    false,
+        cueMapsUploading:  false,
+        cueMapsResults:    null,   // {ip: {status, cue_count, name, error}}
+        cueMapsError:      null,
 
         // Fire results: cue_number -> {ip -> {status, reason}}
         fireResults:   {},
@@ -43,12 +48,6 @@ document.addEventListener("alpine:init", () => {
         _importInput:  null,
 
         // ── Computed ──────────────────────────────────────────────────
-
-        get audioDevices() {
-            return (Alpine.store("app").state?.devices || [])
-                .map((d, i) => ({ ...d, di: i }))
-                .filter(d => d.is_audio);
-        },
 
         get sortedCues() {
             return [...this.cues].sort((a, b) => (a.number || 0) - (b.number || 0));
@@ -61,8 +60,25 @@ document.addEventListener("alpine:init", () => {
         // ── Lifecycle ─────────────────────────────────────────────────
 
         async init() {
+            // Load cues and project files from the server immediately —
+            // these don't depend on device state.
             await this.load();
             await this.loadProjectFiles();
+
+            // Refresh the device snapshot when the user navigates to this tab.
+            // $watch on mode fires only on tab clicks, not on the 100ms state
+            // poll, so it won't disrupt open <select> dropdowns.
+            this.$watch(() => Alpine.store("app").mode, (mode) => {
+                if (mode === "cues") this._syncDevices();
+            });
+            // Also populate now if already on the cues tab.
+            if (Alpine.store("app").mode === "cues") this._syncDevices();
+        },
+
+        _syncDevices() {
+            this.audioDevices = (Alpine.store("app").state?.devices || [])
+                .map((d, i) => ({ ...d, di: i }))
+                .filter(d => d.is_audio);
         },
 
         // ── Cue sheet persistence ─────────────────────────────────────
@@ -558,39 +574,52 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        // ── Push cue maps ─────────────────────────────────────────────
+        // ── Cue maps modal ────────────────────────────────────────────
 
-        async pushCueMaps() {
-            this.pushingMaps = true;
-            this.pushMapsResult = null;
+        async openCueMaps() {
+            this.cueMapsModal     = true;
+            this.cueMapsPreview   = null;
+            this.cueMapsResults   = null;
+            this.cueMapsError     = null;
+            this.cueMapsLoading   = true;
+            this.cueMapsUploading = false;
+            try {
+                const data = await api("POST", "/api/audio_cues/preview_cue_maps");
+                this.cueMapsPreview = data.devices || [];
+            } catch (e) {
+                this.cueMapsError = e.message;
+            } finally {
+                this.cueMapsLoading = false;
+            }
+        },
+
+        closeCueMaps() {
+            this.cueMapsModal = false;
+        },
+
+        async uploadCueMaps() {
+            this.cueMapsUploading = true;
+            this.cueMapsResults   = null;
+            this.cueMapsError     = null;
             try {
                 const data = await api("POST", "/api/audio_cues/push_cue_maps");
-                const results = data.results || {};
-                const ips = Object.keys(results);
-                if (ips.length === 0) {
-                    this.pushMapsResult = data.message || "No connected devices";
-                } else {
-                    const ok  = ips.filter(ip => results[ip].status === "ok").length;
-                    const err = ips.filter(ip => results[ip].status === "error").length;
-                    const parts = [];
-                    if (ok)  parts.push(`${ok} ok`);
-                    if (err) parts.push(`${err} failed`);
-                    this.pushMapsResult = parts.join(", ");
-                    if (err) {
-                        const errDetails = ips
-                            .filter(ip => results[ip].status === "error")
-                            .map(ip => `${ip}: ${results[ip].error}`)
-                            .join("\n");
-                        console.warn("[audio-cues] push_cue_maps errors:\n" + errDetails);
-                    }
-                }
+                this.cueMapsResults = data.results || {};
+                if (data.message) this.cueMapsError = data.message;
             } catch (e) {
-                this.pushMapsResult = "Error: " + e.message;
-                console.error("[audio-cues] push_cue_maps failed:", e);
+                this.cueMapsError = e.message;
             } finally {
-                this.pushingMaps = false;
-                setTimeout(() => this.pushMapsResult = null, 6000);
+                this.cueMapsUploading = false;
             }
+        },
+
+        cueMapsUploadDone() {
+            if (!this.cueMapsResults) return false;
+            const ips = Object.keys(this.cueMapsResults);
+            return ips.length > 0 && !this.cueMapsUploading;
+        },
+
+        cueMapsConnectedCount() {
+            return (this.cueMapsPreview || []).filter(d => d.connected).length;
         },
 
     }));

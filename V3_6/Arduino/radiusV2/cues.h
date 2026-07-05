@@ -39,7 +39,7 @@
 
 struct AudioCue {
   uint8_t  cmd;           // AUDIO_CUE_CMD_*
-  char     filename[33];  // empty for stop / volume
+  char     filename[65];  // empty for stop / volume
   uint8_t  volume;        // 0–100, or CUE_VOLUME_UNSET
   uint16_t duration;      // seconds; 0 = full file
   uint16_t delay;         // milliseconds before executing; 0 = immediate
@@ -83,8 +83,8 @@ void cuesLoad() {
 
     if (kv.value().is<const char*>()) {
       // Shorthand: "1": "file.wav" → play with device default volume
-      strncpy(cue.filename, kv.value().as<const char*>(), 32);
-      cue.filename[32] = '\0';
+      strncpy(cue.filename, kv.value().as<const char*>(), 64);
+      cue.filename[64] = '\0';
 
     } else if (kv.value().is<JsonObject>()) {
       JsonObject obj = kv.value().as<JsonObject>();
@@ -99,8 +99,8 @@ void cuesLoad() {
       // file — required for play/loop
       if (cue.cmd == AUDIO_CUE_CMD_PLAY || cue.cmd == AUDIO_CUE_CMD_LOOP) {
         const char* fn = obj["file"] | "";
-        strncpy(cue.filename, fn, 32);
-        cue.filename[32] = '\0';
+        strncpy(cue.filename, fn, 64);
+        cue.filename[64] = '\0';
       }
 
       // volume — optional; CUE_VOLUME_UNSET means "use device current"
