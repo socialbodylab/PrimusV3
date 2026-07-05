@@ -164,7 +164,7 @@ class RadiusState:
     def restore_devices(self):
         saved = _load_devices()
         if not saved:
-            return
+            return set()
         known_ips = []
         seen = set()
         for device in saved:
@@ -177,6 +177,7 @@ class RadiusState:
             timeout=2.0,
             interface=self._discovery_interface(),
         )
+        discovered_ips = {n["ip"] for n in nodes}
         node_map = {n["ip"]: n for n in nodes}
         nodes_by_name = {}
         duplicate_names = set()
@@ -218,6 +219,7 @@ class RadiusState:
                 }, auto_save=False)
         if refreshed:
             _save_devices(self.devices)
+        return discovered_ips
 
     def _discovery_interface(self):
         try:
@@ -477,6 +479,7 @@ class RadiusState:
             try:
                 volume = action.get("volume")
                 duration = action.get("duration") or 0
+                delay_ms = action.get("delay_ms")
                 kwargs = {"source_ip": self.artnet_source_ip}
                 if volume is not None:
                     kwargs["volume"] = int(volume)
@@ -485,6 +488,8 @@ class RadiusState:
                 if cmd_str in ("play", "loop"):
                     kwargs["filename"] = filename
                     kwargs["duration"] = int(duration)
+                if delay_ms:
+                    kwargs["delay_ms"] = int(delay_ms)
                 send_audio_cmd(ip, cmd_code, **kwargs)
                 results[ip] = {"status": "sent", "reason": None}
                 self.performance.increment("audio_commands")

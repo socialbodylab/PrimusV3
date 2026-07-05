@@ -68,7 +68,6 @@
 #define FTP_PORT     21
 
 #define FPS_INTERVAL           1000
-#define TRACK_HEARTBEAT_MS     1000
 #define WIFI_CHECK_INTERVAL_MS 200
 #define CONNECTION_TIMEOUT     10000
 #define RECONNECT_INTERVAL     5000

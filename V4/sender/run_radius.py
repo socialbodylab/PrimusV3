@@ -407,7 +407,9 @@ def main():
 
     state = RadiusState(telemetry_listener=telemetry_listener)
     print("Restoring saved Radius devices...")
-    state.restore_devices()
+    discovered_ips = state.restore_devices()
+    if discovered_ips:
+        state.connect_all(only_ips=discovered_ips)
 
     ui_lifecycle_enabled = is_bundled() and not args.no_browser
     browser_profile_root = _browser_profile_root() if not args.no_browser else None

@@ -356,7 +356,7 @@
         </template>
     </div>
 
-    <div class="panel" x-show="$store.app.mode === 'cues'" x-data="audioCues">
+    <div class="panel audio-cues-panel" x-show="$store.app.mode === 'cues'" x-data="audioCues">
 
         <div class="flex justify-between items-center mb-4">
             <span class="section-title" style="margin:0">Audio Cues</span>
@@ -664,19 +664,19 @@
             <span class="section-title" style="margin:0">Network Log</span>
             <div class="btn-group">
                 <label class="flex items-center gap-1" style="cursor:pointer;font-size:12px">
-                    <input type="checkbox" x-model="autoScroll">
-                    <span>Auto-scroll</span>
+                    <input type="checkbox" x-model="showFps">
+                    <span>FPS</span>
                 </label>
                 <button class="btn btn-sm" @click="clear()">Clear</button>
                 <button class="btn btn-sm" @click="download()">↓ Download</button>
             </div>
         </div>
 
-        <div class="log-list" x-ref="logList">
-            <template x-if="entries.length === 0">
+        <div class="log-list">
+            <template x-if="visibleEntries.length === 0">
                 <p class="text-muted text-sm" style="padding:8px">No events logged yet.</p>
             </template>
-            <template x-for="entry in entries" :key="entry.id">
+            <template x-for="entry in visibleEntries" :key="entry.id">
                 <div class="log-row">
                     <span class="log-time" x-text="formatTime(entry.ts)"></span>
                     <span class="log-dir" :class="dirClass(entry.dir)" x-text="entry.dir"></span>

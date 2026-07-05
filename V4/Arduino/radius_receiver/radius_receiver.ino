@@ -56,9 +56,15 @@ uint8_t storedGateway[4] = {0};
 uint8_t storedSubnet[4]  = {0};
 
 unsigned long lastFpsTime = 0;
-unsigned long lastTrackHeartbeatMs = 0;
 unsigned long packetCount = 0;
 uint8_t infoScreenIndex = 0;
+
+// ── Pending cue (non-blocking delay) ─────────────────────────────────
+static struct {
+  bool          active;
+  unsigned long fireAt;  // millis() target
+  AudioCue      cue;
+} _pendingCue = { false, 0, {} };
 
 #if RADIUS_DIAG
 unsigned long diagLoopMaxUs = 0;
@@ -357,21 +363,49 @@ void handleArtFtpCmd(uint8_t* data, uint16_t len) {
 
 // ── ArtAudioCmd (0x8300) ─────────────────────────────────────────────
 
+void executeCue(const AudioCue* cue) {
+  uint8_t vol = (cue->volume != CUE_VOLUME_UNSET) ? cue->volume : _audioVolume;
+  switch (cue->cmd) {
+    case AUDIO_CUE_CMD_PLAY:   audioPlay(cue->filename, vol, cue->duration); break;
+    case AUDIO_CUE_CMD_LOOP:   audioLoop(cue->filename, vol, cue->duration); break;
+    case AUDIO_CUE_CMD_STOP:   audioStop();              break;
+    case AUDIO_CUE_CMD_VOLUME: audioSetVolume(vol);      break;
+  }
+  if (infoScreenIndex == 2)
+    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+}
+
+void dispatchCue(const AudioCue* cue) {
+  if (cue->delay > 0) {
+    _pendingCue.cue       = *cue;
+    _pendingCue.cue.delay = 0;  // clear so executeCue doesn't re-schedule
+    _pendingCue.fireAt    = millis() + (unsigned long)cue->delay;
+    _pendingCue.active    = true;
+    Serial.printf("[Cue] Scheduled in %dms\n", cue->delay);
+    return;
+  }
+  executeCue(cue);
+}
+
 void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (len < 15) return;
 
   uint8_t cmd = data[12];
   uint8_t volume = data[13];
-  char filename[33] = {0};
+  char filename[65] = {0};
   uint16_t fnLen = len - 14;
-  if (fnLen > 32) fnLen = 32;
+  if (fnLen > 64) fnLen = 64;
   memcpy(filename, data + 14, fnLen);
 
   uint16_t duration = 0;
+  uint16_t delay_ms = 0;
   uint16_t nullPos = 14;
   while (nullPos < len && data[nullPos] != 0) nullPos++;
   if (len >= nullPos + 3) {
     duration = (uint16_t)data[nullPos + 1] | ((uint16_t)data[nullPos + 2] << 8);
+  }
+  if (len >= nullPos + 5) {
+    delay_ms = (uint16_t)data[nullPos + 3] | ((uint16_t)data[nullPos + 4] << 8);
   }
 
   if (ftpIsRunning()) {
@@ -381,23 +415,38 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   }
 
   switch (cmd) {
-    case 1:  audioPlay(filename, volume, duration); break;
-    case 2:  audioLoop(filename, volume, duration); break;
-    case 3:  audioPause(); break;
-    case 4:  audioSetVolume(volume); break;
+    case 1:
+    case 2: {
+      if (delay_ms > 0) {
+        AudioCue cue;
+        cue.cmd      = (cmd == 2) ? AUDIO_CUE_CMD_LOOP : AUDIO_CUE_CMD_PLAY;
+        strncpy(cue.filename, filename, 64); cue.filename[64] = '\0';
+        cue.volume   = volume;
+        cue.duration = duration;
+        cue.delay    = delay_ms;
+        dispatchCue(&cue);
+      } else if (cmd == 1) {
+        audioPlay(filename, volume, duration);
+      } else {
+        audioLoop(filename, volume, duration);
+      }
+      break;
+    }
+    case 3:  audioPause();                           break;
+    case 4:  audioSetVolume(volume);                 break;
     case 5:  audioSetVolume(volume); audioTestTone(); break;
     case 6:
     case 7: {
       AudioCue cue;
       if (cueLookup(volume, &cue)) {
-        if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
-        else          audioLoop(cue.filename, _audioVolume, cue.duration);
+        if (cmd == 7) cue.cmd = AUDIO_CUE_CMD_LOOP;
+        dispatchCue(&cue);
       } else {
         Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
       break;
     }
-    default: audioStop(); break;
+    default: _pendingCue.active = false; audioStop(); break;
   }
 
   if (infoScreenIndex == 2)
@@ -476,17 +525,6 @@ void sendFpsTelemetry(uint16_t pktRate) {
   udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
   udpFps.write(buf, 7);
   udpFps.endPacket();
-}
-
-void telemetryHeartbeat() {
-  if (!TRACK_TELEMETRY_ENABLED) return;
-  if (!audioIsPlaying()) return;
-
-  unsigned long now = millis();
-  if (now - lastTrackHeartbeatMs < TRACK_HEARTBEAT_MS) return;
-  lastTrackHeartbeatMs = now;
-
-  sendTrackTelemetry(audioPlaybackState(), audioCurrentFile());
 }
 
 // ── Buttons ──────────────────────────────────────────────────────────
@@ -580,6 +618,12 @@ void loop() {
   // Priority 1: keep VS1053 fed
   audioUpdate();
 
+  // Pending cue delay
+  if (_pendingCue.active && millis() >= _pendingCue.fireAt) {
+    _pendingCue.active = false;
+    executeCue(&_pendingCue.cue);
+  }
+
   // Priority 2: FTP when active
   ftpUpdate();
 
@@ -608,9 +652,6 @@ void loop() {
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1 = false; handleD1Press(); }
-
-  // Track telemetry heartbeat (decoupled from debug Serial)
-  telemetryHeartbeat();
 
   // Periodic PFP + optional diag
   unsigned long now = millis();

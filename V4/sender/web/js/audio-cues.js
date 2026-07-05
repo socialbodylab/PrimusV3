@@ -104,7 +104,7 @@ document.addEventListener("alpine:init", () => {
 
         getAction(cueIdx, ip) {
             const c = this.sortedCues[cueIdx];
-            return c?.actions?.[ip] || { cmd: "none", filename: "", volume: 80, duration: 0 };
+            return c?.actions?.[ip] || { cmd: "none", filename: "", volume: 80, duration: 0, delay_ms: 0 };
         },
 
         setActionField(cueIdx, ip, field, value) {

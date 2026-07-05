@@ -6,12 +6,16 @@ document.addEventListener("alpine:init", () => {
 
     Alpine.data("netLog", () => ({
 
-        entries:    [],
+        entries:    [],   // newest-first
         lastId:     0,
-        autoScroll: true,
-        showFps:    false,
+        showFps:    true,
         _timer:     null,
         _polling:   false,
+
+        get visibleEntries() {
+            if (this.showFps) return this.entries;
+            return this.entries.filter(e => e.type !== "fps_telemetry");
+        },
 
         TYPE_LABELS: {
             artpoll:       "Poll",
@@ -44,17 +48,9 @@ document.addEventListener("alpine:init", () => {
                 const res = await fetch(`/api/netlog?since=${this.lastId}`).then(r => r.json());
                 const fresh = res.entries || [];
                 if (fresh.length > 0) {
-                    this.entries = [...this.entries, ...fresh];
-                    if (this.entries.length > 1000) {
-                        this.entries = this.entries.slice(-1000);
-                    }
+                    this.entries = [...fresh.slice().reverse(), ...this.entries];
+                    if (this.entries.length > 1000) this.entries = this.entries.slice(0, 1000);
                     this.lastId = fresh[fresh.length - 1].id;
-                    if (this.autoScroll) {
-                        this.$nextTick(() => {
-                            const el = this.$refs.logList;
-                            if (el) el.scrollTop = el.scrollHeight;
-                        });
-                    }
                 }
             } catch (_) { /* ignore */ }
             finally {
@@ -69,7 +65,8 @@ document.addEventListener("alpine:init", () => {
         },
 
         download() {
-            const blob = new Blob([JSON.stringify(this.entries, null, 2)],
+            const chronological = [...this.entries].reverse();
+            const blob = new Blob([JSON.stringify(chronological, null, 2)],
                                   { type: "application/json" });
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);

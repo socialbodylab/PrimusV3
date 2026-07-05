@@ -18,8 +18,10 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("audioPanel", () => ({
 
         // ── Playback ────────────────────────────────────────────────────
-        playing:      {},   // { di: { file, cmd } }
-        _lastVolSent: {},
+        playing:        {},   // { di: { file, cmd } }
+        lastPlayed:     {},   // { di: filename }
+        _playingExpiry: {},   // { di: timestamp } — only set for connected devices
+        _lastVolSent:   {},
 
         // ── File manager ────────────────────────────────────────────────
         cwd:     {},        // { di: "/" }
@@ -102,10 +104,20 @@ document.addEventListener("alpine:init", () => {
         },
 
         async play(di, filename, cmd = "play") {
+            const devices = Alpine.store("app").state?.devices || [];
+            const isConnected = !!devices[di]?.connected;
             await api("POST", "/api/audio/cmd", {
                 device: di, cmd, filename, volume: this.getVolume(di),
             });
-            this.playing = { ...this.playing, [di]: { file: filename, cmd } };
+            this.playing    = { ...this.playing,    [di]: { file: filename, cmd } };
+            this.lastPlayed = { ...this.lastPlayed, [di]: filename };
+            if (isConnected) {
+                this._playingExpiry = { ...this._playingExpiry, [di]: Date.now() + 3000 };
+            } else {
+                const expiry = { ...this._playingExpiry };
+                delete expiry[di];
+                this._playingExpiry = expiry;
+            }
         },
 
         async stop(di) {

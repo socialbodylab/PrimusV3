@@ -3835,6 +3835,18 @@ input[type="color"] {
     margin-bottom: 10px;
 }
 
+/* Audio cues panel: reset the look-controller .cue-card flex/aspect-ratio styles */
+.audio-cues-panel .cue-card {
+    display: block; aspect-ratio: unset; justify-content: normal;
+    gap: 0; padding: 0; background: none; cursor: default;
+    box-shadow: none; position: static; width: auto; transition: none;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: 8px; overflow: hidden;
+}
+.audio-cues-panel .cue-card:hover,
+.audio-cues-panel .cue-card:focus-visible { border-color: var(--border); box-shadow: none; outline: none; }
+.audio-cues-panel .cue-card:active { transform: none; box-shadow: none; }
+
 .cue-card-header {
     display: flex;
     align-items: center;

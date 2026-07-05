@@ -14,7 +14,7 @@
 
 extern bool sdBusy;
 
-char   _audioCurrentFile[33] = {0};
+char   _audioCurrentFile[65] = {0};
 uint8_t _audioVolume = 80;
 bool   _audioLooping = false;
 uint8_t _audioPlaybackState = TRACK_STATE_STOPPED;
@@ -69,8 +69,8 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   }
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
 
-  strncpy(_audioCurrentFile, filename, 32);
-  _audioCurrentFile[32] = '\0';
+  strncpy(_audioCurrentFile, filename, 64);
+  _audioCurrentFile[64] = '\0';
   _audioLooping = false;
   _audioDuration = duration;
   _audioStartMillis = millis();

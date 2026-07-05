@@ -21,6 +21,10 @@ from paths import state_file
 
 
 STATE_KEY = "sender_network"
+_network_status_cache = None
+_network_status_cache_time = 0.0
+_NETWORK_STATUS_TTL = 10.0  # seconds
+
 NETWORKSETUP = "/usr/sbin/networksetup"
 SCUTIL = "/usr/sbin/scutil"
 AIRPORT = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
@@ -739,7 +743,17 @@ def _mac_interfaces(settings):
     return interfaces, route
 
 
-def get_network_status():
+def invalidate_network_status_cache():
+    global _network_status_cache, _network_status_cache_time
+    _network_status_cache = None
+    _network_status_cache_time = 0.0
+
+
+def get_network_status(force=False):
+    global _network_status_cache, _network_status_cache_time
+    now = time.monotonic()
+    if not force and _network_status_cache is not None and (now - _network_status_cache_time) < _NETWORK_STATUS_TTL:
+        return _network_status_cache
     settings = load_settings()
     supported = sys.platform == "darwin" or sys.platform.startswith("win")
     status = {
@@ -779,6 +793,8 @@ def get_network_status():
         "recommended_network": recommended.get("network", {}) if recommended else {},
         "current_route": route,
     })
+    _network_status_cache = status
+    _network_status_cache_time = time.monotonic()
     return status
 
 
@@ -814,7 +830,7 @@ def set_preferred_interface(data):
     if data.get("mode") == "auto" or data.get("id") in (None, "") and not data.get("service") and not data.get("device"):
         settings["preferred"] = copy.deepcopy(DEFAULT_SETTINGS["preferred"])
         save_settings(settings)
-        return get_network_status()
+        return get_network_status(force=True)
     status = get_network_status()
     interface = _find_interface(status, data)
     if not interface:
@@ -827,7 +843,7 @@ def set_preferred_interface(data):
         "source_ip": interface.get("source_ip", ""),
     }
     save_settings(settings)
-    return get_network_status()
+    return get_network_status(force=True)
 
 
 def set_controller_connection(data):
@@ -835,7 +851,7 @@ def set_controller_connection(data):
     if data.get("mode") == "clear":
         settings["controller_connection"] = copy.deepcopy(DEFAULT_SETTINGS["controller_connection"])
         save_settings(settings)
-        return get_network_status()
+        return get_network_status(force=True)
     status = get_network_status()
     has_interface_selector = bool(data.get("id") or data.get("interface_id") or data.get("service") or data.get("device"))
     interface = _find_interface(status, data) if has_interface_selector else None
@@ -854,7 +870,7 @@ def set_controller_connection(data):
         "source_ip": interface.get("source_ip", "") if interface else "",
     }
     save_settings(settings)
-    return get_network_status()
+    return get_network_status(force=True)
 
 
 def _profile_from_payload(data, interface=None):
@@ -908,7 +924,7 @@ def save_profile(data):
     else:
         raise NetworkSettingsError(400, "scope must be ssid or service")
     save_settings(settings)
-    return get_network_status()
+    return get_network_status(force=True)
 
 
 def _require_host_network_changes_supported():
@@ -1103,4 +1119,4 @@ def set_dhcp(data):
         settings["service_profiles"][profile["service"] or profile["device"]] = profile
     settings["last_applied"] = profile
     save_settings(settings)
-    return get_network_status()
+    return get_network_status(force=True)
