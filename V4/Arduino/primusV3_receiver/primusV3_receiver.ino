@@ -104,6 +104,8 @@ bool      senderKnown = false;
 Preferences prefs;
 char customShortName[18] = {0};
 bool hasCustomName = false;
+char showCharacterName[SHOW_INFO_FIELD_LEN + 1] = {0};
+char showPerformerName[SHOW_INFO_FIELD_LEN + 1] = {0};
 
 // ── Static IP config (stored in NVS) ─────────────────────────────────
 bool useStaticIP = false;
@@ -135,6 +137,24 @@ void loadStoredDeviceName() {
       Serial.print(customShortName);
       Serial.println("\"");
     }
+  }
+}
+
+void loadStoredShowInfo() {
+  if (prefs.isKey("characterName")) {
+    String stored = prefs.getString("characterName", "");
+    stored.toCharArray(showCharacterName, sizeof(showCharacterName));
+  }
+  if (prefs.isKey("performerName")) {
+    String stored = prefs.getString("performerName", "");
+    stored.toCharArray(showPerformerName, sizeof(showPerformerName));
+  }
+  if (showCharacterName[0] != '\0' || showPerformerName[0] != '\0') {
+    Serial.print("Loaded show info: character=\"");
+    Serial.print(showCharacterName);
+    Serial.print("\" performer=\"");
+    Serial.print(showPerformerName);
+    Serial.println("\"");
   }
 }
 
@@ -902,6 +922,70 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
   }
 }
 
+void sendShowInfoReply(IPAddress dest) {
+  uint8_t reply[SHOW_INFO_PACKET_LEN];
+  memset(reply, 0, sizeof(reply));
+  memcpy(reply, ARTNET_MAGIC, 8);
+  reply[8] = (ARTNET_OPCODE_SHOW_INFO) & 0xFF;
+  reply[9] = (ARTNET_OPCODE_SHOW_INFO >> 8) & 0xFF;
+  reply[10] = 0;
+  reply[11] = ARTNET_PROTOCOL_VER;
+  reply[12] = SHOW_INFO_MODE_RESPONSE;
+  uint8_t charLen = strnlen(showCharacterName, SHOW_INFO_FIELD_LEN);
+  uint8_t perfLen = strnlen(showPerformerName, SHOW_INFO_FIELD_LEN);
+  reply[13] = charLen;
+  memcpy(reply + 14, showCharacterName, charLen);
+  reply[78] = perfLen;
+  memcpy(reply + 79, showPerformerName, perfLen);
+
+  udp.beginPacket(dest, ARTNET_PORT);
+  udp.write(reply, sizeof(reply));
+  udp.endPacket();
+}
+
+void handleArtShowInfo(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
+  if (len < SHOW_INFO_PACKET_LEN) return;
+
+  uint8_t mode = data[12];
+  if (mode == SHOW_INFO_MODE_READ) {
+    sendShowInfoReply(remoteAddr);
+    return;
+  }
+
+  if (mode != SHOW_INFO_MODE_WRITE) return;
+
+  char newCharacter[SHOW_INFO_FIELD_LEN + 1] = {0};
+  char newPerformer[SHOW_INFO_FIELD_LEN + 1] = {0};
+  uint8_t charLen = data[13];
+  if (charLen > SHOW_INFO_FIELD_LEN) charLen = SHOW_INFO_FIELD_LEN;
+  if (charLen > 0) {
+    memcpy(newCharacter, data + 14, charLen);
+    newCharacter[charLen] = '\0';
+  }
+  uint8_t perfLen = data[78];
+  if (perfLen > SHOW_INFO_FIELD_LEN) perfLen = SHOW_INFO_FIELD_LEN;
+  if (perfLen > 0) {
+    memcpy(newPerformer, data + 79, perfLen);
+    newPerformer[perfLen] = '\0';
+  }
+
+  strncpy(showCharacterName, newCharacter, SHOW_INFO_FIELD_LEN);
+  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+  strncpy(showPerformerName, newPerformer, SHOW_INFO_FIELD_LEN);
+  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("characterName", showCharacterName);
+  prefs.putString("performerName", showPerformerName);
+
+  Serial.print("ArtShowInfo: character=\"");
+  Serial.print(showCharacterName);
+  Serial.print("\" performer=\"");
+  Serial.print(showPerformerName);
+  Serial.println("\"");
+
+  sendShowInfoReply(remoteAddr);
+  broadcastArtPollReply();
+}
+
 // =====================================================================
 //  Art-Net Packet Router — branch on opcode
 // =====================================================================
@@ -936,6 +1020,11 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   if (opcode == ARTNET_OPCODE_IP_CONFIG) {
     // ArtIPConfig — remote static/DHCP IP assignment
     handleArtIPConfig(data, len);
+    return;
+  }
+
+  if (opcode == ARTNET_OPCODE_SHOW_INFO) {
+    handleArtShowInfo(data, len, remoteAddr);
     return;
   }
 
@@ -1240,6 +1329,7 @@ void setup() {
 
   // Connect WiFi
   loadStoredDeviceName();
+  loadStoredShowInfo();
 
   loadStoredNetworkConfig();
 

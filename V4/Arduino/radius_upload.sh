@@ -407,7 +407,9 @@ create_build_override_header() {
 }
 
 check_cli() {
-  info "Checking Arduino CLI..."
+  if [[ "$LIST_PORTS_JSON" != true ]]; then
+    info "Checking Arduino CLI..."
+  fi
   if ! command -v arduino-cli &>/dev/null; then
     err "arduino-cli not found. Install Arduino CLI: https://arduino.github.io/arduino-cli/latest/installation/"
     exit 1

@@ -22,6 +22,7 @@ from artnet import (
     send_receive_config,
     send_art_address,
     send_ip_config,
+    send_show_info,
     ipv4_octets,
 )
 from paths import state_file
@@ -66,6 +67,7 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "receive_mode": "split",
     "base_universe": 0,
     "battery": False,
+    "show_info": False,
 }
 CONTROL_CAPABILITY_LABELS = {
     "rename": "remote rename",
@@ -73,9 +75,11 @@ CONTROL_CAPABILITY_LABELS = {
     "ip_config": "remote IP configuration",
     "output_config": "remote output configuration",
     "receive_config": "remote receive mode configuration",
+    "show_info": "remote show info",
 }
 RECEIVE_MODES = ("split", "combined")
 COMBINED_RECEIVE_MAX_PIXELS = 170
+DEVICE_SHOW_INFO_MAX_LENGTH = 64
 _DEVICE_FILTER_UNCHANGED = object()
 TRANSPORT_FAIL_STREAK_LIMIT = 90  # ~3 s at 30 FPS before surfacing a send warning
 
@@ -291,16 +295,130 @@ def _normalize_device_capabilities(capabilities=None):
     base = out.get("base_universe")
     out["base_universe"] = int(base) if base is not None else 0
     out["battery"] = bool(out.get("battery"))
+    out["show_info"] = bool(out.get("show_info"))
     return out
+
+
+def _normalize_show_info_value(value):
+    return str(value or "").strip()[:DEVICE_SHOW_INFO_MAX_LENGTH]
+
+
+def _show_info_from_saved(saved):
+    if not isinstance(saved, dict):
+        return "", ""
+    return (
+        _normalize_show_info_value(saved.get("character_name")),
+        _normalize_show_info_value(saved.get("performer_name")),
+    )
+
+
+def _apply_saved_show_info(dev, saved):
+    character_name, performer_name = _show_info_from_saved(saved)
+    dev["character_name"] = character_name
+    dev["performer_name"] = performer_name
+
+
+def _read_state_data():
+    try:
+        with open(_state_file(), "r") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_state_data(data):
+    try:
+        with open(_state_file(), "w") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
+def _device_show_info_map_from_data(data):
+    info_map = data.get("device_show_info")
+    return dict(info_map) if isinstance(info_map, dict) else {}
+
+
+def _show_info_entry(device_name, character_name, performer_name):
+    return {
+        "device_name": str(device_name or "")[:17],
+        "character_name": _normalize_show_info_value(character_name),
+        "performer_name": _normalize_show_info_value(performer_name),
+    }
+
+
+def _lookup_device_show_info(ip=None, device_name=None):
+    info_map = _device_show_info_map_from_data(_read_state_data())
+    entry = info_map.get(ip) if ip else None
+    if isinstance(entry, dict):
+        return _show_info_from_saved(entry)
+    if device_name:
+        for candidate in info_map.values():
+            if isinstance(candidate, dict) and candidate.get("device_name") == device_name:
+                return _show_info_from_saved(candidate)
+    return "", ""
+
+
+def _persist_device_show_info(ip, device_name, character_name, performer_name):
+    if not ip:
+        return
+    data = _read_state_data()
+    info_map = _device_show_info_map_from_data(data)
+    info_map[ip] = _show_info_entry(device_name, character_name, performer_name)
+    data["device_show_info"] = info_map
+    _write_state_data(data)
+
+
+def _migrate_device_show_info_key(old_ip, new_ip, device_name=None):
+    if not old_ip or not new_ip or old_ip == new_ip:
+        return
+    data = _read_state_data()
+    info_map = _device_show_info_map_from_data(data)
+    entry = info_map.pop(old_ip, None)
+    if not isinstance(entry, dict):
+        return
+    if device_name:
+        entry["device_name"] = str(device_name)[:17]
+    info_map[new_ip] = entry
+    data["device_show_info"] = info_map
+    _write_state_data(data)
+
+
+def _show_info_from_node(node_info):
+    if not isinstance(node_info, dict):
+        return "", ""
+    return (
+        _normalize_show_info_value(node_info.get("character_name")),
+        _normalize_show_info_value(node_info.get("performer_name")),
+    )
+
+
+def _merge_show_info_fields(character_name, performer_name, ip=None, device_name=None):
+    lookup_char, lookup_perf = _lookup_device_show_info(ip, device_name)
+    if not character_name and lookup_char:
+        character_name = lookup_char
+    if not performer_name and lookup_perf:
+        performer_name = lookup_perf
+    return character_name, performer_name
+
+
+def _apply_persisted_show_info(dev, node_info=None):
+    ip = dev.get("ip") or (node_info or {}).get("ip")
+    name = dev.get("name") or (node_info or {}).get("short_name")
+    character_name, performer_name = _lookup_device_show_info(ip, name)
+    if character_name:
+        dev["character_name"] = character_name
+    if performer_name:
+        dev["performer_name"] = performer_name
 
 
 def _save_devices(devices):
     """Persist device list so known V3.6 profile hints survive restarts."""
     try:
-        with open(_state_file(), "r") as f:
-            data = json.load(f)
+        data = _read_state_data()
     except (OSError, json.JSONDecodeError):
         data = {}
+    info_map = _device_show_info_map_from_data(data)
     saved_devices = []
     for d in devices:
         saved_outputs = []
@@ -325,14 +443,20 @@ def _save_devices(devices):
             "subnet": d.get("subnet"),
             "receive_mode": d.get("receive_mode", "split"),
             "base_universe": d.get("base_universe", 0),
+            "character_name": _normalize_show_info_value(d.get("character_name")),
+            "performer_name": _normalize_show_info_value(d.get("performer_name")),
             "outputs": saved_outputs,
         })
+        ip = d.get("ip")
+        if ip:
+            info_map[ip] = _show_info_entry(
+                d.get("name"),
+                d.get("character_name"),
+                d.get("performer_name"),
+            )
     data["devices"] = saved_devices
-    try:
-        with open(_state_file(), "w") as f:
-            json.dump(data, f)
-    except OSError:
-        pass
+    data["device_show_info"] = info_map
+    _write_state_data(data)
 
 
 def _load_devices():
@@ -727,12 +851,14 @@ class ControllerState:
             node = node_map.get(ip) or nodes_by_name.get(sd.get("name"))
             if node:
                 node["short_name"] = node.get("short_name") or sd.get("name") or "Node"
-                self.add_device_from_node(node, auto_save=False)
+                result = self.add_device_from_node(node, auto_save=False)
+                _apply_saved_show_info(self.devices[result["device_index"]], sd)
+                _apply_persisted_show_info(self.devices[result["device_index"]], node)
                 if node.get("ip") != ip:
                     refreshed = True
             else:
                 # Add offline device with saved name
-                self.add_device_from_node({
+                result = self.add_device_from_node({
                     "ip": ip,
                     "short_name": sd.get("name", ip),
                     "long_name": "",
@@ -748,8 +874,11 @@ class ControllerState:
                     "subnet": sd.get("subnet"),
                     "receive_mode": sd.get("receive_mode", "split"),
                     "base_universe": sd.get("base_universe", 0),
+                    "character_name": sd.get("character_name", ""),
+                    "performer_name": sd.get("performer_name", ""),
                     "outputs": sd.get("outputs"),
                 }, auto_save=False)
+                _apply_saved_show_info(self.devices[result["device_index"]], sd)
         if refreshed:
             _save_devices(self.devices)
 
@@ -763,6 +892,10 @@ class ControllerState:
                     if ip and ip not in seen:
                         targets.append(ip)
                         seen.add(ip)
+        for ip in _device_show_info_map_from_data(_read_state_data()):
+            if ip and ip not in seen:
+                targets.append(ip)
+                seen.add(ip)
         return targets
 
     def set_artnet_source(self, source_ip=None):
@@ -970,9 +1103,16 @@ class ControllerState:
                 "playback": self._playback_status_unlocked(),
             }
             for dev in self.devices:
-                rx = self.fps_listener.get(dev["ip"]) if self.fps_listener else None
+                rx = None
+                telemetry_age_seconds = None
+                receiver_online = False
+                if self.fps_listener:
+                    rx, telemetry_age_seconds, receiver_online = (
+                        self.fps_listener.get_telemetry_status(dev["ip"]))
                 d = {
                     "name": dev["name"],
+                    "character_name": _normalize_show_info_value(dev.get("character_name")),
+                    "performer_name": _normalize_show_info_value(dev.get("performer_name")),
                     "ip": dev["ip"],
                     "base_universe": dev["base_universe"],
                     "receive_mode": dev.get("receive_mode", "split"),
@@ -993,6 +1133,8 @@ class ControllerState:
                     "transport_error": dev.get("transport_error"),
                     "receiver_fps": rx.get("fps") if rx else None,
                     "receiver_pkt_rate": rx.get("pkt_rate") if rx else None,
+                    "receiver_online": receiver_online,
+                    "telemetry_age_seconds": telemetry_age_seconds,
                     "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
                     "outputs": [],
                 }
@@ -1240,31 +1382,22 @@ class ControllerState:
             dev["receive_mode"] = receive_mode
             dev["base_universe"] = base_universe
             _apply_output_universes(dev["outputs"], receive_mode, base_universe)
-            if dev["sender"].connected:
-                if not self._ensure_sender_connected_unlocked(dev):
-                    dev["receive_mode"] = prior_mode
-                    dev["base_universe"] = prior_base
-                    _apply_output_universes(dev["outputs"], prior_mode, prior_base)
-                    return {
-                        "ok": False,
-                        "error": dev.get("transport_error") or "sender connection failed",
-                    }
-                try:
-                    send_receive_config(
-                        dev["ip"],
-                        receive_mode,
-                        base_universe,
-                        source_ip=self.artnet_source_ip,
-                    )
-                except OSError as error:
-                    dev["receive_mode"] = prior_mode
-                    dev["base_universe"] = prior_base
-                    _apply_output_universes(dev["outputs"], prior_mode, prior_base)
-                    return {"ok": False, "error": self._transport_error_text(error)}
-                _save_devices(self.devices)
-                return _config_apply_result(True)
+            try:
+                send_receive_config(
+                    dev["ip"],
+                    receive_mode,
+                    base_universe,
+                    source_ip=self.artnet_source_ip,
+                )
+            except OSError as error:
+                dev["receive_mode"] = prior_mode
+                dev["base_universe"] = prior_base
+                _apply_output_universes(dev["outputs"], prior_mode, prior_base)
+                self._mark_transport_error_unlocked(dev, error)
+                return {"ok": False, "error": self._transport_error_text(error)}
+            self._clear_transport_error_unlocked(dev)
             _save_devices(self.devices)
-            return _config_apply_result(False)
+            return _config_apply_result(True)
 
     # ------------------------------------------------------------------
     #  Device management
@@ -1310,6 +1443,7 @@ class ControllerState:
                     old_ip = dev["ip"]
                     dev["ip"] = node_info["ip"]
                     dev["sender"].ip = dev["ip"]
+                    _migrate_device_show_info_key(old_ip, dev["ip"], dev.get("name"))
                     groups_changed = self._replace_device_ip_references_unlocked(old_ip, dev["ip"])
                 updated = self._refresh_device_from_node_unlocked(dev, node_info)
                 if (updated or ip_changed) and auto_save:
@@ -1331,8 +1465,18 @@ class ControllerState:
             receive_mode, base_u = _receive_fields_from_node(
                 node_info, capabilities, fallback_base=base_u)
 
+            character_name, performer_name = _show_info_from_node(node_info)
+            character_name, performer_name = _merge_show_info_fields(
+                character_name,
+                performer_name,
+                node_info.get("ip"),
+                node_info.get("short_name"),
+            )
+
             dev = {
                 "name": node_info.get("short_name", "Node"),
+                "character_name": character_name,
+                "performer_name": performer_name,
                 "ip": node_info["ip"],
                 "base_universe": base_u,
                 "receive_mode": receive_mode,
@@ -1353,7 +1497,10 @@ class ControllerState:
             _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
             dev["outputs"] = self._build_device_outputs_unlocked(
                 node_info, output_cfgs, base_u, receive_mode=receive_mode)
+            _apply_persisted_show_info(dev, node_info)
             self.devices.append(dev)
+            if dev.get("character_name") or dev.get("performer_name"):
+                self._sync_show_info_to_device_unlocked(dev)
             if auto_save:
                 _save_devices(self.devices)
             return {"status": "added", "device_index": len(self.devices) - 1}
@@ -1435,6 +1582,13 @@ class ControllerState:
             "firmware_version", capabilities.get("firmware_version"))
         _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
         dev["ip_config_pending"] = None
+
+        char, perf = _show_info_from_node(node_info)
+        char, perf = _merge_show_info_fields(char, perf, dev.get("ip"), dev.get("name"))
+        if char:
+            dev["character_name"] = char
+        if perf:
+            dev["performer_name"] = perf
 
         output_cfgs = _output_configs_from_node(node_info)
         if output_cfgs:
@@ -1520,6 +1674,47 @@ class ControllerState:
             self._clear_transport_error_unlocked(dev)
             _save_devices(self.devices)
             return {"ok": True}
+
+    def _sync_show_info_to_device_unlocked(self, dev):
+        caps = _normalize_device_capabilities(dev.get("capabilities"))
+        if not caps.get("show_info"):
+            return True
+        try:
+            send_show_info(
+                dev["ip"],
+                dev.get("character_name", ""),
+                dev.get("performer_name", ""),
+                source_ip=self.artnet_source_ip,
+            )
+        except OSError as error:
+            self._mark_transport_error_unlocked(dev, error)
+            return False
+        self._clear_transport_error_unlocked(dev)
+        return True
+
+    def update_device_show_info(self, di, character_name=None, performer_name=None):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index"}
+            dev = self.devices[di]
+            if character_name is not None:
+                dev["character_name"] = _normalize_show_info_value(character_name)
+            if performer_name is not None:
+                dev["performer_name"] = _normalize_show_info_value(performer_name)
+            caps = _normalize_device_capabilities(dev.get("capabilities"))
+            applied_to_device = False
+            if caps.get("show_info"):
+                if not self._sync_show_info_to_device_unlocked(dev):
+                    return {"ok": False, "error": dev.get("transport_error")}
+                applied_to_device = True
+            _persist_device_show_info(
+                dev["ip"],
+                dev.get("name"),
+                dev.get("character_name"),
+                dev.get("performer_name"),
+            )
+            _save_devices(self.devices)
+            return {"ok": True, "applied_to_device": applied_to_device}
 
     def set_device_ip(self, di, static_ip, gateway, subnet):
         with self.lock:
@@ -1966,20 +2161,26 @@ class ControllerState:
                     continue
                 if ctrl_ips is not None and dev["ip"] not in ctrl_ips:
                     continue
+                keepalive_sent = False
                 if dev.get("receive_mode") == "combined":
                     total = _combined_pixel_total(dev.get("outputs", []))
-                    if total <= 0:
-                        continue
+                    pixel_bytes = total * 3 if total > 0 else 3
                     send_queue.append(
-                        (di, dev["sender"], dev.get("base_universe", 0), bytes(total * 3)))
-                    devices_sent.add(di)
-                    continue
-                for o in dev["outputs"]:
-                    count = o.get("count") or 0
-                    if count <= 0:
-                        continue
-                    send_queue.append(
-                        (di, dev["sender"], o["universe"], bytes(count * 3)))
+                        (di, dev["sender"], dev.get("base_universe", 0), bytes(pixel_bytes)))
+                    keepalive_sent = True
+                else:
+                    for o in dev["outputs"]:
+                        count = o.get("count") or 0
+                        if count <= 0:
+                            continue
+                        send_queue.append(
+                            (di, dev["sender"], o["universe"], bytes(count * 3)))
+                        keepalive_sent = True
+                    if not keepalive_sent:
+                        send_queue.append(
+                            (di, dev["sender"], dev.get("base_universe", 0), bytes(3)))
+                        keepalive_sent = True
+                if keepalive_sent:
                     devices_sent.add(di)
         lock_released = time.perf_counter()
 

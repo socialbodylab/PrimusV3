@@ -30,6 +30,12 @@ document.addEventListener("alpine:init", () => {
         _ipRediscoveryTimer: null,
         _ipRediscoveryUntil: 0,
         sidebarCollapsed: false,
+        showInfoDrafts: {},
+        showInfoFocus: null,
+        receiveConfigDrafts: {},
+        receiveConfigFocus: null,
+        editingShowInfo: null,
+        showInfoEditValue: "",
 
         get devices() {
             return Alpine.store("app").state?.devices || [];
@@ -74,12 +80,64 @@ document.addEventListener("alpine:init", () => {
 
         receiveModeHint(dev) {
             if (this.canConfigureReceiveMode(dev)) {
-                return "Configure how this receiver expects Art-Net universes";
+                return "Receive mode and base universe are stored on the receiver (NVS)";
             }
             if (dev?.receive_mode) {
                 return "Receive mode reported from device discovery";
             }
             return "Flash firmware v3.8+ to change receive mode remotely";
+        },
+
+        initReceiveConfigDrafts(di) {
+            if (this.receiveConfigDrafts[di]) {
+                return;
+            }
+            const dev = this.devices[di];
+            this.receiveConfigDrafts[di] = {
+                receive_mode: dev?.receive_mode || "split",
+                base_universe: dev?.base_universe ?? 0,
+            };
+        },
+
+        syncReceiveConfigDrafts() {
+            if (connProduct() !== "primus") {
+                return;
+            }
+            const focusParts = (this.receiveConfigFocus || "").split(":");
+            const focusDi = focusParts[0] !== "" ? Number(focusParts[0]) : null;
+            const focusField = focusParts[1] || null;
+            const validIndices = new Set(this.devices.map((_, di) => String(di)));
+            for (const key of Object.keys(this.receiveConfigDrafts)) {
+                if (!validIndices.has(String(key))) {
+                    delete this.receiveConfigDrafts[key];
+                }
+            }
+            this.devices.forEach((dev, di) => {
+                if (!this.receiveConfigDrafts[di]) {
+                    this.receiveConfigDrafts[di] = {
+                        receive_mode: dev.receive_mode || "split",
+                        base_universe: dev.base_universe ?? 0,
+                    };
+                    return;
+                }
+                const draft = this.receiveConfigDrafts[di];
+                if (!(focusDi === di && focusField === "receive_mode")) {
+                    draft.receive_mode = dev.receive_mode || "split";
+                }
+                if (!(focusDi === di && focusField === "base_universe")) {
+                    draft.base_universe = dev.base_universe ?? 0;
+                }
+            });
+        },
+
+        finishReceiveConfigBaseEdit(di) {
+            this.receiveConfigFocus = null;
+            this.initReceiveConfigDrafts(di);
+            const draft = this.receiveConfigDrafts[di];
+            if (!draft) {
+                return;
+            }
+            this.setDeviceBaseUniverse(di, draft.base_universe);
         },
 
         combinedPixelTotal(dev) {
@@ -117,6 +175,10 @@ document.addEventListener("alpine:init", () => {
         configFeedbackKey(di, kind, oi) {
             if (kind === "output") return `${di}:output:${oi}`;
             return `${di}:receive:${kind}`;
+        },
+
+        showInfoFeedbackKey(di, field) {
+            return `${di}:show:${field}`;
         },
 
         setConfigFeedback(key, state, message) {
@@ -176,13 +238,174 @@ document.addEventListener("alpine:init", () => {
         },
 
         receiverFpsLabel(dev) {
-            if (dev?.receiver_fps != null) {
-                return `${dev.receiver_fps} fps`;
+            if (!dev?.connected) {
+                return "";
             }
-            if (dev?.connected) {
-                return "-- fps";
+            if (dev?.receiver_online) {
+                if (dev?.receiver_fps != null) {
+                    return `${dev.receiver_fps} fps · live`;
+                }
+                return "live";
             }
-            return "";
+            return "waiting for receiver";
+        },
+
+        receiverLiveClass(dev) {
+            if (!dev?.connected) {
+                return "";
+            }
+            return dev?.receiver_online ? "device-live-ok" : "device-live-warn";
+        },
+
+        showInfoEnabled() {
+            return connProduct() === "primus";
+        },
+
+        initShowInfoDrafts(di) {
+            if (this.showInfoDrafts[di]) {
+                return;
+            }
+            const dev = this.devices[di];
+            this.showInfoDrafts[di] = {
+                character_name: dev?.character_name || "",
+                performer_name: dev?.performer_name || "",
+            };
+        },
+
+        syncShowInfoDrafts() {
+            if (!this.showInfoEnabled()) {
+                return;
+            }
+            const focusParts = (this.showInfoFocus || "").split(":");
+            const focusDi = focusParts[0] !== "" ? Number(focusParts[0]) : null;
+            const focusField = focusParts[1] || null;
+            const validIndices = new Set(this.devices.map((_, di) => String(di)));
+            for (const key of Object.keys(this.showInfoDrafts)) {
+                if (!validIndices.has(String(key))) {
+                    delete this.showInfoDrafts[key];
+                }
+            }
+            this.devices.forEach((dev, di) => {
+                if (!this.showInfoDrafts[di]) {
+                    this.showInfoDrafts[di] = {
+                        character_name: dev.character_name || "",
+                        performer_name: dev.performer_name || "",
+                    };
+                    return;
+                }
+                const draft = this.showInfoDrafts[di];
+                if (!(focusDi === di && focusField === "character_name")) {
+                    draft.character_name = dev.character_name || "";
+                }
+                if (!(focusDi === di && focusField === "performer_name")) {
+                    draft.performer_name = dev.performer_name || "";
+                }
+            });
+        },
+
+        showInfoEditKey(di, field) {
+            return `${di}:${field}`;
+        },
+
+        isEditingShowInfo(di, field) {
+            return this.editingShowInfo === this.showInfoEditKey(di, field);
+        },
+
+        showInfoDisplay(dev, field) {
+            const value = field === "character_name" ? dev?.character_name : dev?.performer_name;
+            return value || "Add…";
+        },
+
+        showInfoHint(field) {
+            if (field === "character_name") {
+                return "Click to set character name";
+            }
+            return "Click to set performer name";
+        },
+
+        showInfoStorageHint(dev) {
+            if (dev?.capabilities?.show_info) {
+                return "Stored on receiver";
+            }
+            return "Saved on this computer only — flash firmware v3.10+ to store on receiver";
+        },
+
+        startShowInfoEdit(di, field) {
+            const dev = this.devices[di];
+            if (!dev) {
+                return;
+            }
+            this.editingShowInfo = this.showInfoEditKey(di, field);
+            this.showInfoEditValue = field === "character_name"
+                ? (dev.character_name || "")
+                : (dev.performer_name || "");
+        },
+
+        async finishShowInfoEdit(di, field) {
+            const key = this.showInfoEditKey(di, field);
+            if (this.editingShowInfo !== key) {
+                return;
+            }
+            const trimmed = this.showInfoEditValue.trim().slice(0, 64);
+            this.editingShowInfo = null;
+            this.showInfoEditValue = "";
+            this.initShowInfoDrafts(di);
+            this.showInfoDrafts[di][field] = trimmed;
+            await this.saveShowInfoField(di, field);
+        },
+
+        cancelShowInfoEdit() {
+            this.editingShowInfo = null;
+            this.showInfoEditValue = "";
+        },
+
+        async saveShowInfoField(di, field) {
+            if (!this.showInfoEnabled()) {
+                return;
+            }
+            const dev = this.devices[di];
+            if (!dev) {
+                return;
+            }
+            this.initShowInfoDrafts(di);
+            const trimmed = String(this.showInfoDrafts[di]?.[field] || "").trim().slice(0, 64);
+            const current = field === "character_name"
+                ? (dev.character_name || "")
+                : (dev.performer_name || "");
+            const feedbackField = field === "character_name" ? "character" : "performer";
+            const feedbackKey = this.showInfoFeedbackKey(di, feedbackField);
+            if (trimmed === current) {
+                this.showInfoDrafts[di][field] = trimmed;
+                return;
+            }
+            const body = {
+                device: di,
+                character_name: dev.character_name || "",
+                performer_name: dev.performer_name || "",
+            };
+            body[field] = trimmed;
+            this.setConfigFeedback(feedbackKey, "pending", "");
+            try {
+                const result = await api("POST", "/api/device_show_info", body);
+                this.showInfoDrafts[di][field] = trimmed;
+                this.setConfigFeedback(feedbackKey, "ok", "Saved");
+                await Alpine.store("app").fetchState();
+                const label = feedbackField === "character" ? "Character" : "Performer";
+                const name = this.devices[di]?.name || "device";
+                const storage = result?.applied_to_device
+                    ? "saved on receiver"
+                    : "saved on this computer (upgrade firmware v3.10+ for receiver storage)";
+                Alpine.store("app").showNotice(
+                    trimmed
+                        ? `${label} for ${name} ${storage}.`
+                        : `${label} cleared for ${name}.`,
+                    "success",
+                    2800,
+                );
+            } catch (e) {
+                this.setConfigFeedback(feedbackKey, "error", "Save failed");
+                Alpine.store("app").showApiError("Could not save show info", e);
+            }
         },
 
         firmwareLabel(dev) {
@@ -430,29 +653,42 @@ document.addEventListener("alpine:init", () => {
         async setDeviceReceiveModeValue(di, receiveMode) {
             const dev = this.devices[di];
             if (!dev) return;
+            this.initReceiveConfigDrafts(di);
+            const mode = receiveMode || this.receiveConfigDrafts[di]?.receive_mode || "split";
             const priorMode = dev.receive_mode || "split";
-            if (priorMode === receiveMode) return;
-            if (receiveMode === "combined" && !this.canUseCombinedMode(dev)) {
+            if (priorMode === mode) return;
+            if (mode === "combined" && !this.canUseCombinedMode(dev)) {
                 Alpine.store("app").showNotice(
                     "Combined mode requires at most 170 pixels across outputs", "error");
+                this.receiveConfigDrafts[di].receive_mode = priorMode;
                 return;
             }
-            await this._applyReceiveMode(di, receiveMode, dev.base_universe ?? 0, "mode");
+            await this._applyReceiveMode(
+                di,
+                mode,
+                this.receiveConfigDrafts[di]?.base_universe ?? dev.base_universe ?? 0,
+                "mode",
+            );
         },
 
         async setDeviceBaseUniverse(di, baseUniverse) {
             const dev = this.devices[di];
             if (!dev) return;
-            const base = Number(baseUniverse);
+            this.initReceiveConfigDrafts(di);
+            const base = Number(
+                baseUniverse ?? this.receiveConfigDrafts[di]?.base_universe ?? dev.base_universe ?? 0,
+            );
             if (!Number.isFinite(base) || base < 0 || base > 32767) {
                 Alpine.store("app").showNotice("Base universe must be 0–32767", "error");
+                this.receiveConfigDrafts[di].base_universe = dev.base_universe ?? 0;
                 return;
             }
             if ((dev.base_universe ?? 0) === base) return;
-            const mode = dev.receive_mode || "split";
+            const mode = this.receiveConfigDrafts[di]?.receive_mode || dev.receive_mode || "split";
             if (mode === "combined" && !this.canUseCombinedMode(dev)) {
                 Alpine.store("app").showNotice(
                     "Combined mode requires at most 170 pixels across outputs", "error");
+                this.receiveConfigDrafts[di].base_universe = dev.base_universe ?? 0;
                 return;
             }
             await this._applyReceiveMode(di, mode, base, "base");
@@ -468,9 +704,13 @@ document.addEventListener("alpine:init", () => {
                     base_universe: baseUniverse,
                 });
                 this.setConfigFeedback(key, "ok", result?.message || "Applied");
+                this.initReceiveConfigDrafts(di);
+                this.receiveConfigDrafts[di].receive_mode = receiveMode;
+                this.receiveConfigDrafts[di].base_universe = baseUniverse;
             } catch (e) {
                 this.setConfigFeedback(key, "error", e.message || "Update failed");
                 Alpine.store("app").showApiError("Receive mode update failed", e);
+                this.syncReceiveConfigDrafts();
             } finally {
                 await Alpine.store("app").fetchState();
             }

@@ -113,6 +113,7 @@
                     </template>
                     <div class="device-stats" x-show="entry.dev.connected && $store.app.product === 'primus'">
                         <span class="device-fps"
+                              :class="$store.conn.receiverLiveClass(entry.dev)"
                               x-text="$store.conn.receiverFpsLabel(entry.dev)"></span>
                         <span class="device-battery"
                               x-show="$store.conn.showBattery(entry.dev)"
@@ -123,6 +124,61 @@
                     <span class="audio-badge"
                           x-show="$store.app.product === 'radius' && entry.dev.is_radius"
                           title="Radius audio node">&#9834;</span>
+                </div>
+
+                <div class="device-identity" x-show="$store.conn.showInfoEnabled()" x-cloak>
+                    <div class="device-identity-note text-sm text-muted"
+                         x-text="$store.conn.showInfoStorageHint(entry.dev)"></div>
+                    <div class="device-identity-row">
+                        <span class="device-identity-label">Character</span>
+                        <template x-if="!$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                            <button type="button"
+                                    class="device-identity-value"
+                                    :class="{ 'device-identity-empty': !entry.dev.character_name }"
+                                    :title="$store.conn.showInfoHint('character_name')"
+                                    @click="$store.conn.startShowInfoEdit(entry._index, 'character_name')"
+                                    x-text="$store.conn.showInfoDisplay(entry.dev, 'character_name')"></button>
+                        </template>
+                        <template x-if="$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                            <input class="device-rename-input device-identity-input"
+                                   type="text"
+                                   maxlength="64"
+                                   x-model="$store.conn.showInfoEditValue"
+                                   @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
+                                   @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                                   @blur="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
+                                   x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                        </template>
+                        <span class="device-config-status"
+                              :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(entry._index, 'character'))"
+                              x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"
+                              x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"></span>
+                    </div>
+                    <div class="device-identity-row">
+                        <span class="device-identity-label">Performer</span>
+                        <template x-if="!$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
+                            <button type="button"
+                                    class="device-identity-value"
+                                    :class="{ 'device-identity-empty': !entry.dev.performer_name }"
+                                    :title="$store.conn.showInfoHint('performer_name')"
+                                    @click="$store.conn.startShowInfoEdit(entry._index, 'performer_name')"
+                                    x-text="$store.conn.showInfoDisplay(entry.dev, 'performer_name')"></button>
+                        </template>
+                        <template x-if="$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
+                            <input class="device-rename-input device-identity-input"
+                                   type="text"
+                                   maxlength="64"
+                                   x-model="$store.conn.showInfoEditValue"
+                                   @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'performer_name')"
+                                   @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                                   @blur="$store.conn.finishShowInfoEdit(entry._index, 'performer_name')"
+                                   x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                        </template>
+                        <span class="device-config-status"
+                              :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"
+                              x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"
+                              x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"></span>
+                    </div>
                 </div>
 
                 <div class="device-meta">
@@ -207,8 +263,9 @@
                         <select class="form-input form-input-sm device-output-select"
                                 :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'mode'))"
                                 :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'mode'))"
-                                x-effect="$el.value = entry.dev.receive_mode || 'split'"
-                                @change="$store.conn.setDeviceReceiveModeValue(entry._index, $event.target.value)">
+                                x-init="$store.conn.initReceiveConfigDrafts(entry._index)"
+                                x-model="$store.conn.receiveConfigDrafts[entry._index].receive_mode"
+                                @change="$store.conn.setDeviceReceiveModeValue(entry._index, $store.conn.receiveConfigDrafts[entry._index].receive_mode)">
                             <option value="split">Split</option>
                             <option value="combined" :disabled="!$store.conn.canUseCombinedMode(entry.dev)">Combined</option>
                         </select>
@@ -223,8 +280,10 @@
                                type="number" min="0" max="32767"
                                :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'base'))"
                                :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'base'))"
-                               :value="entry.dev.base_universe ?? 0"
-                               @change="$store.conn.setDeviceBaseUniverse(entry._index, $event.target.value)"
+                               x-init="$store.conn.initReceiveConfigDrafts(entry._index)"
+                               x-model.number="$store.conn.receiveConfigDrafts[entry._index].base_universe"
+                               @focus="$store.conn.receiveConfigFocus = entry._index + ':base_universe'"
+                               @blur="$store.conn.finishReceiveConfigBaseEdit(entry._index)"
                                @keydown.enter="$event.target.blur()">
                         <span class="device-config-status"
                               :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'base'))"

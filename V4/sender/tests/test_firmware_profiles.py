@@ -1,5 +1,6 @@
 """Tests for unified Primus + Radius firmware profile routing."""
 
+import json
 import os
 import sys
 import unittest
@@ -78,6 +79,15 @@ class FirmwareProfileTests(unittest.TestCase):
             self.assertEqual(cmd.metadata["overrides"]["base_universe"], 12)
         finally:
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_parse_ports_json_output_tolerates_leading_log_lines(self):
+        payload = {"ports": [{"address": "/dev/cu.usbserial-1", "candidate": True}]}
+        raw = [
+            "\033[1;34m[INFO]\033[0m  Checking Arduino CLI...\n",
+            json.dumps(payload) + "\n",
+        ]
+        parsed = firmware.parse_ports_json_output(raw)
+        self.assertEqual(parsed["ports"][0]["address"], "/dev/cu.usbserial-1")
 
 
 if __name__ == "__main__":

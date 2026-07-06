@@ -69,6 +69,23 @@ def default_profile():
         return "v3"
     return next(iter(sorted(profiles)))
 ACTIONS = {"setup_tools", "list_ports", "install", "compile", "upload", "download_firmware"}
+
+
+def parse_ports_json_output(raw_lines):
+    """Parse upload.sh --ports-json stdout, tolerating leading log lines."""
+    text = "".join(raw_lines or [])
+    if not text.strip():
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    for line in reversed(raw_lines or []):
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        return json.loads(stripped)
+    raise json.JSONDecodeError("No JSON object found in port list output", text, 0)
 PORT_MODES = {"auto", "selected", "all"}
 RUNNING_STATES = {"queued", "running"}
 MAX_OUTPUT_LINES = 800
@@ -664,7 +681,7 @@ class FirmwareJobManager:
             status = "succeeded" if returncode == 0 else "failed"
             if firmware_command.action == "list_ports" and returncode == 0:
                 try:
-                    result = json.loads("".join(raw_lines) or "{}")
+                    result = parse_ports_json_output(raw_lines)
                 except json.JSONDecodeError as exc:
                     status = "failed"
                     error = f"Could not parse port list JSON: {exc}"

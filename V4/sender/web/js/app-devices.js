@@ -141,6 +141,8 @@ document.addEventListener("alpine:init", () => {
                 if (this.state?.product) {
                     this.product = this.state.product;
                 }
+                Alpine.store("conn").syncShowInfoDrafts();
+                Alpine.store("conn").syncReceiveConfigDrafts();
             } catch (e) {
                 /* ignore */
             }

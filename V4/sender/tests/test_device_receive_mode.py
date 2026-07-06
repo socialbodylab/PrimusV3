@@ -96,6 +96,18 @@ class SetDeviceReceiveModeTests(unittest.TestCase):
 
     @patch("state.send_receive_config")
     @patch("state._save_devices")
+    def test_set_device_receive_mode_sends_without_connect(self, save_devices, send_receive_config):
+        self.state.devices[0]["connected"] = False
+        self.state.devices[0]["sender"] = Mock(connected=False)
+        send_receive_config.return_value = None
+        result = self.state.set_device_receive_mode(0, "split", 9)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["applied_to_device"])
+        send_receive_config.assert_called_once_with(
+            "192.168.1.10", "split", 9, source_ip=None)
+
+    @patch("state.send_receive_config")
+    @patch("state._save_devices")
     def test_set_device_receive_mode_updates_state(self, save_devices, send_receive_config):
         send_receive_config.return_value = None
         result = self.state.set_device_receive_mode(0, "combined", 5)

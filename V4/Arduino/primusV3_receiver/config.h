@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.9.0"
+#define FIRMWARE_VERSION "3.10.0"
 
 // =====================================================================
 //  Board Profile
@@ -78,7 +78,7 @@ enum OutputType {
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP   // Collar (72 px strip)
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A13
-  #define BOARD_BATTERY_FEATURES  "RIOHBM"
+  #define BOARD_BATTERY_FEATURES  "RIOHBMS"
 #elif defined(PRIMUS_PROFILE_V2)
   #define BOARD_PROFILE_ID        "v2_feather"
   #define BOARD_PROFILE_CODE      "v2"
@@ -112,7 +112,7 @@ enum OutputType {
   #define BOARD_OUTPUT_WIFI_GATED 1
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A4   // GPIO14 — 5V rail via 100k/100k divider
-  #define BOARD_BATTERY_FEATURES  "RIOHBM"
+  #define BOARD_BATTERY_FEATURES  "RIOHBMS"
   #define BOARD_BATTERY_TYPE_RAIL 1
   #define BOARD_BATTERY_ADC_SCALE_NUM  2
   #define BOARD_BATTERY_ADC_SCALE_DEN  1
@@ -126,7 +126,7 @@ enum OutputType {
   #define BOARD_BATTERY_MONITOR   0
 #endif
 #ifndef BOARD_BATTERY_FEATURES
-  #define BOARD_BATTERY_FEATURES  "RIOHM"
+  #define BOARD_BATTERY_FEATURES  "RIOHMS"
 #endif
 #ifndef BOARD_OUTPUT_WIFI_GATED
   #define BOARD_OUTPUT_WIFI_GATED 0
@@ -305,6 +305,12 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_OUTPUT_CONFIG 0x8100  // Vendor-defined: set output types
 #define ARTNET_OPCODE_RECEIVE_CONFIG 0x8110 // Vendor-defined: set receive mode / universe base
 #define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
+#define ARTNET_OPCODE_SHOW_INFO    0x8210  // Vendor-defined: read/write show metadata
+#define SHOW_INFO_FIELD_LEN        64
+#define SHOW_INFO_MODE_READ        0
+#define SHOW_INFO_MODE_WRITE       1
+#define SHOW_INFO_MODE_RESPONSE    2
+#define SHOW_INFO_PACKET_LEN       143
 #define ARTNET_PROTOCOL_VER    14
 
 // Device identity — reported in ArtPollReply
@@ -314,7 +320,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 9
+#define FIRMWARE_VERSION_L 10
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 

@@ -23,6 +23,7 @@ ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
 ARTNET_OPCODE_RECEIVE_CONFIG = 0x8110
 ARTNET_OPCODE_IP_CONFIG = 0x8200
+ARTNET_OPCODE_SHOW_INFO = 0x8210
 ARTNET_OPCODE_AUDIO_CMD = 0x8300
 ARTNET_OPCODE_FTP_CMD = 0x8301
 ARTNET_VERSION = 14
@@ -325,6 +326,7 @@ class PrimusTelemetryListener:
                     netlog.log_fps(ip, parsed["fps"], parsed["pkt_rate"])
 
     TELEMETRY_STALE_SECONDS = 12.0
+    TELEMETRY_ONLINE_SECONDS = 3.0
 
     def get(self, ip):
         with self.lock:
@@ -332,6 +334,17 @@ class PrimusTelemetryListener:
             if entry and (time.monotonic() - entry.get("ts", 0)) < self.TELEMETRY_STALE_SECONDS:
                 return dict(entry)
         return None
+
+    def get_telemetry_status(self, ip):
+        """Return (fresh_entry_or_none, age_seconds_or_none, receiver_online)."""
+        with self.lock:
+            entry = self.data.get(ip)
+            if not entry or "ts" not in entry:
+                return None, None, False
+            age = time.monotonic() - entry["ts"]
+            fresh = dict(entry) if age < self.TELEMETRY_STALE_SECONDS else None
+            online = age < self.TELEMETRY_ONLINE_SECONDS
+            return fresh, round(age, 2), online
 
     def stop(self):
         self.running = False
@@ -504,6 +517,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
                 pass
 
         nodes = {}
+        node_list = []
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
@@ -549,11 +563,30 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
                 "subnet": capabilities.get("subnet"),
                 "num_ports": num_ports,
                 "universes": universes,
+                "character_name": "",
+                "performer_name": "",
             }
+
+        node_list = list(nodes.values())
+        for node in node_list:
+            caps = node.get("capabilities") or {}
+            if not caps.get("show_info"):
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            show = query_show_info(
+                node["ip"],
+                timeout=min(0.35, remaining),
+                sock=sock,
+            )
+            if show:
+                node["character_name"] = show.get("character_name", "")
+                node["performer_name"] = show.get("performer_name", "")
 
     finally:
         sock.close()
-    return list(nodes.values())
+    return node_list
 
 
 # ======================================================================
@@ -728,6 +761,7 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             caps["output_config"] = "O" in features
             caps["receive_config"] = "M" in features
             caps["battery"] = "B" in features
+            caps["show_info"] = "S" in features
         if saw_feature_token:
             if caps["hardware_profile"] == "unknown" and "primusv3" in name_blob:
                 caps["hardware_profile"] = "v31"
@@ -990,6 +1024,96 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_i
     elif mode == 1:
         raise ValueError("static IP mode requires ip, gateway, and subnet")
     _send_udp_packet(ip, pkt, source_ip=source_ip)
+
+
+# ======================================================================
+#  ART-NET SHOW INFO — ArtShowInfo (opcode 0x8210)
+# ======================================================================
+
+SHOW_INFO_FIELD_LEN = 64
+SHOW_INFO_PACKET_LEN = 143
+SHOW_INFO_MODE_READ = 0
+SHOW_INFO_MODE_WRITE = 1
+SHOW_INFO_MODE_RESPONSE = 2
+
+
+def _encode_show_info_field(value):
+    return str(value or "").encode("utf-8", errors="replace")[:SHOW_INFO_FIELD_LEN]
+
+
+def build_show_info_packet(mode, character_name="", performer_name=""):
+    char_bytes = _encode_show_info_field(character_name)
+    perf_bytes = _encode_show_info_field(performer_name)
+    pkt = bytearray(SHOW_INFO_PACKET_LEN)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_SHOW_INFO)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = mode & 0xFF
+    pkt[13] = len(char_bytes)
+    pkt[14:14 + SHOW_INFO_FIELD_LEN] = char_bytes.ljust(SHOW_INFO_FIELD_LEN, b"\x00")
+    pkt[78] = len(perf_bytes)
+    pkt[79:79 + SHOW_INFO_FIELD_LEN] = perf_bytes.ljust(SHOW_INFO_FIELD_LEN, b"\x00")
+    return bytes(pkt)
+
+
+def parse_show_info_packet(raw):
+    if len(raw) < SHOW_INFO_PACKET_LEN or raw[:8] != ARTNET_HEADER:
+        return None
+    if struct.unpack("<H", raw[8:10])[0] != ARTNET_OPCODE_SHOW_INFO:
+        return None
+    char_len = min(raw[13], SHOW_INFO_FIELD_LEN)
+    perf_len = min(raw[78], SHOW_INFO_FIELD_LEN)
+    return {
+        "mode": raw[12],
+        "character_name": raw[14:14 + char_len].decode("utf-8", errors="replace"),
+        "performer_name": raw[79:79 + perf_len].decode("utf-8", errors="replace"),
+    }
+
+
+def send_show_info(ip, character_name="", performer_name="", source_ip=None):
+    pkt = build_show_info_packet(
+        SHOW_INFO_MODE_WRITE,
+        character_name=character_name,
+        performer_name=performer_name,
+    )
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
+
+
+def query_show_info(ip, timeout=0.35, sock=None, source_ip=None):
+    """Read character/performer strings stored on a receiver."""
+    owns_sock = sock is None
+    if owns_sock:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(max(0.05, timeout))
+        try:
+            if source_ip:
+                sock.bind((source_ip, 0))
+            else:
+                sock.bind(("", 0))
+        except OSError:
+            sock.bind(("", 0))
+    else:
+        sock.settimeout(max(0.05, timeout))
+
+    try:
+        pkt = build_show_info_packet(SHOW_INFO_MODE_READ)
+        sock.sendto(pkt, (ip, ARTNET_PORT))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw, addr = sock.recvfrom(512)
+            except socket.timeout:
+                break
+            if addr[0] != ip:
+                continue
+            parsed = parse_show_info_packet(raw)
+            if parsed and parsed.get("mode") == SHOW_INFO_MODE_RESPONSE:
+                return parsed
+    finally:
+        if owns_sock:
+            sock.close()
+    return None
 
 
 # ======================================================================
