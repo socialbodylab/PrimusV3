@@ -59,6 +59,10 @@ unsigned long lastFpsTime = 0;
 unsigned long packetCount = 0;
 uint8_t infoScreenIndex = 0;
 
+// SD screen state
+char sdSelectedFile[65] = {0};
+uint16_t sdCachedFileCount = 0;
+
 // ── Pending cue (non-blocking delay) ─────────────────────────────────
 static struct {
   bool          active;
@@ -527,6 +531,45 @@ void sendFpsTelemetry(uint16_t pktRate) {
   udpFps.endPacket();
 }
 
+// ── SD screen helpers ────────────────────────────────────────────────
+
+void sdScreenLoadFile() {
+  // Advance sdSelectedFile to the next WAV file on the SD card.
+  // entry.name() returns just the filename (no leading slash).
+  File root = SD.open("/");
+  if (!root) return;
+
+  bool foundCurrent = (sdSelectedFile[0] == '\0');
+  bool wrapped = false;
+
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) {
+      if (!foundCurrent && !wrapped) {
+        // Reached end without finding a next — wrap to beginning
+        root.rewindDirectory();
+        wrapped = true;
+        continue;
+      }
+      break;
+    }
+    if (entry.isDirectory()) { entry.close(); continue; }
+    const char* name = entry.name();
+    if (!name) { entry.close(); continue; }
+    entry.close();
+
+    if (foundCurrent) {
+      strncpy(sdSelectedFile, name, 64);
+      sdSelectedFile[64] = '\0';
+      break;
+    }
+    if (strcmp(name, sdSelectedFile) == 0) {
+      foundCurrent = true;
+    }
+  }
+  root.close();
+}
+
 // ── Buttons ──────────────────────────────────────────────────────────
 
 void handleScreenCycle() {
@@ -548,6 +591,12 @@ void handleScreenCycle() {
     case 3:
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
       break;
+    case 4:
+      sdCachedFileCount = sdFileCount();
+      if (sdCachedFileCount > 0 && sdSelectedFile[0] == '\0') sdScreenLoadFile();
+      displaySdStatus(sdCachedFileCount > 0 || audioIsPlaying(), sdCachedFileCount,
+                      sdSelectedFile[0] ? sdSelectedFile : nullptr, audioIsPlaying());
+      break;
   }
 }
 
@@ -566,9 +615,32 @@ void handleD1Press() {
       }
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
       break;
+    case 4:
+      if (audioIsPlaying()) {
+        audioStop();
+        displaySdStatus(true, sdCachedFileCount, sdSelectedFile, false);
+      } else if (sdSelectedFile[0] != '\0') {
+        audioPlay(sdSelectedFile, _audioVolume);
+        displaySdStatus(true, sdCachedFileCount, sdSelectedFile, true);
+      } else {
+        // Retry SD / load first file
+        sdCachedFileCount = sdFileCount();
+        if (sdCachedFileCount > 0) sdScreenLoadFile();
+        displaySdStatus(sdCachedFileCount > 0, sdCachedFileCount,
+                        sdSelectedFile[0] ? sdSelectedFile : nullptr, false);
+      }
+      break;
     default:
       break;
   }
+}
+
+void handleD2Press() {
+  if (infoScreenIndex != 4) return;
+  if (audioIsPlaying()) audioStop();
+  sdScreenLoadFile();
+  displaySdStatus(true, sdCachedFileCount,
+                  sdSelectedFile[0] ? sdSelectedFile : nullptr, false);
 }
 
 // ── Setup / loop ─────────────────────────────────────────────────────
@@ -652,6 +724,7 @@ void loop() {
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1 = false; handleD1Press(); }
+  if (btnD2)          { btnD2 = false; handleD2Press(); }
 
   // Periodic PFP + optional diag
   unsigned long now = millis();

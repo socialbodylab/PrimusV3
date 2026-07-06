@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# upload.sh — Compile & upload PrimusV3.6 receiver build profiles
+# upload.sh — Compile & upload PrimusV4 receiver build profiles
 # Usage:
-#   ./upload.sh --ports                   # list likely ESP32 serial ports
-#   ./upload.sh --ports-json              # list likely ESP32 serial ports as JSON
-#   ./upload.sh -v3 --auto                # compile, then upload if exactly one ESP32-like port is connected
-#   ./upload.sh -v2 --all                 # compile, then upload selected profile to every detected ESP32-like port
-#   ./upload.sh -v1 --compile             # compile V1 only, like Arduino IDE Verify
-#   ./upload.sh -v2 /dev/cu.usb...        # compile, then upload V2 to an explicit port
-#   ./upload.sh -v2 -ssid PrimusRouter -pw router-password --auto # override WiFi defaults for this build
-#   ./upload.sh -v3 --name StageLeft --auto # override default device name for this build
-#   ./upload.sh -v1 /dev/cu.usb1 /dev/cu.usb2 # upload selected profile to explicit ports
-#   ./upload.sh -v2 --baud 115200 /dev/cu.usb... # override upload speed
-#   ./upload.sh --install                 # install libraries for selected board
+#   ./upload.sh --ports                        # list likely ESP32 serial ports
+#   ./upload.sh --ports-json                   # list likely ESP32 serial ports as JSON
+#   ./upload.sh -rv2 --auto                    # compile Radius V2, upload if exactly one port
+#   ./upload.sh -rv1 --auto                    # compile Radius V1 (HUZZAH32), upload if exactly one port
+#   ./upload.sh -v3 --auto                     # compile V3 LED receiver, upload if exactly one port
+#   ./upload.sh -v2 --all                      # compile V2 LED receiver, upload to all detected ports
+#   ./upload.sh -v1 --compile                  # compile V1 LED receiver only, like Arduino IDE Verify
+#   ./upload.sh -rv1 /dev/cu.usb...            # compile Radius V1 and upload to explicit port
+#   ./upload.sh -rv2 -ssid PrimusRouter -pw router-password --auto
+#   ./upload.sh -rv1 --name E8 --static-ip 192.168.8.157 --gateway 192.168.8.1 --subnet 255.255.255.0 --auto
+#   ./upload.sh --install                      # install libraries for selected board
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SKETCH_DIR="$SCRIPT_DIR/primusV3_receiver"
+SKETCH_DIR=""
 
 if [[ -n "${ARDUINO_CLI:-}" && -x "$ARDUINO_CLI" ]]; then
   PATH="$(dirname "$ARDUINO_CLI"):$PATH"
@@ -73,40 +73,48 @@ err()   { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*" >&2; }
 
 usage() {
   cat <<'EOF'
-upload.sh — Compile & upload PrimusV3.6 receiver build profiles
+upload.sh — Compile & upload PrimusV4 receiver build profiles
 
 Usage:
   ./upload.sh --ports
       List likely ESP32 serial ports detected by arduino-cli.
 
-    ./upload.sh --ports-json
+  ./upload.sh --ports-json
       List likely ESP32 serial ports as machine-readable JSON.
 
+  ./upload.sh -rv2 --auto
+      Compile Radius V2 (ESP32-S3 Reverse TFT), then upload to the only detected port.
+
+  ./upload.sh -rv1 --auto
+      Compile Radius V1 (HUZZAH32), then upload to the only detected port.
+
   ./upload.sh -v3 --auto
-      Compile first, then upload when exactly one ESP32-like serial port is connected.
+      Compile V3 LED receiver (ESP32-S3 Reverse TFT), then upload to the only detected port.
 
   ./upload.sh -v2 --all
-      Compile once, then upload to every detected ESP32-like serial port.
+      Compile V2 LED receiver, then upload to every detected ESP32-like serial port.
 
   ./upload.sh -v1 --compile
       Compile only; do not upload. This is like Arduino IDE Verify.
 
-  ./upload.sh -v2 /dev/cu.usbserial-XXXX /dev/cu.usbserial-YYYY
-      Compile once, then upload to one or more explicit serial ports.
+  ./upload.sh -rv1 /dev/cu.usbserial-XXXX
+      Compile Radius V1 and upload to an explicit port.
 
-  ./upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
-      Compile with WiFi credential overrides for this build, then upload.
+  ./upload.sh -rv2 -ssid "PrimusRouter" -pw "router-password" --auto
+      Compile Radius V2 with WiFi credential overrides, then upload.
 
-    ./upload.sh -v3 --name "StageLeft" --auto
-      Compile with a default Art-Net short-name override for this build.
+  ./upload.sh -rv1 --name "E8" --static-ip 192.168.8.157 --gateway 192.168.8.1 --subnet 255.255.255.0 --auto
+      Compile Radius V1 with name and static IP baked in, then upload.
 
   Behavior:
     Upload commands always compile first, then upload. You do not need to run
     --compile before uploading; use --compile only when you want a verify-only pass.
 
 Flags:
-  -v1, -v2, -v3          Select hardware profile. Default: -v3.
-  --board v1|v2|v3       Long-form hardware profile selection.
+  -rv1                   Radius V1 (Feather HUZZAH32, headless).
+  -rv2, -radius          Radius V2 (ESP32-S3 Reverse TFT Feather).
+  -v1, -v2, -v3          LED receiver hardware profile. Default: -v3.
+  --board v1|v2|v3|rv1|rv2  Long-form hardware profile selection.
   --auto, -auto            Select the only detected ESP32-like serial port.
   --all, -all              Select every detected ESP32-like serial port.
   --all-ports              Alias for --all.
@@ -134,6 +142,14 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -rv1)
+      BOARD_PROFILE="rv1"
+      shift
+      ;;
+    -rv2|-radius)
+      BOARD_PROFILE="rv2"
+      shift
+      ;;
     -v1)
       BOARD_PROFILE="v1"
       shift
@@ -148,7 +164,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --board)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        err "--board requires a value: v1, v2, or v3"
+        err "--board requires a value: v1, v2, v3, rv1, or rv2"
         exit 1
       fi
       BOARD_PROFILE="${2:-}"
@@ -299,8 +315,35 @@ if [[ "$ALL_PORTS" == true && ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
 fi
 
 case "$BOARD_PROFILE" in
+  rv1|rv1_huzzah)
+    BOARD_PROFILE="rv1"
+    SKETCH_DIR="$SCRIPT_DIR/radius_receiver"
+    FQBN="esp32:esp32:featheresp32"
+    EXTRA_FLAGS="-DTARGET_BOARD=2"
+    DEFAULT_BAUD=460800
+    REQUIRED_LIBS=(
+      "Adafruit VS1053 Library"
+      "ArduinoJson"
+      "SimpleFTPServer"
+    )
+    ;;
+  rv2|rv2_s3|radius)
+    BOARD_PROFILE="rv2"
+    SKETCH_DIR="$SCRIPT_DIR/radius_receiver"
+    FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
+    EXTRA_FLAGS="-DTARGET_BOARD=1"
+    DEFAULT_BAUD=921600
+    REQUIRED_LIBS=(
+      "Adafruit VS1053 Library"
+      "ArduinoJson"
+      "SimpleFTPServer"
+      "Adafruit ST7735 and ST7789 Library"
+      "Adafruit GFX Library"
+    )
+    ;;
   v1|v1_huzzah)
     BOARD_PROFILE="v1"
+    SKETCH_DIR="$SCRIPT_DIR/primusV3_receiver"
     FQBN="esp32:esp32:featheresp32"
     EXTRA_FLAGS="-DPRIMUS_PROFILE_V1"
     DEFAULT_BAUD=115200
@@ -308,6 +351,7 @@ case "$BOARD_PROFILE" in
     ;;
   v2|v2_feather)
     BOARD_PROFILE="v2"
+    SKETCH_DIR="$SCRIPT_DIR/primusV3_receiver"
     FQBN="esp32:esp32:adafruit_feather_esp32_v2"
     EXTRA_FLAGS="-DPRIMUS_PROFILE_V2"
     DEFAULT_BAUD=115200
@@ -315,6 +359,7 @@ case "$BOARD_PROFILE" in
     ;;
   v3|v3_1|v31|v3_1_reverse_tft)
     BOARD_PROFILE="v3"
+    SKETCH_DIR="$SCRIPT_DIR/primusV3_receiver"
     FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
     EXTRA_FLAGS="-DPRIMUS_PROFILE_V3_1"
     DEFAULT_BAUD=921600
@@ -326,7 +371,7 @@ case "$BOARD_PROFILE" in
     ;;
   *)
     err "Unknown board profile: $BOARD_PROFILE"
-    err "Expected one of: v1, v2, v3"
+    err "Expected one of: v1, v2, v3, rv1, rv2"
     exit 1
     ;;
 esac

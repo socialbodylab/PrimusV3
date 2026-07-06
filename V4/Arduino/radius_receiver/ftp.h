@@ -78,7 +78,7 @@ void ftpStop() {
 }
 
 void ftpUpdate() {
-  if (_ftpRunning) {
+  if (_ftpRunning && !sdBusy) {
     _ftpServer.handleFTP();
   }
 }

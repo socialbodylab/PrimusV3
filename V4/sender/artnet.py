@@ -1074,14 +1074,26 @@ def _ftp_session(ip, source_ip=None, timeout=8.0):
 
 
 def _parse_list_line(line):
+    """Parse a SimpleFTPServer LIST line into {name, is_dir, size}.
+
+    SimpleFTPServer (SD storage) omits the group field, producing 8 fields:
+      permissions links user size month day time filename
+    Standard Unix ls long format has 9 fields (includes group between user and size):
+      permissions links user group size month day time/year filename
+    """
     parts = line.split(None, 8)
-    if len(parts) < 9:
+    n = len(parts)
+    if n == 9:
+        size_idx, name_idx = 4, 8   # standard: has group field
+    elif n == 8:
+        size_idx, name_idx = 3, 7   # SimpleFTPServer: no group field
+    else:
         return None
     try:
-        size = int(parts[4])
+        size = int(parts[size_idx])
     except ValueError:
         size = 0
-    return {"name": parts[8], "is_dir": parts[0].startswith("d"), "size": size}
+    return {"name": parts[name_idx], "is_dir": parts[0].startswith("d"), "size": size}
 
 
 def ftp_list_dir(ip, path="/", source_ip=None):

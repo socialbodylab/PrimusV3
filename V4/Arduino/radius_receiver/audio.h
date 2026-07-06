@@ -64,12 +64,12 @@ void audioInit() {
 }
 
 bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
-  if (sdBusy && _musicMaker.playingMusic) {
-    _musicMaker.stopPlaying();
-  }
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
 
-  strncpy(_audioCurrentFile, filename, 64);
+  char trackPath[66];
+  snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
+
+  strncpy(_audioCurrentFile, trackPath, 64);
   _audioCurrentFile[64] = '\0';
   _audioLooping = false;
   _audioDuration = duration;
@@ -77,10 +77,10 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   sdBusy = true;
   _applyVolume(volume);
 
-  bool ok = _musicMaker.startPlayingFile(filename);
+  bool ok = _musicMaker.startPlayingFile(trackPath);
   if (!ok) {
     Serial.print("[Audio] ERROR: could not open ");
-    Serial.println(filename);
+    Serial.println(trackPath);
     sdBusy = false;
     _audioCurrentFile[0] = '\0';
     _audioDuration = 0;
