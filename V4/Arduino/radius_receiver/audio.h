@@ -17,6 +17,8 @@ extern bool sdBusy;
 char   _audioCurrentFile[65] = {0};
 uint8_t _audioVolume = 80;
 bool   _audioLooping = false;
+bool   _audioHwReady = false;
+bool   _audioSdReady = false;
 uint8_t _audioPlaybackState = TRACK_STATE_STOPPED;
 uint8_t _lastAppliedVolume = 255;
 uint16_t _audioDuration = 0;
@@ -52,15 +54,19 @@ void audioInit() {
     Serial.println("[Audio] ERROR: VS1053 begin() failed");
     return;
   }
+  _musicMaker.setVolume(254, 254);  // start muted — unmuted when playback begins
+  // No interrupt on ESP32 — SPI uses semaphores, can't be called from ISR.
+  // feedBuffer() is called from audioUpdate() in the main loop instead.
+  _audioHwReady = true;
+  Serial.println("[Audio] VS1053 OK");
 
   if (!SD.begin(MM_SDCS_PIN)) {
-    Serial.println("[Audio] ERROR: SD card init failed");
+    Serial.println("[Audio] WARNING: SD card not found — file playback unavailable");
     return;
   }
-  Serial.println("[Audio] SD + VS1053 OK");
-
   _applyVolume(80);
-  _musicMaker.useInterrupt(VS1053_FILEPLAYER_PIN_INT);
+  _audioSdReady = true;
+  Serial.println("[Audio] SD OK");
 }
 
 bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
@@ -135,12 +141,15 @@ void audioUpdate() {
     }
   }
 
-  if (!_musicMaker.playingMusic) {
+  if (_musicMaker.playingMusic) {
+    _musicMaker.feedBuffer();
+  } else {
     if (_audioLooping && _audioCurrentFile[0] != '\0') {
       if (_musicMaker.startPlayingFile(_audioCurrentFile)) {
         _notifyTrack(TRACK_STATE_PLAYING);
       }
     } else if (_audioCurrentFile[0] != '\0') {
+      _musicMaker.setVolume(254, 254);
       _audioCurrentFile[0] = '\0';
       _audioDuration = 0;
       sdBusy = false;
@@ -155,6 +164,44 @@ const char* audioCurrentFile() {
 
 uint8_t audioPlaybackState() {
   return _audioPlaybackState;
+}
+
+bool audioSdIsReady() {
+  return _audioSdReady;
+}
+
+void audioBootTest() {
+  if (!_audioHwReady) return;
+  Serial.println("[Boot] Sine test (1kHz, 500ms)...");
+  _musicMaker.setVolume(40, 40);
+  _musicMaker.sineTest(0x44, 500);
+  Serial.println("[Boot] Sine test complete");
+
+  if (!_audioSdReady) {
+    Serial.println("[Boot] SD not ready — skipping file playback");
+    return;
+  }
+
+  char filename[65] = {0};
+  File root = SD.open("/");
+  if (!root) { Serial.println("[Boot] Failed to open SD root"); return; }
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) { Serial.println("[Boot] No WAV files found on SD"); break; }
+    if (!entry.isDirectory()) {
+      const char* ext = strrchr(entry.name(), '.');
+      if (ext && strcasecmp(ext, ".wav") == 0) {
+        strncpy(filename, entry.name(), 64);
+        entry.close();
+        root.close();
+        Serial.print("[Boot] Playing: "); Serial.println(filename);
+        audioPlay(filename, 60, 2);
+        return;
+      }
+    }
+    entry.close();
+  }
+  root.close();
 }
 
 uint16_t sdFileCount() {

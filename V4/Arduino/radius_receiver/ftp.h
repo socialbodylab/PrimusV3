@@ -49,22 +49,16 @@ static bool _ftpRunning = false;
 //  API
 // =====================================================================
 
-void ftpInit(fs::FS& fsRef) {
-  // SD must already be initialised by audioInit() before FTP can start
+void ftpInit() {
+  // Begin the TCP server once here — it stays bound for the life of the sketch.
+  // ftpStart/ftpStop only toggle _ftpRunning; they never re-call begin().
+  _ftpServer.begin(FTP_USER, FTP_PASSWORD);
   Serial.println("[FTP] FTP subsystem ready (SimpleFTPServer/SD)");
 }
 
 void ftpStart() {
   if (_ftpRunning) return;
-
-  if (sdBusy || audioIsPlaying()) {
-    Serial.println("[FTP] SD busy (audio playing) — FTP start refused");
-    return;
-  }
-
-  _ftpServer.begin(FTP_USER, FTP_PASSWORD);
   _ftpRunning = true;
-
   Serial.print("[FTP] Server started — user: ");
   Serial.print(FTP_USER);
   Serial.print("  pass: ");

@@ -672,7 +672,9 @@ void setup() {
 
   audioInit();
   cuesLoad();
-  ftpInit(SD);
+  audioBootTest();
+  ftpInit();
+  if (audioSdIsReady()) ftpStart();
 
   lastFpsTime = millis();
 #if RADIUS_DIAG
