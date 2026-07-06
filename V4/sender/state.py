@@ -19,6 +19,7 @@ from artnet import (
     parse_node_capabilities,
     parse_node_outputs,
     send_output_config,
+    send_virtual_resolution,
     send_receive_config,
     send_art_address,
     send_ip_config,
@@ -26,6 +27,12 @@ from artnet import (
     ipv4_octets,
 )
 from paths import state_file
+from virtual_resolution import (
+    default_virtual_pixels,
+    resolve_virtual_pixels,
+    virtual_percent_to_count,
+    transport_rgb_bytes,
+)
 
 
 # ======================================================================
@@ -64,7 +71,7 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "ip_config": False,
     "output_config": False,
     "receive_config": False,
-    "receive_mode": "split",
+    "receive_mode": "combined",
     "base_universe": 0,
     "battery": False,
     "show_info": False,
@@ -105,9 +112,9 @@ PLAYBACK_MODES = ["loop", "boomerang", "once"]
 GRID_ORDERS = ["progressive", "serpentine"]
 GRID_ROTATIONS = [0, 90, 180, 270]
 
-# V3.1: default 2-output template (A0 + A1)
+# Workshop kit default: Badge + Collar
 DEFAULT_TEMPLATE = [
-    {"name": "A0", "type": "short_strip"},
+    {"name": "A0", "type": "small_grid"},
     {"name": "A1", "type": "long_strip"},
 ]
 
@@ -429,6 +436,7 @@ def _save_devices(devices):
                 "universe": output.get("universe", 0),
                 "grid_order": output.get("grid_order", "progressive"),
                 "grid_rotation": output.get("grid_rotation", 0),
+                "virtual_pixels": output.get("virtual_pixels"),
             })
         saved_devices.append({
             "ip": d["ip"],
@@ -441,7 +449,7 @@ def _save_devices(devices):
             "static_ip": d.get("static_ip"),
             "gateway": d.get("gateway"),
             "subnet": d.get("subnet"),
-            "receive_mode": d.get("receive_mode", "split"),
+            "receive_mode": d.get("receive_mode", "combined"),
             "base_universe": d.get("base_universe", 0),
             "character_name": _normalize_show_info_value(d.get("character_name")),
             "performer_name": _normalize_show_info_value(d.get("performer_name")),
@@ -607,6 +615,8 @@ def _output_configs_from_node(node_info):
                 cfg["grid_order"] = output.get("grid_order")
             if "grid_rotation" in output:
                 cfg["grid_rotation"] = output.get("grid_rotation")
+            if "virtual_pixels" in output:
+                cfg["virtual_pixels"] = output.get("virtual_pixels")
             output_cfgs.append(cfg)
         if output_cfgs:
             return output_cfgs
@@ -627,14 +637,19 @@ def _receive_fields_from_node(node_info, capabilities, fallback_base=0):
     if base is None:
         base = capabilities.get("base_universe")
     if mode not in RECEIVE_MODES:
-        mode = "split"
+        mode = "combined"
     if base is None:
         base = fallback_base
     return mode, int(base)
 
 
 def _combined_pixel_total(outputs):
-    return sum(int(o.get("count") or 0) for o in outputs)
+    total = 0
+    for output in outputs:
+        if output.get("type") == "none" or int(output.get("count") or 0) <= 0:
+            continue
+        total += resolve_virtual_pixels(output)
+    return total
 
 
 def _validate_receive_mode_for_device(receive_mode, outputs):
@@ -671,10 +686,10 @@ def _device_blackout_info(dev):
         return [(dev.get("base_universe", 0), total)]
     info = []
     for output in outputs:
-        count = int(output.get("count") or 0)
-        if count <= 0:
+        virtual = resolve_virtual_pixels(output)
+        if virtual <= 0:
             continue
-        info.append((output["universe"], count))
+        info.append((output["universe"], virtual))
     return info
 
 
@@ -689,19 +704,20 @@ def _queue_device_frame_sends(send_queue, di, dev, frame_buffers):
     if receive_mode == "combined":
         combined = bytearray()
         for oi, output in enumerate(outputs):
-            count = int(output.get("count") or 0)
-            if count <= 0:
+            virtual = resolve_virtual_pixels(output)
+            if virtual <= 0:
                 continue
             data = frame_buffers.get(oi)
             if data is None:
-                combined.extend(bytes(count * 3))
+                combined.extend(bytes(virtual * 3))
             else:
-                expected = count * 3
-                if len(data) >= expected:
-                    combined.extend(data[:expected])
+                transport = transport_rgb_bytes(output, rgb_bytes=data)
+                expected = virtual * 3
+                if len(transport) >= expected:
+                    combined.extend(transport[:expected])
                 else:
-                    combined.extend(data)
-                    combined.extend(bytes(expected - len(data)))
+                    combined.extend(transport)
+                    combined.extend(bytes(expected - len(transport)))
         if combined:
             send_queue.append(
                 (di, sender, dev.get("base_universe", 0), bytes(combined)))
@@ -710,7 +726,10 @@ def _queue_device_frame_sends(send_queue, di, dev, frame_buffers):
     for oi, data in frame_buffers.items():
         if oi >= len(outputs):
             continue
-        send_queue.append((di, sender, outputs[oi]["universe"], data))
+        output = outputs[oi]
+        transport = transport_rgb_bytes(output, rgb_bytes=data)
+        if transport:
+            send_queue.append((di, sender, output["universe"], transport))
 
 
 def _config_apply_result(applied_to_device):
@@ -736,20 +755,20 @@ def _device_flash_entries(dev, rgb_triplet):
     if receive_mode == "combined":
         combined = bytearray()
         for output in outputs:
-            count = int(output.get("count") or 0)
-            if count <= 0:
+            virtual = resolve_virtual_pixels(output)
+            if virtual <= 0:
                 continue
-            combined.extend(rgb_triplet * count)
+            combined.extend(rgb_triplet * virtual)
         if not combined:
             return []
         return [(dev.get("base_universe", 0), bytes(combined))]
 
     entries = []
     for output in outputs:
-        count = int(output.get("count") or 0)
-        if count <= 0:
+        virtual = resolve_virtual_pixels(output)
+        if virtual <= 0:
             continue
-        entries.append((output["universe"], rgb_triplet * count))
+        entries.append((output["universe"], rgb_triplet * virtual))
     return entries
 
 
@@ -1154,6 +1173,7 @@ class ControllerState:
                         "name": o["name"],
                         "type": o["type"],
                         "count": o["count"],
+                        "virtual_pixels": resolve_virtual_pixels(o),
                         "grid": o["grid"],
                         "universe": o["universe"],
                         "grid_order": o["grid_order"],
@@ -1288,6 +1308,8 @@ class ControllerState:
             raise ValueError(f"Unknown output type: {new_type!r}")
         dev_output["type"] = new_type
         dev_output["count"] = typedef["pixels"]
+        dev_output["virtual_pixels"] = default_virtual_pixels(
+            new_type, typedef["pixels"])
         dev_output["layout"] = typedef["layout"]
         dev_output["grid"] = (
             typedef.get("grid_size") if typedef["layout"] == "grid" else None
@@ -1326,6 +1348,85 @@ class ControllerState:
                 )
         return True, None
 
+    def _send_virtual_resolution(self, dev):
+        caps = _normalize_device_capabilities(dev.get("capabilities"))
+        if not caps.get("output_config"):
+            return False, "output configuration is not advertised for this node"
+
+        outputs = dev.get("outputs", [])
+        if not outputs:
+            return False, "device has no outputs to configure"
+        virtual_counts = [resolve_virtual_pixels(o) for o in outputs]
+        try:
+            send_virtual_resolution(
+                dev["ip"], virtual_counts, source_ip=self.artnet_source_ip)
+        except OSError as error:
+            return False, self._transport_error_text(error)
+        return True, None
+
+    def set_device_virtual_resolution(self, di, oi, virtual_pixels=None,
+                                      virtual_percent=None):
+        with self.lock:
+            status = self._device_capability_status_unlocked(di, "output_config")
+            if not status["ok"]:
+                return status
+            dev = self.devices[di]
+            if not (0 <= oi < len(dev.get("outputs", []))):
+                return {"ok": False, "error": "invalid output index"}
+            output = dev["outputs"][oi]
+            physical = int(output.get("count") or 0)
+            if physical <= 0 or output.get("type") == "none":
+                return {"ok": False, "error": "output is inactive"}
+
+            if virtual_percent is not None:
+                try:
+                    resolved = virtual_percent_to_count(physical, virtual_percent)
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "virtual_percent must be 1-100"}
+            elif virtual_pixels is not None:
+                try:
+                    resolved = int(virtual_pixels)
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "virtual_pixels must be an integer"}
+            else:
+                return {
+                    "ok": False,
+                    "error": "virtual_pixels or virtual_percent is required",
+                }
+
+            if resolved < 1 or resolved > physical:
+                return {
+                    "ok": False,
+                    "error": f"virtual_pixels must be 1-{physical}",
+                }
+
+            prior = output.get("virtual_pixels")
+            output["virtual_pixels"] = resolved
+            valid, err = _validate_receive_mode_for_device(
+                dev.get("receive_mode", "split"), dev.get("outputs", []))
+            if not valid:
+                output["virtual_pixels"] = prior
+                return {"ok": False, "error": err}
+
+            if dev["sender"].connected:
+                if not self._ensure_sender_connected_unlocked(dev):
+                    output["virtual_pixels"] = prior
+                    return {
+                        "ok": False,
+                        "error": dev.get("transport_error") or "sender connection failed",
+                    }
+                config_ok, config_error = self._send_virtual_resolution(dev)
+                if not config_ok:
+                    output["virtual_pixels"] = prior
+                    return {
+                        "ok": False,
+                        "error": config_error or "virtual resolution configuration failed",
+                    }
+                _save_devices(self.devices)
+                return _config_apply_result(True)
+            _save_devices(self.devices)
+            return _config_apply_result(False)
+
     def set_device_output_type(self, di, oi, output_type):
         with self.lock:
             status = self._device_capability_status_unlocked(di, "output_config")
@@ -1354,6 +1455,13 @@ class ControllerState:
                     return {
                         "ok": False,
                         "error": config_error or "output configuration failed",
+                    }
+                virt_ok, virt_error = self._send_virtual_resolution(dev)
+                if not virt_ok:
+                    dev["outputs"][oi] = prior
+                    return {
+                        "ok": False,
+                        "error": virt_error or "virtual resolution configuration failed",
                     }
                 _save_devices(self.devices)
                 return _config_apply_result(True)
@@ -1529,7 +1637,7 @@ class ControllerState:
 
     def _build_device_outputs_unlocked(self, node_info, output_cfgs, base_u,
                                        existing_outputs=None,
-                                       receive_mode="split"):
+                                       receive_mode="combined"):
         outputs = []
         existing_outputs = existing_outputs or []
         existing_by_name = {
@@ -1556,11 +1664,22 @@ class ControllerState:
             grid_rotation = o_cfg.get("grid_rotation")
             if grid_rotation not in GRID_ROTATIONS:
                 grid_rotation = prior.get("grid_rotation") if prior else 0
+            virtual_pixels = o_cfg.get("virtual_pixels")
+            if virtual_pixels is None and prior is not None:
+                virtual_pixels = prior.get("virtual_pixels")
+            if virtual_pixels is None:
+                virtual_pixels = default_virtual_pixels(
+                    resolved["type"], resolved["count"])
+            else:
+                virtual_pixels = resolve_virtual_pixels(
+                    {"type": resolved["type"], "count": resolved["count"],
+                     "virtual_pixels": virtual_pixels})
             outputs.append({
                 **resolved,
                 "universe": universe,
                 "grid_order": grid_order if is_grid else "progressive",
                 "grid_rotation": grid_rotation if is_grid else 0,
+                "virtual_pixels": virtual_pixels,
             })
         _apply_output_universes(outputs, receive_mode, base_u)
         return outputs
@@ -2170,11 +2289,11 @@ class ControllerState:
                     keepalive_sent = True
                 else:
                     for o in dev["outputs"]:
-                        count = o.get("count") or 0
-                        if count <= 0:
+                        virtual = resolve_virtual_pixels(o)
+                        if virtual <= 0:
                             continue
                         send_queue.append(
-                            (di, dev["sender"], o["universe"], bytes(count * 3)))
+                            (di, dev["sender"], o["universe"], bytes(virtual * 3)))
                         keepalive_sent = True
                     if not keepalive_sent:
                         send_queue.append(

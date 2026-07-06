@@ -27,7 +27,7 @@ enum ReceiveMode : uint8_t {
 };
 
 #ifndef DEFAULT_RECEIVE_MODE
-  #define DEFAULT_RECEIVE_MODE RECEIVE_MODE_SPLIT
+  #define DEFAULT_RECEIVE_MODE RECEIVE_MODE_COMBINED
 #endif
 
 #ifndef DEFAULT_UNIVERSE_BASE
@@ -66,7 +66,7 @@ inline uint16_t totalActivePixels(const OutputConfig outputs[NUM_OUTPUTS]) {
   uint16_t total = 0;
   for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
     if (outputs[i].type == OUTPUT_OFF) continue;
-    total += outputs[i].pixelCount;
+    total += outputs[i].virtualPixelCount;
   }
   return total;
 }
@@ -177,7 +177,7 @@ inline void handleArtDmxSplit(OutputConfig outputs[NUM_OUTPUTS],
     if (outputs[o].type == OUTPUT_OFF) continue;
     if (outputs[o].universe != universe) continue;
 
-    uint16_t needed = outputs[o].pixelCount * outputs[o].bytesPerPixel;
+    uint16_t needed = outputs[o].virtualPixelCount * outputs[o].bytesPerPixel;
     if (needed > MAX_BUFFER_SIZE) needed = MAX_BUFFER_SIZE;
     copyOutputSlice(outputBuffers[o], needed, pixelData, dataLen);
     outputDataReady[o] = true;
@@ -204,7 +204,7 @@ inline void handleArtDmxCombined(OutputConfig outputs[NUM_OUTPUTS],
   for (uint8_t o = 0; o < NUM_OUTPUTS; o++) {
     if (outputs[o].type == OUTPUT_OFF) continue;
 
-    uint16_t needed = outputs[o].pixelCount * outputs[o].bytesPerPixel;
+    uint16_t needed = outputs[o].virtualPixelCount * outputs[o].bytesPerPixel;
     if (needed > MAX_BUFFER_SIZE) needed = MAX_BUFFER_SIZE;
     if (offset >= dataLen) {
       memset(outputBuffers[o], 0, needed);

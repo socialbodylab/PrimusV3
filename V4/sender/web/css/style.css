@@ -878,6 +878,17 @@ body {
     cursor: not-allowed;
 }
 
+.device-virtual-range {
+    flex: 1;
+    min-width: 0;
+}
+
+.device-virtual-hint {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-size: 10px;
+}
+
 .device-ip-config {
     margin-top: 6px;
     padding: 8px;

@@ -12,6 +12,7 @@ if SENDER_DIR not in sys.path:
 from state import (
     COMBINED_RECEIVE_MAX_PIXELS,
     ControllerState,
+    LOOK_OUTPUT_TYPES,
     _apply_output_universes,
     _device_blackout_info,
     _queue_device_frame_sends,
@@ -21,12 +22,18 @@ from state import (
 
 class ReceiveModeHelperTests(unittest.TestCase):
     def test_validate_combined_pixel_limit(self):
-        outputs = [{"count": 32}, {"count": 72}]
+        outputs = [
+            {"type": "small_grid", "count": 32, "virtual_pixels": 32},
+            {"type": "long_strip", "count": 72, "virtual_pixels": 72},
+        ]
         ok, err = _validate_receive_mode_for_device("combined", outputs)
         self.assertTrue(ok)
         self.assertIsNone(err)
 
-        outputs = [{"count": 122}, {"count": 122}]
+        outputs = [
+            {"type": "extra_long_strip", "count": 122, "virtual_pixels": 122},
+            {"type": "long_strip", "count": 72, "virtual_pixels": 72},
+        ]
         ok, err = _validate_receive_mode_for_device("combined", outputs)
         self.assertFalse(ok)
         self.assertIn(str(COMBINED_RECEIVE_MAX_PIXELS), err)
@@ -48,7 +55,10 @@ class ReceiveModeHelperTests(unittest.TestCase):
         dev = {
             "receive_mode": "combined",
             "base_universe": 12,
-            "outputs": [{"count": 32}, {"count": 72}],
+            "outputs": [
+                {"type": "small_grid", "count": 32, "virtual_pixels": 32},
+                {"type": "long_strip", "count": 72, "virtual_pixels": 72},
+            ],
         }
         self.assertEqual(_device_blackout_info(dev), [(12, 104)])
 
@@ -58,8 +68,8 @@ class ReceiveModeHelperTests(unittest.TestCase):
             "base_universe": 0,
             "sender": object(),
             "outputs": [
-                {"count": 2, "universe": 0},
-                {"count": 1, "universe": 0},
+                {"type": "short_strip", "count": 2, "virtual_pixels": 2, "universe": 0},
+                {"type": "short_strip", "count": 1, "virtual_pixels": 1, "universe": 0},
             ],
         }
         send_queue = []

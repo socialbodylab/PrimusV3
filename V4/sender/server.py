@@ -584,6 +584,30 @@ class Handler(BaseHTTPRequestHandler):
                 code = 400 if "invalid" in error.lower() or "unknown" in error.lower() else 409
                 self._json_error(code, error)
 
+        elif path == "/api/set_device_virtual_resolution":
+            self._sync_artnet_source()
+            di = data.get("device", -1)
+            oi = data.get("output", -1)
+            virtual_pixels = data.get("virtual_pixels")
+            virtual_percent = data.get("virtual_percent")
+            try:
+                di = int(di)
+                oi = int(oi)
+            except (TypeError, ValueError):
+                self._json_error(400, "invalid device or output index")
+                return
+            result = self._device_state().set_device_virtual_resolution(
+                di, oi,
+                virtual_pixels=virtual_pixels,
+                virtual_percent=virtual_percent,
+            )
+            if result.get("ok"):
+                self._json_response(result)
+            else:
+                error = result.get("error", "virtual resolution update failed")
+                code = 400 if "invalid" in error.lower() or "unknown" in error.lower() else 409
+                self._json_error(code, error)
+
         elif path == "/api/set_device_receive_mode":
             self._sync_artnet_source()
             di = data.get("device", -1)

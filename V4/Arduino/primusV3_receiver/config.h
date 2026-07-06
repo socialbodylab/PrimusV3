@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.10.0"
+#define FIRMWARE_VERSION "3.11.0"
 
 // =====================================================================
 //  Board Profile
@@ -95,7 +95,7 @@ enum OutputType {
   #define OUTPUT0_PHYSICAL_PORT   0
   #define OUTPUT1_PHYSICAL_PORT   1
   #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SMALL_GRID
-  #define OUTPUT1_DEFAULT_TYPE    OUTPUT_SHORT_STRIP
+  #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
 #else
   #define BOARD_PROFILE_ID        "v3_1_reverse_tft"
   #define BOARD_PROFILE_CODE      "v31"
@@ -107,8 +107,8 @@ enum OutputType {
   #define OUTPUT1_PIN             A1   // GPIO18 — custom PCB output 1
   #define OUTPUT0_PHYSICAL_PORT   0
   #define OUTPUT1_PHYSICAL_PORT   1
-  #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SHORT_STRIP
-  #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
+  #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SMALL_GRID   // Badge (8×4 grid)
+  #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP   // Collar (72 px strip)
   #define BOARD_OUTPUT_WIFI_GATED 1
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A4   // GPIO14 — 5V rail via 100k/100k divider
@@ -221,13 +221,30 @@ struct OutputConfig {
   uint8_t     dataPin;       // physical data pin for direct-driver profiles
   uint16_t    universe;      // Art-Net universe for this output
   // Derived fields — call deriveFromType() after setting .type
-  uint16_t    pixelCount;
+  uint16_t    pixelCount;        // physical LED count
+  uint16_t    virtualPixelCount; // Art-Net transport pixel count
   uint8_t     bytesPerPixel;
 };
+
+inline uint16_t defaultVirtualPixels(OutputType t) {
+  if (t == OUTPUT_SMALL_GRID) return 1;
+  return typePixels(t);
+}
+
+inline void applyVirtualPixelCount(OutputConfig& cfg, uint16_t virtualCount) {
+  if (cfg.type == OUTPUT_OFF || cfg.pixelCount == 0) {
+    cfg.virtualPixelCount = 0;
+    return;
+  }
+  if (virtualCount < 1) virtualCount = 1;
+  if (virtualCount > cfg.pixelCount) virtualCount = cfg.pixelCount;
+  cfg.virtualPixelCount = virtualCount;
+}
 
 inline void deriveFromType(OutputConfig& cfg) {
   cfg.pixelCount    = typePixels(cfg.type);
   cfg.bytesPerPixel = typeBpp(cfg.type);
+  applyVirtualPixelCount(cfg, defaultVirtualPixels(cfg.type));
 }
 
 inline bool profileSupportsOutputType(OutputType t) {
@@ -304,6 +321,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_ADDRESS  0x6000
 #define ARTNET_OPCODE_OUTPUT_CONFIG 0x8100  // Vendor-defined: set output types
 #define ARTNET_OPCODE_RECEIVE_CONFIG 0x8110 // Vendor-defined: set receive mode / universe base
+#define ARTNET_OPCODE_VIRTUAL_RESOLUTION 0x8130 // Vendor-defined: set virtual pixel counts
 #define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
 #define ARTNET_OPCODE_SHOW_INFO    0x8210  // Vendor-defined: read/write show metadata
 #define SHOW_INFO_FIELD_LEN        64
@@ -320,7 +338,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 10
+#define FIRMWARE_VERSION_L 11
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 

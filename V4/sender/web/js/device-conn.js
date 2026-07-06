@@ -142,7 +142,39 @@ document.addEventListener("alpine:init", () => {
 
         combinedPixelTotal(dev) {
             return (dev?.outputs || []).reduce(
-                (sum, output) => sum + (output?.count || 0), 0);
+                (sum, output) => sum + this.resolveVirtualPixels(output), 0);
+        },
+
+        resolveVirtualPixels(output) {
+            const physical = Number(output?.count) || 0;
+            if (physical <= 0 || output?.type === "none") {
+                return 0;
+            }
+            const stored = output?.virtual_pixels;
+            if (stored == null) {
+                return output?.type === "small_grid" ? 1 : physical;
+            }
+            const virtual = Number(stored) || 0;
+            return Math.max(1, Math.min(physical, virtual));
+        },
+
+        virtualResolutionPercent(output) {
+            const physical = Number(output?.count) || 0;
+            const virtual = this.resolveVirtualPixels(output);
+            if (physical <= 0) {
+                return 100;
+            }
+            return Math.max(1, Math.round((virtual / physical) * 100));
+        },
+
+        virtualResolutionHint(output) {
+            const physical = Number(output?.count) || 0;
+            const virtual = this.resolveVirtualPixels(output);
+            if (physical <= 0) {
+                return "";
+            }
+            const pct = Math.round((virtual / physical) * 100);
+            return `${virtual}→${physical} px (${pct}%)`;
         },
 
         canUseCombinedMode(dev) {
@@ -174,6 +206,7 @@ document.addEventListener("alpine:init", () => {
 
         configFeedbackKey(di, kind, oi) {
             if (kind === "output") return `${di}:output:${oi}`;
+            if (kind === "virtual") return `${di}:virtual:${oi}`;
             return `${di}:receive:${kind}`;
         },
 
@@ -645,6 +678,34 @@ document.addEventListener("alpine:init", () => {
             } catch (e) {
                 this.setConfigFeedback(key, "error", e.message || "Update failed");
                 Alpine.store("app").showApiError("Output update failed", e);
+            } finally {
+                await Alpine.store("app").fetchState();
+            }
+        },
+
+        async setDeviceVirtualResolutionPercent(di, oi, virtualPercent) {
+            const dev = this.devices[di];
+            const output = dev?.outputs?.[oi];
+            if (!output || output.type === "none") {
+                return;
+            }
+            const percent = Math.max(1, Math.min(100, Number(virtualPercent) || 100));
+            const priorPercent = this.virtualResolutionPercent(output);
+            if (priorPercent === percent) {
+                return;
+            }
+            const key = this.configFeedbackKey(di, "virtual", oi);
+            this.setConfigFeedback(key, "pending", "");
+            try {
+                const result = await api("POST", "/api/set_device_virtual_resolution", {
+                    device: di,
+                    output: oi,
+                    virtual_percent: percent,
+                });
+                this.setConfigFeedback(key, "ok", result?.message || "Applied");
+            } catch (e) {
+                this.setConfigFeedback(key, "error", e.message || "Update failed");
+                Alpine.store("app").showApiError("Virtual resolution update failed", e);
             } finally {
                 await Alpine.store("app").fetchState();
             }

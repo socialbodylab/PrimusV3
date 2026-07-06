@@ -435,12 +435,25 @@ void loadStoredOutputConfig() {
     outputs[i].type = candidate;
     deriveFromType(outputs[i]);
   }
+  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
+    String key = "vpx" + String(i);
+    if (!prefs.isKey(key.c_str())) continue;
+    uint16_t storedVirtual = (uint16_t)prefs.getUShort(key.c_str(), outputs[i].virtualPixelCount);
+    applyVirtualPixelCount(outputs[i], storedVirtual);
+  }
 }
 
 void saveOutputConfig() {
   for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
     String key = "otype" + String(i);
     prefs.putUChar(key.c_str(), (uint8_t)outputs[i].type);
+  }
+}
+
+void saveVirtualResolutionConfig() {
+  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
+    String key = "vpx" + String(i);
+    prefs.putUShort(key.c_str(), outputs[i].virtualPixelCount);
   }
 }
 
@@ -474,12 +487,44 @@ bool applyOutputTypeChange(uint8_t outputIndex, OutputType newType) {
     applyReceiveMode(outputs, currentReceiveMode, currentUniverseBase);
   }
   saveOutputConfig();
+  saveVirtualResolutionConfig();
   broadcastArtPollReply();
 
   Serial.print("Output ");
   Serial.print(outputIndex);
   Serial.print(" -> ");
   Serial.println(typeName(newType));
+  return true;
+}
+
+bool applyVirtualPixelCountChange(uint8_t outputIndex, uint16_t virtualCount) {
+  if (outputIndex >= NUM_OUTPUTS) return false;
+  if (outputs[outputIndex].type == OUTPUT_OFF) return false;
+
+  uint16_t prior = outputs[outputIndex].virtualPixelCount;
+  if (virtualCount == 0) {
+    virtualCount = defaultVirtualPixels(outputs[outputIndex].type);
+  }
+  applyVirtualPixelCount(outputs[outputIndex], virtualCount);
+  if (outputs[outputIndex].virtualPixelCount == prior) return false;
+
+  memset(outputBuffers[outputIndex], 0, MAX_BUFFER_SIZE);
+  outputDataReady[outputIndex] = false;
+  outputActive[outputIndex] = false;
+
+  if (!validateReceiveMode(currentReceiveMode, outputs)) {
+    applyReceiveMode(outputs, RECEIVE_MODE_SPLIT, currentUniverseBase);
+    saveReceiveMode(prefs);
+  } else {
+    applyReceiveMode(outputs, currentReceiveMode, currentUniverseBase);
+  }
+  saveVirtualResolutionConfig();
+  broadcastArtPollReply();
+
+  Serial.print("Output ");
+  Serial.print(outputIndex);
+  Serial.print(" virtual pixels -> ");
+  Serial.println(outputs[outputIndex].virtualPixelCount);
   return true;
 }
 
@@ -738,7 +783,8 @@ void sendArtPollReply(IPAddress dest) {
   for (uint8_t i = 0; i < NUM_OUTPUTS && reportPos < (int)sizeof(reportBuf) - 1; i++) {
     if (outputs[i].type == OUTPUT_OFF) continue;
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|%u:%u:%u", i, (uint8_t)outputs[i].type, outputs[i].universe);
+                          "|%u:%u:%u:%u", i, (uint8_t)outputs[i].type,
+                          outputs[i].universe, outputs[i].virtualPixelCount);
   }
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
@@ -869,6 +915,33 @@ void handleArtOutputConfig(uint8_t* data, uint16_t len) {
     if (typeId >= NUM_OUTPUT_TYPES) continue;
     OutputType newType = (OutputType)typeId;
     if (applyOutputTypeChange(i, newType)) {
+      changed = true;
+    }
+  }
+
+  if (changed) {
+#if BOARD_HAS_TFT_DISPLAY
+    displayUpdateOutputPower(outputs, outputsPowerEnabled);
+#endif
+  }
+}
+
+// =====================================================================
+//  ArtVirtualResolution — remote virtual pixel count (opcode 0x8130)
+// =====================================================================
+
+void handleArtVirtualResolution(uint8_t* data, uint16_t len) {
+  // [header 8][opcode 2][version 2][num_outputs 1][virtual0 LE 2][virtual1 LE 2]...
+  if (len < 13) return;
+  uint8_t numOut = data[12];
+  if (numOut > NUM_OUTPUTS) numOut = NUM_OUTPUTS;
+  if (len < (uint16_t)(13 + (numOut * 2))) return;
+
+  bool changed = false;
+  for (uint8_t i = 0; i < numOut; i++) {
+    uint16_t offset = 13 + (i * 2);
+    uint16_t virtualCount = (uint16_t)data[offset] | ((uint16_t)data[offset + 1] << 8);
+    if (applyVirtualPixelCountChange(i, virtualCount)) {
       changed = true;
     }
   }
@@ -1017,6 +1090,11 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     return;
   }
 
+  if (opcode == ARTNET_OPCODE_VIRTUAL_RESOLUTION) {
+    handleArtVirtualResolution(data, len);
+    return;
+  }
+
   if (opcode == ARTNET_OPCODE_IP_CONFIG) {
     // ArtIPConfig — remote static/DHCP IP assignment
     handleArtIPConfig(data, len);
@@ -1074,15 +1152,22 @@ void applyBufferedData() {
     if (!outputDataReady[o]) continue;
 
     uint8_t  port  = outputs[o].pxl8Port;
-    uint16_t count = outputs[o].pixelCount;
+    uint16_t physical = outputs[o].pixelCount;
+    uint16_t virtualCount = outputs[o].virtualPixelCount;
     uint8_t  bpp   = outputs[o].bytesPerPixel;
     if (bpp != 3 && bpp != 4) {
       outputDataReady[o] = false;
       continue;
     }
+    if (physical == 0 || virtualCount == 0) {
+      outputDataReady[o] = false;
+      continue;
+    }
 
-    for (uint16_t p = 0; p < count; p++) {
-      uint16_t base = p * bpp;
+    for (uint16_t p = 0; p < physical; p++) {
+      uint16_t v = (uint16_t)(((uint32_t)p * virtualCount) / physical);
+      if (v >= virtualCount) v = virtualCount - 1;
+      uint16_t base = v * bpp;
       if ((uint16_t)(base + bpp) > MAX_BUFFER_SIZE) break;
       if (bpp == 4) {
         setStripPixel(port, p, Adafruit_NeoPixel::Color(

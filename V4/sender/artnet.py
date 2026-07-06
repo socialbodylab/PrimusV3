@@ -22,6 +22,7 @@ ARTNET_OPCODE_POLLREPLY = 0x2100
 ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
 ARTNET_OPCODE_RECEIVE_CONFIG = 0x8110
+ARTNET_OPCODE_VIRTUAL_RESOLUTION = 0x8130
 ARTNET_OPCODE_IP_CONFIG = 0x8200
 ARTNET_OPCODE_SHOW_INFO = 0x8210
 ARTNET_OPCODE_AUDIO_CMD = 0x8300
@@ -853,18 +854,24 @@ def _parse_capability_outputs(node_report, type_keys):
 
     outputs = []
     for part in parts:
-        match = re.fullmatch(r"(\d+):(\d+):(\d+)", part)
+        match = re.fullmatch(r"(\d+):(\d+):(\d+)(?::(\d+))?", part)
         if not match:
             continue
-        port_index, type_id, universe = (int(value) for value in match.groups())
+        port_index, type_id, universe, virtual_text = match.groups()
+        port_index = int(port_index)
+        type_id = int(type_id)
+        universe = int(universe)
         if 0 <= type_id < len(type_keys):
             type_key = type_keys[type_id]
             if type_key != "none":
-                outputs.append({
+                entry = {
                     "name": f"A{port_index}",
                     "type": type_key,
                     "universe": universe,
-                })
+                }
+                if virtual_text is not None:
+                    entry["virtual_pixels"] = int(virtual_text)
+                outputs.append(entry)
 
     outputs.sort(key=lambda output: int(output["name"][1:]))
     return outputs
@@ -956,6 +963,25 @@ def send_output_config(ip, output_types, type_to_id_map, source_ip=None):
     type_to_id_map: dict mapping type key -> firmware enum int.
     """
     pkt = build_output_config_packet(output_types, type_to_id_map)
+    _send_udp_packet(ip, pkt, source_ip=source_ip)
+
+
+def build_virtual_resolution_packet(virtual_counts):
+    """Build an ArtVirtualResolution packet for the given virtual pixel counts."""
+    num = len(virtual_counts)
+    pkt = bytearray(13 + (num * 2))
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_VIRTUAL_RESOLUTION)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = num
+    for i, count in enumerate(virtual_counts):
+        struct.pack_into("<H", pkt, 13 + (i * 2), int(count) & 0xFFFF)
+    return bytes(pkt)
+
+
+def send_virtual_resolution(ip, virtual_counts, source_ip=None):
+    """Send ArtVirtualResolution packet."""
+    pkt = build_virtual_resolution_packet(virtual_counts)
     _send_udp_packet(ip, pkt, source_ip=source_ip)
 
 

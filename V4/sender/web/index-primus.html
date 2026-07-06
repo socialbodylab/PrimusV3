@@ -277,6 +277,20 @@
                                   x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"
                                   x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"></span>
                         </label>
+                        <label class="device-output-row" x-show="o.type && o.type !== 'none'"
+                               title="Art-Net transport resolution (receiver upscales to full physical output)">
+                            <span class="device-config-label">Virt</span>
+                            <input class="form-range device-virtual-range" type="range" min="1" max="100"
+                                   :disabled="!$store.conn.canConfigureOutputs(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                   :value="$store.conn.virtualResolutionPercent(o)"
+                                   @change="$store.conn.setDeviceVirtualResolutionPercent(di, oi, $event.target.value)">
+                            <span class="text-sm text-muted device-virtual-hint"
+                                  x-text="$store.conn.virtualResolutionHint(o)"></span>
+                            <span class="device-config-status"
+                                  :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                  x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                  x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'virtual', oi))"></span>
+                        </label>
                     </template>
                 </div>
                 <div class="device-footer-actions">
