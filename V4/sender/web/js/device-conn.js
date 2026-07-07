@@ -403,6 +403,27 @@ document.addEventListener("alpine:init", () => {
             return "dm-status-nosignal";
         },
 
+        // FPS/battery counterparts of receiverFpsLabel/receiverLiveClass/showBattery
+        // for Device Manager's monitoring view — telemetry comes from the UDP 6455
+        // listener regardless of connect state, so these don't gate on dev.connected.
+        monitorFpsLabel(dev) {
+            if (dev?.receiver_online) {
+                if (dev?.receiver_fps != null) {
+                    return `${dev.receiver_fps} fps · live`;
+                }
+                return "live";
+            }
+            return "waiting for receiver";
+        },
+
+        monitorLiveClass(dev) {
+            return dev?.receiver_online ? "device-live-ok" : "device-live-warn";
+        },
+
+        monitorShowBattery(dev) {
+            return connProduct() === "primus" && !!dev?.capabilities?.battery;
+        },
+
         showInfoEnabled() {
             return connProduct() === "primus";
         },

@@ -91,14 +91,22 @@ def _sync_network_devices(device_state, interface=None):
                 "device_index": result.get("device_index"),
             })
 
-    online_ips = {node.get("ip") for node in nodes if node.get("ip")}
-    connect_results = device_state.connect_all(
-        only_ips=online_ips if online_ips else None,
-    )
-    connected = [
-        result for result in connect_results
-        if result.get("ok") and not result.get("skipped")
-    ]
+    if getattr(device_state, "monitor_only", False):
+        # Discovery only — never open an output connection automatically.
+        # Otherwise the per-frame send loop would start streaming DMX
+        # (including idle keepalive frames) to devices this instance has no
+        # business driving, e.g. receivers a console like EOS is already
+        # controlling on the same network.
+        connected = []
+    else:
+        online_ips = {node.get("ip") for node in nodes if node.get("ip")}
+        connect_results = device_state.connect_all(
+            only_ips=online_ips if online_ips else None,
+        )
+        connected = [
+            result for result in connect_results
+            if result.get("ok") and not result.get("skipped")
+        ]
     return {
         "added": added,
         "skipped": skipped,
@@ -163,6 +171,7 @@ class Handler(BaseHTTPRequestHandler):
                     "devices": "/devices",
                 },
                 "default_frontend": default_frontend_path(),
+                "monitor_only": bool(getattr(self._device_state(), "monitor_only", False)),
             })
             return
         if path == "/api/state":
@@ -381,6 +390,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response(self._device_state().get_json())
 
         elif path == "/api/connect":
+            if getattr(self._device_state(), "monitor_only", False):
+                self._json_error(409, "this instance is running in monitor-only mode")
+                return
             di = data.get("device", 0)
             if 0 <= di < len(self._device_state().devices):
                 ip = self._device_state().devices[di]["ip"]
@@ -406,6 +418,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
 
         elif path == "/api/connect_all":
+            if getattr(self._device_state(), "monitor_only", False):
+                self._json_error(409, "this instance is running in monitor-only mode")
+                return
             known_ips = self._device_state().discovery_targets()
             interface = self._sync_artnet_source()
             nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)

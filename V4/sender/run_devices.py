@@ -15,6 +15,13 @@ os.environ.setdefault("PRIMUSV3_DEFAULT_FRONTEND", "devices")
 if "--frontend" not in sys.argv:
     sys.argv[1:1] = ["--frontend", "devices"]
 
+# Device Manager's job is to monitor devices, not drive them. This is inert if
+# we attach to an already-running Central server (its ControllerState was
+# already constructed without this flag) and only takes effect when this
+# process starts a fresh backend of its own.
+if "--monitor-only" not in sys.argv:
+    sys.argv[1:1] = ["--monitor-only"]
+
 from run_primus import main
 
 

@@ -81,6 +81,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
             },
         ]
         state = MagicMock()
+        state.monitor_only = False
         state.discovery_targets.return_value = ["192.168.1.10"]
         state.add_device_from_node.return_value = {
             "status": "added",
@@ -117,6 +118,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
             },
         ]
         state = MagicMock()
+        state.monitor_only = False
         state.discovery_targets.return_value = []
         state.add_device_from_node.return_value = {
             "status": "exists",
@@ -128,6 +130,31 @@ class SyncNetworkDevicesTests(unittest.TestCase):
 
         state.add_device_from_node.assert_called_once()
         self.assertEqual(result["added"], [])
+
+    @patch("server.discover_artnet_nodes")
+    @patch("server.sender_product")
+    def test_sync_never_connects_when_monitor_only(self, mock_product, mock_discover):
+        mock_product.return_value = "primus"
+        mock_discover.return_value = [
+            {
+                "ip": "192.168.1.10",
+                "node_report": "PV3CAP1|B:v1|IP:D|F:RIOH",
+                "short_name": "NodeA",
+            },
+        ]
+        state = MagicMock()
+        state.monitor_only = True
+        state.discovery_targets.return_value = []
+        state.add_device_from_node.return_value = {
+            "status": "added",
+            "device_index": 0,
+        }
+
+        result = _sync_network_devices(state)
+
+        state.connect_all.assert_not_called()
+        self.assertEqual(result["connected"], [])
+        self.assertEqual(len(result["added"]), 1)
 
 
 if __name__ == "__main__":

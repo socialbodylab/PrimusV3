@@ -796,7 +796,7 @@ class ControllerState:
         SOURCE_CONTROLLER,
     )
 
-    def __init__(self, fps_listener):
+    def __init__(self, fps_listener, monitor_only=False):
         self.lock = threading.Lock()
         self.render_event = threading.Event()
         self.performance = PerformanceStats()
@@ -806,6 +806,7 @@ class ControllerState:
         self.start_time = time.monotonic()
         self.last_tick = self.start_time
         self.devices = []
+        self.monitor_only = bool(monitor_only)
         self.playback_source = self.SOURCE_IDLE
         self.artnet_source_ip = None
 
@@ -1408,22 +1409,30 @@ class ControllerState:
                 output["virtual_pixels"] = prior
                 return {"ok": False, "error": err}
 
-            if dev["sender"].connected:
-                if not self._ensure_sender_connected_unlocked(dev):
-                    output["virtual_pixels"] = prior
-                    return {
-                        "ok": False,
-                        "error": dev.get("transport_error") or "sender connection failed",
-                    }
-                config_ok, config_error = self._send_virtual_resolution(dev)
-                if not config_ok:
-                    output["virtual_pixels"] = prior
-                    return {
-                        "ok": False,
-                        "error": config_error or "virtual resolution configuration failed",
-                    }
-                _save_devices(self.devices)
-                return _config_apply_result(True)
+            was_connected = dev["sender"].connected
+            if was_connected or self.monitor_only:
+                try:
+                    if not self._ensure_sender_connected_unlocked(dev):
+                        output["virtual_pixels"] = prior
+                        return {
+                            "ok": False,
+                            "error": dev.get("transport_error") or "sender connection failed",
+                        }
+                    config_ok, config_error = self._send_virtual_resolution(dev)
+                    if not config_ok:
+                        output["virtual_pixels"] = prior
+                        return {
+                            "ok": False,
+                            "error": config_error or "virtual resolution configuration failed",
+                        }
+                    _save_devices(self.devices)
+                    return _config_apply_result(True)
+                finally:
+                    # A monitor-only backend never keeps a device connected
+                    # between one-off actions — revert once this config push
+                    # is done so the per-frame tick loop doesn't pick it up.
+                    if self.monitor_only and not was_connected:
+                        dev["connected"] = False
             _save_devices(self.devices)
             return _config_apply_result(False)
 
@@ -1442,29 +1451,34 @@ class ControllerState:
                 self._apply_type_to_device_output_unlocked(dev["outputs"][oi], output_type)
             except ValueError as error:
                 return {"ok": False, "error": str(error)}
-            if dev["sender"].connected:
-                if not self._ensure_sender_connected_unlocked(dev):
-                    dev["outputs"][oi] = prior
-                    return {
-                        "ok": False,
-                        "error": dev.get("transport_error") or "sender connection failed",
-                    }
-                config_ok, config_error = self._send_output_config(dev)
-                if not config_ok:
-                    dev["outputs"][oi] = prior
-                    return {
-                        "ok": False,
-                        "error": config_error or "output configuration failed",
-                    }
-                virt_ok, virt_error = self._send_virtual_resolution(dev)
-                if not virt_ok:
-                    dev["outputs"][oi] = prior
-                    return {
-                        "ok": False,
-                        "error": virt_error or "virtual resolution configuration failed",
-                    }
-                _save_devices(self.devices)
-                return _config_apply_result(True)
+            was_connected = dev["sender"].connected
+            if was_connected or self.monitor_only:
+                try:
+                    if not self._ensure_sender_connected_unlocked(dev):
+                        dev["outputs"][oi] = prior
+                        return {
+                            "ok": False,
+                            "error": dev.get("transport_error") or "sender connection failed",
+                        }
+                    config_ok, config_error = self._send_output_config(dev)
+                    if not config_ok:
+                        dev["outputs"][oi] = prior
+                        return {
+                            "ok": False,
+                            "error": config_error or "output configuration failed",
+                        }
+                    virt_ok, virt_error = self._send_virtual_resolution(dev)
+                    if not virt_ok:
+                        dev["outputs"][oi] = prior
+                        return {
+                            "ok": False,
+                            "error": virt_error or "virtual resolution configuration failed",
+                        }
+                    _save_devices(self.devices)
+                    return _config_apply_result(True)
+                finally:
+                    if self.monitor_only and not was_connected:
+                        dev["connected"] = False
             _save_devices(self.devices)
             return _config_apply_result(False)
 
@@ -1950,7 +1964,7 @@ class ControllerState:
             if not status["ok"]:
                 return False
             dev = self.devices[di]
-            if not dev.get("connected"):
+            if not dev.get("connected") and not self.monitor_only:
                 return False
             if not self._ensure_sender_connected_unlocked(dev):
                 return False
@@ -2212,6 +2226,9 @@ class ControllerState:
                         devices_sent.add(di)
                         continue
                     dev["_hello_until"] = 0
+                    if self.monitor_only:
+                        dev["connected"] = False
+                        continue
                 if device_frames_active:
                     frames = None
                     if self._override_frames_by_device is not None:

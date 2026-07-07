@@ -631,6 +631,13 @@ def main():
         action="store_true",
         help="Stop any running Central server and start a new one",
     )
+    parser.add_argument(
+        "--monitor-only",
+        action="store_true",
+        help="Never auto-connect to discovered devices or drive Art-Net output "
+             "(only applies when this process starts a fresh backend; inert if "
+             "it attaches to an already-running server)",
+    )
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -655,7 +662,7 @@ def main():
     fps_thread = threading.Thread(target=fps_listener.run, daemon=True)
     fps_thread.start()
 
-    state = ControllerState(fps_listener)
+    state = ControllerState(fps_listener, monitor_only=args.monitor_only)
     cue_list = CueList()
     osc_service = OscControlServer(cue_list, state)
     osc_service.start()

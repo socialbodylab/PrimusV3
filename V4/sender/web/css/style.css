@@ -126,6 +126,28 @@ body {
     color: var(--text-secondary);
 }
 
+.monitor-only-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    padding: 4px 10px;
+    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--success) 12%, var(--bg-primary));
+    color: var(--success);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.monitor-only-badge::before {
+    content: "\25CF";
+    font-size: 8px;
+}
+
 .network-chip {
     appearance: none;
     display: inline-flex;
@@ -4146,6 +4168,12 @@ input[type="color"] {
 /* ── DEVICE MANAGER ────────────────────────────────────── */
 
 .device-manager-main {
+    display: block;
+    padding: 16px 20px 24px;
+    min-height: calc(100vh - 48px);
+}
+
+.dm-settings-main {
     display: block;
     padding: 16px 20px 24px;
     min-height: calc(100vh - 48px);
