@@ -28,9 +28,12 @@
 bool sdBusy = false;
 
 #define MAX_UDP_PACKET 256
+#define MAX_OSC_PACKET 512
 WiFiUDP udp;
 WiFiUDP udpFps;
+WiFiUDP udpOsc;
 uint8_t udpBuf[MAX_UDP_PACKET];
+uint8_t oscBuf[MAX_OSC_PACKET];
 
 #define ARTNET_HEADER_LEN  8
 static const uint8_t ARTNET_MAGIC[ARTNET_HEADER_LEN] =
@@ -208,6 +211,7 @@ void checkWifiConnection() {
       Serial.print("WiFi connected! IP: ");
       Serial.println(WiFi.localIP());
       udp.begin(ARTNET_PORT);
+      udpOsc.begin(OSC_PORT);
       broadcastArtPollReply();
       if (infoScreenIndex == 0)
         displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), true, WiFi.RSSI());
@@ -531,6 +535,53 @@ void sendFpsTelemetry(uint16_t pktRate) {
   udpFps.endPacket();
 }
 
+// ── OSC /cue/N, /stop, /hello ────────────────────────────────────────
+
+void handleOscPacket() {
+  int len = udpOsc.parsePacket();
+  if (len <= 0) return;
+  if (len > MAX_OSC_PACKET) { udpOsc.clear(); return; }
+  int n = udpOsc.readBytes((char*)oscBuf, len);
+  if (n < 2 || oscBuf[0] != '/') return;
+  oscBuf[n < MAX_OSC_PACKET ? n : MAX_OSC_PACKET - 1] = '\0';
+  const char* addr = (const char*)oscBuf;
+
+  Serial.print("[OSC] "); Serial.println(addr);
+
+  if (strcmp(addr, "/stop") == 0) {
+    _pendingCue.active = false;
+    audioStop();
+    if (infoScreenIndex == 2)
+      displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+    return;
+  }
+
+  if (strcmp(addr, "/hello") == 0 || strcmp(addr, "/radius/hello") == 0) {
+    Serial.println("[OSC] Hello — playing test tone");
+    audioTestTone();
+    if (infoScreenIndex == 2)
+      displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+    return;
+  }
+
+  if (strncmp(addr, "/cue/", 5) == 0) {
+    int cueNum = atoi(addr + 5);
+    if (cueNum <= 0 || cueNum > 255) {
+      Serial.printf("[OSC] Invalid cue number: %s\n", addr);
+      return;
+    }
+    AudioCue cue;
+    if (!cueLookup((uint8_t)cueNum, &cue)) {
+      Serial.printf("[OSC] Cue %d not found — dismissed\n", cueNum);
+      return;
+    }
+    dispatchCue(&cue);
+    return;
+  }
+
+  Serial.printf("[OSC] Unknown address: %s\n", addr);
+}
+
 // ── SD screen helpers ────────────────────────────────────────────────
 
 void sdScreenLoadFile() {
@@ -718,6 +769,9 @@ void loop() {
       processArtNetPacket(udpBuf, bytesRead, remoteAddr);
     }
   }
+
+  // OSC
+  handleOscPacket();
 
   // Throttled WiFi health
   checkWifiConnection();

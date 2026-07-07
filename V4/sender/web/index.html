@@ -85,31 +85,31 @@
                 </div>
             </div>
 
-        <template x-for="(dev, di) in $store.conn.devices" :key="di">
+        <template x-for="dev in $store.conn.devices.map((d,i) => ({...d, _di:i})).filter(d => d.is_audio)" :key="dev._di">
             <div class="device-card" :class="{ 'device-connected': dev.connected, 'device-static-ip': dev.ip_mode === 'static' && !dev.ip_config_pending }">
                 <div class="device-header">
-                    <template x-if="$store.conn.renamingDevice !== di">
+                    <template x-if="$store.conn.renamingDevice !== dev._di">
                         <span class="device-name" x-text="dev.name"
-                              @click="$store.conn.startRename(di)"
+                              @click="$store.conn.startRename(dev._di)"
                               :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(dev) }"
                               :title="$store.conn.renameHint(dev)"></span>
                     </template>
-                    <template x-if="$store.conn.renamingDevice === di">
+                    <template x-if="$store.conn.renamingDevice === dev._di">
                         <input class="device-rename-input" type="text" maxlength="17"
                                x-model="$store.conn.renameValue"
-                               @keydown.enter="$store.conn.finishRename(di)"
+                               @keydown.enter="$store.conn.finishRename(dev._di)"
                                @keydown.escape="$store.conn.cancelRename()"
-                               @blur="$store.conn.finishRename(di)"
+                               @blur="$store.conn.finishRename(dev._di)"
                                x-init="$nextTick(() => { $el.focus(); $el.select() })">
                     </template>
                     <span class="audio-badge" x-show="dev.is_radius" title="Radius audio node">&#9834;</span>
                 </div>
                 <div class="device-meta">
                     <button class="device-ip-button"
-                            :class="{ active: $store.conn.ipConfigDevice === di }"
+                            :class="{ active: $store.conn.ipConfigDevice === dev._di }"
                             :disabled="!$store.conn.canConfigureIp(dev)"
                             :title="$store.conn.ipConfigHint(dev)"
-                            @click="$store.conn.ipConfigDevice === di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(di)"
+                            @click="$store.conn.ipConfigDevice === dev._di ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(dev._di)"
                             x-text="dev.ip"></button>
                     <span class="device-network-badge"
                           :class="$store.conn.networkModeClass(dev)"
@@ -124,12 +124,12 @@
                 <div class="btn-group device-actions device-actions-primary">
                     <button class="btn btn-sm device-action-main"
                             :class="{ 'btn-primary': !dev.connected }"
-                            @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
+                            @click="dev.connected ? $store.conn.disconnect(dev._di) : $store.conn.connect(dev._di)"
                             x-text="dev.connected ? 'Disconnect' : 'Connect'"></button>
                     <button class="btn btn-sm device-action-main" x-show="dev.connected"
-                            @click="api('POST', '/api/hello_device', { device: di, volume: $store.audio.getVolume(di) })">Hello</button>
+                            @click="api('POST', '/api/hello_device', { device: dev._di, volume: $store.audio.getVolume(dev._di) })">Hello</button>
                 </div>
-                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
+                <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === dev._di" x-cloak>
                     <div class="form-group compact">
                         <label class="form-label">Static IP</label>
                         <input class="form-input form-input-sm" type="text"
@@ -146,14 +146,14 @@
                                x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
                     </div>
                     <div class="btn-group" style="margin-top:4px">
-                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(di)">Set Static IP</button>
-                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(di)">Revert to DHCP</button>
+                        <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(dev._di)">Set Static IP</button>
+                        <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(dev._di)">Revert to DHCP</button>
                     </div>
                     <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(dev)"></div>
                     <div class="text-sm text-muted" style="margin-top:4px">Device will reboot after change and Radius Central will rescan.</div>
                 </div>
                 <div class="device-footer-actions">
-                    <button class="btn btn-sm btn-danger device-remove-btn" @click="$store.conn.removeDevice(di)">Remove</button>
+                    <button class="btn btn-sm btn-danger device-remove-btn" @click="$store.conn.removeDevice(dev._di)">Remove</button>
                 </div>
             </div>
         </template>
@@ -168,10 +168,10 @@
                     :disabled="!$store.conn.manualIp">Add</button>
         </div>
 
-        <template x-if="$store.conn.discovered.length > 0">
+        <template x-if="$store.conn.discovered.filter(n => n.is_audio !== false).length > 0">
             <div class="mt-2">
                 <div class="text-sm text-muted mb-2">Discovered:</div>
-                <template x-for="node in $store.conn.discovered" :key="node.ip">
+                <template x-for="node in $store.conn.discovered.filter(n => n.is_audio !== false)" :key="node.ip">
                     <div class="device-card" style="cursor:pointer" @click="$store.conn.addDiscovered(node)">
                         <div class="device-name" x-text="node.short_name || node.ip"></div>
                         <div class="device-ip" x-text="node.ip"></div>
@@ -227,9 +227,9 @@
                               x-text="getVolume(dev.di)"></span>
                     </div>
                 </div>
-                <div class="audio-now-playing" x-show="playing[dev.di]">
-                    <span x-text="playing[dev.di]?.cmd === 'loop' ? '&#8634;' : '&#9654;'"></span>
-                    <span x-text="playing[dev.di]?.file"></span>
+                <div class="audio-now-playing" x-show="nowPlaying(dev.di)">
+                    <span x-text="nowPlaying(dev.di)?.cmd === 'loop' ? '&#8634;' : '&#9654;'"></span>
+                    <span x-text="nowPlaying(dev.di)?.file"></span>
                 </div>
                 <div class="audio-fm">
                     <div class="audio-fm-toolbar">
@@ -273,10 +273,10 @@
                         <template x-if="loading[dev.di] && entries[dev.di] === undefined">
                             <div class="audio-fm-empty text-muted">Loading...</div>
                         </template>
-                        <template x-if="!loading[dev.di] && entries[dev.di] && entries[dev.di].length === 0 && !newFolderMode[dev.di]">
-                            <div class="audio-fm-empty text-muted">Empty directory</div>
+                        <template x-if="!loading[dev.di] && entries[dev.di] && wavFiles(dev.di).length === 0 && !newFolderMode[dev.di]">
+                            <div class="audio-fm-empty text-muted">No WAV files on SD card</div>
                         </template>
-                        <template x-for="entry in (entries[dev.di] || [])" :key="entry.name">
+                        <template x-for="entry in wavFiles(dev.di)" :key="entry.name">
                             <div class="audio-fm-row"
                                  :class="{ 'fm-row-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }">
                                 <span class="audio-fm-icon"
@@ -375,14 +375,12 @@
                     <span class="form-label" style="margin:0">Project Library</span>
                     <button class="btn btn-sm" @click="triggerProjectImport()">+ WAV</button>
                 </div>
-                <template x-if="projectFiles.length === 0">
-                    <p class="text-muted text-sm">No WAV files imported yet.</p>
+                <template x-if="allDeviceFiles.length === 0">
+                    <p class="text-muted text-sm">No WAV files found. Visit the Audio tab to load files from a connected device.</p>
                 </template>
-                <template x-for="f in projectFiles" :key="f.name">
+                <template x-for="name in allDeviceFiles" :key="name">
                     <div class="cues-library-row">
-                        <span class="text-sm" x-text="f.name"></span>
-                        <span class="text-muted" style="font-size:11px" x-text="formatSize(f.size)"></span>
-                        <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
+                        <span class="text-sm" x-text="name"></span>
                     </div>
                 </template>
             </div>
@@ -423,6 +421,9 @@
                         <input type="text" class="form-input" placeholder="note…" style="flex:1"
                                :value="cue.note"
                                @input="updateCueField(idx, 'note', $event.target.value)">
+                        <span class="text-muted" style="font-size:11px;white-space:nowrap"
+                              :title="'OSC address — send this from EOS or QLab to fire cue ' + cue.number"
+                              x-text="'/cue/' + cue.number"></span>
                     </div>
                     <div class="btn-group">
                         <button class="btn btn-sm btn-primary" @click="fireCue(idx)">▶ Fire</button>
@@ -467,8 +468,8 @@
                                     :value="getAction(idx, dev.ip).filename"
                                     @change="setActionField(idx, dev.ip, 'filename', $event.target.value)">
                                 <option value="">— select file —</option>
-                                <template x-for="f in projectFiles" :key="f.name">
-                                    <option :value="f.name" x-text="f.name"></option>
+                                <template x-for="f in deviceFiles(dev.di)" :key="f">
+                                    <option :value="f" x-text="f"></option>
                                 </template>
                             </select>
                         </template>
@@ -491,6 +492,14 @@
                                        placeholder="0=full">
                                 <span class="text-muted" style="font-size:11px">s</span>
                             </div>
+                        </template>
+
+                        <template x-if="getAction(idx, dev.ip).cmd !== 'none'">
+                            <input type="number" class="form-input" min="0" max="65535" style="width:58px"
+                                   title="Delay in milliseconds before firing"
+                                   :value="getAction(idx, dev.ip).delay_ms"
+                                   @input="setActionField(idx, dev.ip, 'delay_ms', parseInt($event.target.value) || 0)"
+                                   placeholder="dly ms">
                         </template>
 
                     </div>
@@ -599,9 +608,12 @@
             <table class="cue-list">
                 <thead>
                     <tr>
-                        <th style="width:70px">Cue #</th>
+                        <th style="width:60px">Cue #</th>
+                        <th style="width:90px">Cmd</th>
                         <th>File</th>
-                        <th style="width:90px">Duration (s)</th>
+                        <th style="width:52px" title="Volume 0–100">Vol</th>
+                        <th style="width:64px" title="Duration in seconds (0 = full file)">Dur s</th>
+                        <th style="width:68px" title="Delay in milliseconds before firing">Dly ms</th>
                         <th style="width:80px">Actions</th>
                     </tr>
                 </thead>
@@ -611,10 +623,18 @@
                             <td>
                                 <input type="number" class="form-input form-input-sm"
                                        x-model.number="row.number"
-                                       min="1" max="64" style="width:54px">
+                                       min="1" max="64" style="width:50px">
                             </td>
                             <td>
-                                <template x-if="deviceFiles.length > 0">
+                                <select class="form-select form-select-sm" x-model="row.cmd">
+                                    <option value="play">play</option>
+                                    <option value="loop">loop</option>
+                                    <option value="stop">stop</option>
+                                    <option value="volume">volume</option>
+                                </select>
+                            </td>
+                            <td>
+                                <template x-if="needsFile(row.cmd) && deviceFiles.length > 0">
                                     <select class="form-select" x-model="row.file">
                                         <option value="">— select —</option>
                                         <template x-for="f in deviceFiles" :key="f">
@@ -622,18 +642,32 @@
                                         </template>
                                     </select>
                                 </template>
-                                <template x-if="deviceFiles.length === 0">
+                                <template x-if="needsFile(row.cmd) && deviceFiles.length === 0">
                                     <input type="text" class="form-input" x-model="row.file"
                                            placeholder="filename.wav">
                                 </template>
+                                <template x-if="!needsFile(row.cmd)">
+                                    <span class="text-muted">—</span>
+                                </template>
                             </td>
                             <td>
-                                <div class="flex items-center gap-1">
-                                    <input type="number" class="form-input form-input-sm"
-                                           x-model.number="row.duration"
-                                           min="0" max="3600" style="width:60px"
-                                           placeholder="0=full">
-                                </div>
+                                <input type="number" class="form-input form-input-sm"
+                                       x-model.number="row.volume"
+                                       min="0" max="100" style="width:48px"
+                                       placeholder="—">
+                            </td>
+                            <td>
+                                <input type="number" class="form-input form-input-sm"
+                                       x-model.number="row.duration"
+                                       min="0" max="3600" style="width:56px"
+                                       placeholder="0=full"
+                                       :disabled="!needsFile(row.cmd)">
+                            </td>
+                            <td>
+                                <input type="number" class="form-input form-input-sm"
+                                       x-model.number="row.delay"
+                                       min="0" max="65535" style="width:60px"
+                                       placeholder="0">
                             </td>
                             <td>
                                 <div class="btn-group">
@@ -652,7 +686,7 @@
         </template>
 
         <p class="text-muted text-sm" style="margin-top:12px">
-            Duration 0 = play full file. Max 64 cues. Changes take effect after device reboot.
+            Duration 0 = play full file. Delay in ms before firing. Max 64 cues. Changes take effect after device reboot.
         </p>
 
     </div><!-- /.Cue Map panel -->

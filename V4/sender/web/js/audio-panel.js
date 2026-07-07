@@ -7,11 +7,25 @@ document.addEventListener("alpine:init", () => {
 
     Alpine.store("audio", {
         volume: {},
+        deviceFiles: {},  // { di: [filenames] } — WAV files on each device's SD card
         getVolume(di) {
             return this.volume[di] ?? 80;
         },
         setVolume(di, vol) {
             this.volume = { ...this.volume, [di]: vol };
+        },
+        setDeviceFiles(di, names) {
+            this.deviceFiles = { ...this.deviceFiles, [di]: names };
+        },
+        allFiles() {
+            const seen = new Set();
+            const result = [];
+            for (const names of Object.values(this.deviceFiles)) {
+                for (const n of (names || [])) {
+                    if (!seen.has(n)) { seen.add(n); result.push(n); }
+                }
+            }
+            return result.sort((a, b) => a.localeCompare(b));
         },
     });
 
@@ -57,6 +71,28 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
+        wavFiles(di) {
+            return (this.entries[di] || []).filter(e =>
+                !e.is_dir &&
+                e.name.toLowerCase().endsWith(".wav") &&
+                !e.name.startsWith("._")
+            );
+        },
+
+        // Authoritative playback state: device report takes priority.
+        // "stopped" from device clears immediately. Unknown status allows a
+        // 3-second optimistic window after a play command so the UI doesn't flash.
+        nowPlaying(di) {
+            const devices = Alpine.store("app").state?.devices || [];
+            const dev = devices[di];
+            if (dev?.audio_status === "stopped") return null;
+            if (dev?.audio_status === "playing" && dev?.now_playing) {
+                return { file: dev.now_playing, cmd: this.playing[di]?.cmd || "play" };
+            }
+            if ((this._playingExpiry[di] || 0) > Date.now()) return this.playing[di] || null;
+            return null;
+        },
+
         // ── Directory navigation ─────────────────────────────────────────
 
         async loadDir(di) {
@@ -64,7 +100,17 @@ document.addEventListener("alpine:init", () => {
             this.loading = { ...this.loading, [di]: true };
             try {
                 const result = await api("POST", "/api/audio/files", { device: di, path });
-                this.entries = { ...this.entries, [di]: result.entries || [] };
+                const entries = result.entries || [];
+                this.entries = { ...this.entries, [di]: entries };
+                // Share WAV filenames with other components via the store.
+                if (path === "/") {
+                    const wavNames = entries
+                        .filter(e => !e.is_dir && e.name.toLowerCase().endsWith(".wav")
+                                              && !e.name.startsWith("._"))
+                        .map(e => e.name)
+                        .sort((a, b) => a.localeCompare(b));
+                    Alpine.store("audio").setDeviceFiles(di, wavNames);
+                }
             } catch (e) {
                 console.error("[audio] dir list failed:", e);
                 this.entries = { ...this.entries, [di]: [] };
@@ -125,6 +171,9 @@ document.addEventListener("alpine:init", () => {
             const p = { ...this.playing };
             delete p[di];
             this.playing = p;
+            const expiry = { ...this._playingExpiry };
+            delete expiry[di];
+            this._playingExpiry = expiry;
         },
 
         async pause(di) {
@@ -142,11 +191,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         isPlaying(di, filename) {
-            return this.playing[di]?.file === filename;
+            return this.nowPlaying(di)?.file === filename;
         },
 
         isLooping(di, filename) {
-            return this.playing[di]?.file === filename && this.playing[di]?.cmd === "loop";
+            const np = this.nowPlaying(di);
+            return np?.file === filename && np?.cmd === "loop";
         },
 
         // ── File operations ───────────────────────────────────────────────

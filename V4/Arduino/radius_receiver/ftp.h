@@ -26,12 +26,9 @@
 
 bool audioIsPlaying();
 
-// Tell SimpleFTPServer to use SD on ESP32.
-// FtpServerKey.h only sets DEFAULT_STORAGE_TYPE_ESP32 inside
-// #ifndef DEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32 — so we must pre-define
-// the network type too, otherwise the library redefines storage to FFAT.
-#define DEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32 NETWORK_ESP32
-#define DEFAULT_STORAGE_TYPE_ESP32 STORAGE_SD
+// SimpleFTPServer storage type is set via compiler flags in upload.sh
+// (-DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5)
+// so that the values reach library compilation, not just the sketch.
 #include <SimpleFTPServer.h>
 
 // =====================================================================

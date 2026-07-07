@@ -78,14 +78,14 @@
 //  Network Defaults
 // =====================================================================
 #ifndef DEFAULT_WIFI_SSID
-  #define DEFAULT_WIFI_SSID      "PrimusRouter"
+  #define DEFAULT_WIFI_SSID      "OPERADEV"
 #endif
 #ifndef DEFAULT_WIFI_PASSWORD
-  #define DEFAULT_WIFI_PASSWORD  "router-password"
+  #define DEFAULT_WIFI_PASSWORD  "torrentoflight"
 #endif
 
-#define DEFAULT_STATIC_IP      192, 168, 1, 100
-#define DEFAULT_GATEWAY        192, 168, 1, 1
+#define DEFAULT_STATIC_IP      192, 168, 8, 150
+#define DEFAULT_GATEWAY        192, 168, 8, 1
 #define DEFAULT_SUBNET         255, 255, 255, 0
 
 // =====================================================================
@@ -124,6 +124,11 @@
 #define FTP_USER     "radius"
 #define FTP_PASSWORD "radius"
 #define FTP_PORT     21
+
+// =====================================================================
+//  OSC
+// =====================================================================
+#define OSC_PORT     53001
 
 // =====================================================================
 //  Timing Constants (ms)

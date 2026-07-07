@@ -39,6 +39,16 @@ document.addEventListener("alpine:init", () => {
             return [...this.cues].sort((a, b) => (a.number || 0) - (b.number || 0));
         },
 
+        // Files available on a specific device's SD card.
+        deviceFiles(di) {
+            return Alpine.store("audio").deviceFiles[di] || [];
+        },
+
+        // All unique WAV filenames across all connected devices — for the project library card.
+        get allDeviceFiles() {
+            return Alpine.store("audio").allFiles();
+        },
+
         // ── Lifecycle ─────────────────────────────────────────────────
 
         async init() {
