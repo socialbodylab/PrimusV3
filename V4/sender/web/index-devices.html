@@ -216,14 +216,16 @@
                 <template x-for="entry in section.entries" :key="entry._index">
                     <div class="device-card dm-card" :class="'dm-card-' + entry._section">
 
-                        <!-- Primary heading: Character Name (editable), falls back to Device Name -->
+                        <!-- Primary heading: Character Name, always editable (placeholder when unset) -->
                         <div class="dm-heading">
-                            <template x-if="$store.conn.showInfoEnabled() && entry.dev.character_name && !$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                            <template x-if="$store.conn.showInfoEnabled() && !$store.conn.isEditingShowInfo(entry._index, 'character_name')">
                                 <h3 class="dm-title"
-                                    @click="$store.conn.startShowInfoEdit(entry._index, 'character_name')"
-                                    x-text="entry.dev.character_name"></h3>
+                                    :class="{ 'dm-title-fallback': !entry.dev.character_name }"
+                                    @click="!$store.app.mobileView && $store.conn.startShowInfoEdit(entry._index, 'character_name')"
+                                    :title="$store.conn.showInfoHint('character_name')"
+                                    x-text="$store.conn.showInfoDisplay(entry.dev, 'character_name')"></h3>
                             </template>
-                            <template x-if="$store.conn.showInfoEnabled() && entry.dev.character_name && $store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                            <template x-if="$store.conn.showInfoEnabled() && $store.conn.isEditingShowInfo(entry._index, 'character_name')">
                                 <input class="dm-title-input" type="text" maxlength="64"
                                        x-model="$store.conn.showInfoEditValue"
                                        @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
@@ -231,14 +233,14 @@
                                        @blur="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
                                        x-init="$nextTick(() => { $el.focus(); $el.select() })">
                             </template>
-                            <template x-if="!($store.conn.showInfoEnabled() && entry.dev.character_name) && $store.conn.renamingDevice !== entry._index">
+                            <template x-if="!$store.conn.showInfoEnabled() && $store.conn.renamingDevice !== entry._index">
                                 <h3 class="dm-title dm-title-fallback"
-                                    @click="$store.conn.startRename(entry._index)"
-                                    :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) }"
+                                    @click="!$store.app.mobileView && $store.conn.startRename(entry._index)"
+                                    :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) || $store.app.mobileView }"
                                     :title="$store.conn.renameHint(entry.dev)"
                                     x-text="entry.dev.name"></h3>
                             </template>
-                            <template x-if="!($store.conn.showInfoEnabled() && entry.dev.character_name) && $store.conn.renamingDevice === entry._index">
+                            <template x-if="!$store.conn.showInfoEnabled() && $store.conn.renamingDevice === entry._index">
                                 <input class="dm-title-input" type="text" maxlength="17"
                                        x-model="$store.conn.renameValue"
                                        @keydown.enter="$store.conn.finishRename(entry._index)"
@@ -250,6 +252,12 @@
                                   :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(entry._index, 'character'))"
                                   x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"
                                   x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"></span>
+                            <button type="button" class="dm-expand-toggle"
+                                    x-show="!$store.app.mobileView"
+                                    :class="{ 'dm-expand-toggle-open': $store.app.isCardExpanded(entry._index) }"
+                                    :aria-expanded="$store.app.isCardExpanded(entry._index) ? 'true' : 'false'"
+                                    :title="$store.app.isCardExpanded(entry._index) ? 'Collapse configuration' : 'Expand configuration'"
+                                    @click="$store.app.toggleCardExpanded(entry._index)">&#9656;</button>
                         </div>
 
                         <!-- Performer Name subheading -->
@@ -273,6 +281,26 @@
                                   :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"
                                   x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"
                                   x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"></span>
+                        </div>
+
+                        <!-- Device (technical) name -->
+                        <div class="dm-device-name-row" x-show="$store.conn.showInfoEnabled()">
+                            <span class="device-config-label">Device</span>
+                            <template x-if="$store.conn.renamingDevice !== entry._index">
+                                <span class="dm-footer-name-value"
+                                      @click="!$store.app.mobileView && $store.conn.startRename(entry._index)"
+                                      :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) || $store.app.mobileView }"
+                                      :title="$store.conn.renameHint(entry.dev)"
+                                      x-text="entry.dev.name"></span>
+                            </template>
+                            <template x-if="$store.conn.renamingDevice === entry._index">
+                                <input class="device-rename-input" type="text" maxlength="17"
+                                       x-model="$store.conn.renameValue"
+                                       @keydown.enter="$store.conn.finishRename(entry._index)"
+                                       @keydown.escape="$store.conn.cancelRename()"
+                                       @blur="$store.conn.finishRename(entry._index)"
+                                       x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                            </template>
                         </div>
 
                         <!-- Status cluster: connection status / battery / hello -->
@@ -300,8 +328,8 @@
                         <div class="dm-row dm-row-ip">
                             <button class="device-ip-button"
                                     :class="{ active: $store.conn.ipConfigDevice === entry._index }"
-                                    :disabled="!$store.conn.canConfigureIp(entry.dev)"
-                                    :title="$store.conn.ipConfigHint(entry.dev)"
+                                    :disabled="!$store.conn.canConfigureIp(entry.dev) || $store.app.mobileView || !$store.app.isCardExpanded(entry._index)"
+                                    :title="$store.app.isCardExpanded(entry._index) ? $store.conn.ipConfigHint(entry.dev) : 'Expand card to configure'"
                                     @click="$store.conn.ipConfigDevice === entry._index ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(entry._index)"
                                     x-text="entry.dev.ip"></button>
                             <span class="dm-universe" x-show="$store.app.product === 'primus'"
@@ -313,7 +341,7 @@
                         </div>
 
                         <div class="device-ip-config"
-                             x-show="$store.conn.ipConfigDevice === entry._index"
+                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index) && $store.conn.ipConfigDevice === entry._index"
                              x-cloak>
                             <div class="form-group compact">
                                 <label class="form-label">Static IP</label>
@@ -339,13 +367,13 @@
 
                         <!-- Receive Mode -->
                         <div class="dm-row dm-row-receive"
-                             x-show="$store.app.product === 'primus'"
+                             x-show="$store.app.product === 'primus' && $store.app.isCardExpanded(entry._index)"
                              :title="$store.conn.receiveModeHint(entry.dev)"
                              x-init="$store.conn.initReceiveConfigDrafts(entry._index)">
                             <span class="device-config-label">Receive</span>
                             <select class="form-input form-input-sm device-output-select"
                                     :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'mode'))"
-                                    :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'mode'))"
+                                    :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'mode')) || $store.app.mobileView"
                                     x-model="$store.conn.receiveConfigDrafts[entry._index].receive_mode"
                                     @change="$store.conn.setDeviceReceiveModeValue(entry._index, $store.conn.receiveConfigDrafts[entry._index].receive_mode)">
                                 <option value="split">Split</option>
@@ -354,7 +382,7 @@
                             <input class="form-input form-input-sm device-output-select device-config-input"
                                    type="number" min="0" max="32767"
                                    :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'base'))"
-                                   :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'base'))"
+                                   :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'base')) || $store.app.mobileView"
                                    x-model.number="$store.conn.receiveConfigDrafts[entry._index].base_universe"
                                    @focus="$store.conn.receiveConfigFocus = entry._index + ':base_universe'"
                                    @blur="$store.conn.finishReceiveConfigBaseEdit(entry._index)"
@@ -367,7 +395,7 @@
 
                         <!-- Outputs + Resolution -->
                         <div class="device-outputs dm-outputs-table"
-                             x-show="$store.app.product === 'primus'"
+                             x-show="$store.app.product === 'primus' && $store.app.isCardExpanded(entry._index)"
                              :title="$store.conn.outputConfigHint(entry.dev)">
                             <template x-for="(o, oi) in entry.dev.outputs" :key="oi">
                                 <div class="device-output-group" x-init="$store.conn.initVirtualConfigDrafts(entry._index)">
@@ -375,7 +403,7 @@
                                         <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
                                         <select class="form-input form-input-sm device-output-select"
                                                 :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'output', oi))"
-                                                :disabled="!$store.conn.canConfigureOutputs(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'output', oi))"
+                                                :disabled="!$store.conn.canConfigureOutputs(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'output', oi)) || $store.app.mobileView"
                                                 x-effect="$el.value = o.type || 'none'"
                                                 @change="$store.conn.setDeviceOutputType(entry._index, oi, $event.target.value)">
                                             <template x-for="type in $store.conn.deviceOutputTypesFor(entry.dev, oi)" :key="type">
@@ -393,7 +421,7 @@
                                         <input class="form-input form-input-sm device-output-select device-config-input"
                                                type="number" min="1" :max="Math.max(1, o.count || 1)"
                                                :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'virtual', oi))"
-                                               :disabled="!$store.conn.canConfigureOutputs(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'virtual', oi))"
+                                               :disabled="!$store.conn.canConfigureOutputs(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'virtual', oi)) || $store.app.mobileView"
                                                x-model.number="$store.conn.virtualConfigDrafts[entry._index][oi]"
                                                @focus="$store.conn.virtualConfigFocus = entry._index + ':' + oi"
                                                @blur="$store.conn.finishVirtualConfigEdit(entry._index, oi)"
@@ -409,27 +437,10 @@
                             </template>
                         </div>
 
-                        <!-- Footer: secondary metadata + device (technical) name if character name is the heading -->
+                        <!-- Footer: secondary metadata -->
                         <div class="device-footer-actions dm-footer">
                             <div class="dm-footer-meta">
-                                <div class="dm-footer-name" x-show="$store.conn.showInfoEnabled() && entry.dev.character_name">
-                                    <template x-if="$store.conn.renamingDevice !== entry._index">
-                                        <span class="dm-footer-name-value"
-                                              @click="$store.conn.startRename(entry._index)"
-                                              :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) }"
-                                              :title="$store.conn.renameHint(entry.dev)"
-                                              x-text="entry.dev.name"></span>
-                                    </template>
-                                    <template x-if="$store.conn.renamingDevice === entry._index">
-                                        <input class="device-rename-input" type="text" maxlength="17"
-                                               x-model="$store.conn.renameValue"
-                                               @keydown.enter="$store.conn.finishRename(entry._index)"
-                                               @keydown.escape="$store.conn.cancelRename()"
-                                               @blur="$store.conn.finishRename(entry._index)"
-                                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
-                                    </template>
-                                </div>
-                                <span class="device-profile" x-text="$store.conn.monitorHardwareLabel(entry.dev)"></span>
+                                <span class="device-profile" x-text="$store.conn.monitorProductLabel()"></span>
                                 <span class="device-fw-version"
                                       x-show="$store.app.product === 'primus' && $store.conn.firmwareLabel(entry.dev) !== '—'"
                                       x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
@@ -439,6 +450,7 @@
                                 <span class="device-transport-error" x-show="entry.dev.transport_error" x-text="entry.dev.transport_error"></span>
                             </div>
                             <button class="btn btn-sm btn-danger device-remove-btn"
+                                    x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index)"
                                     @click="$store.conn.removeDevice(entry._index)">Remove</button>
                         </div>
                     </div>

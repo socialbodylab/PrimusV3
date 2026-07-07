@@ -347,6 +347,13 @@ document.addEventListener("alpine:init", () => {
             return this.hardwareLabel(entity);
         },
 
+        // Device Manager card footer only: a stage manager scanning the grid cares
+        // whether a node is a Primus (LED) or Radius (audio) receiver, not its exact
+        // board/firmware version — that detail is one tap away in the expanded card.
+        monitorProductLabel() {
+            return connProduct() === "radius" ? "Radius" : "Primus";
+        },
+
         capabilityItems(entity) {
             const caps = entity?.capabilities || {};
             const items = [

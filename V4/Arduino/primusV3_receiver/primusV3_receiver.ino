@@ -774,30 +774,46 @@ void sendArtPollReply(IPAddress dest) {
   }
   strncpy((char*)&reply[44], longBuf, 63);
 
-  // Node Report (bytes 108-171, max 64 chars)
+  // Node Report (bytes 108-171, max 64 chars — hard Art-Net protocol limit).
   // Append a versioned capability tag so the sender can discover output
   // types and universe mapping without scraping the Long Name.
+  //
+  // With 2 active outputs, a 3-digit base universe, combined receive mode,
+  // and a static IP, the tokens below add up to more than 64 bytes, so this
+  // buffer routinely runs out of room. Order matters: the |F: feature-flags
+  // token gates nearly every remote-management capability the sender knows
+  // about (rename, hello, IP config, output config, receive mode, battery,
+  // show info) — losing it silently degrades the device to "unconfirmed
+  // legacy hardware" with none of those working. The per-output detail
+  // tokens are comparatively low-stakes (the sender keeps its last-known
+  // values when a refresh comes back without them), so they go last and
+  // are the first thing dropped when space runs out.
   char reportBuf[64];
   int reportPos = snprintf(reportBuf, sizeof(reportBuf), "#0001 [%04d] OK|%s",
                            (int)packetCount, NODE_CAPS_PREFIX);
+  if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|F:%s", BOARD_BATTERY_FEATURES);
+    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  }
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|B:%s", BOARD_PROFILE_CODE);
+    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  }
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|IP:%c", useStaticIP ? 'S' : 'D');
+    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  }
+  reportPos = buildReceiveModeCapabilityToken(reportBuf, sizeof(reportBuf), reportPos);
   for (uint8_t i = 0; i < NUM_OUTPUTS && reportPos < (int)sizeof(reportBuf) - 1; i++) {
     if (outputs[i].type == OUTPUT_OFF) continue;
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|%u:%u:%u:%u", i, (uint8_t)outputs[i].type,
                           outputs[i].universe, outputs[i].virtualPixelCount);
-  }
-  if (reportPos < (int)sizeof(reportBuf) - 1) {
-    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|B:%s", BOARD_PROFILE_CODE);
-  }
-  if (reportPos < (int)sizeof(reportBuf) - 1) {
-    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|IP:%c", useStaticIP ? 'S' : 'D');
-  }
-  reportPos = buildReceiveModeCapabilityToken(reportBuf, sizeof(reportBuf), reportPos);
-  if (reportPos < (int)sizeof(reportBuf) - 1) {
-    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|F:%s", BOARD_BATTERY_FEATURES);
+    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
   }
   strncpy((char*)&reply[108], reportBuf, 63);
 

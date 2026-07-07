@@ -122,7 +122,11 @@ inline void saveReceiveMode(Preferences& prefs) {
 inline int buildReceiveModeCapabilityToken(char* buf, int bufSize, int pos) {
   if (pos >= bufSize - 1) return pos;
   const char* tag = (currentReceiveMode == RECEIVE_MODE_COMBINED) ? "C" : "S";
-  return pos + snprintf(buf + pos, bufSize - pos, "|U:%s:%u", tag, currentUniverseBase);
+  // snprintf returns the length it *would* have written even when the
+  // actual write got truncated to fit — clamp so callers never compute a
+  // negative/underflowed "remaining space" from this on the next append.
+  int written = pos + snprintf(buf + pos, bufSize - pos, "|U:%s:%u", tag, currentUniverseBase);
+  return written > bufSize ? bufSize : written;
 }
 
 inline void clearOutputBuffers(uint8_t outputBuffers[NUM_OUTPUTS][MAX_BUFFER_SIZE],

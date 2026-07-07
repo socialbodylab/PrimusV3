@@ -4401,6 +4401,33 @@ input[type="color"] {
     outline: none;
 }
 
+.dm-expand-toggle {
+    flex: 0 0 auto;
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 22px;
+    height: 22px;
+    line-height: 1;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+}
+
+.dm-expand-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.dm-expand-toggle-open {
+    transform: rotate(90deg);
+}
+
 .dm-subheading {
     margin-top: -4px;
 }
@@ -4525,6 +4552,17 @@ input[type="color"] {
     align-items: center;
     gap: 6px;
     min-width: 0;
+}
+
+.dm-device-name-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: -2px;
+}
+
+.dm-device-name-row .device-config-label {
+    flex: 0 0 auto;
 }
 
 .dm-footer-name-value {

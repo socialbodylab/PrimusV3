@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.11.0"
+#define FIRMWARE_VERSION "3.12.0"
 
 // =====================================================================
 //  Board Profile
@@ -338,7 +338,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 11
+#define FIRMWARE_VERSION_L 12
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 

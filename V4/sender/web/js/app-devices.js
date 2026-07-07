@@ -49,6 +49,7 @@ document.addEventListener("alpine:init", () => {
         bulkReceiveMode: "split",
         bulkReceiveBase: 0,
         bulkReceiveStep: 2,
+        expandedCards: {},
 
         get brandLabel() {
             const version = this.runtime?.app_version;
@@ -157,6 +158,14 @@ document.addEventListener("alpine:init", () => {
                 entries.push({ dev, _index: index });
                 return entries;
             }, []);
+        },
+
+        isCardExpanded(index) {
+            return !!this.expandedCards[index];
+        },
+
+        toggleCardExpanded(index) {
+            this.expandedCards[index] = !this.expandedCards[index];
         },
 
         outputLabel(value, idx = null) {

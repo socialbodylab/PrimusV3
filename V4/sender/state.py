@@ -2227,6 +2227,15 @@ class ControllerState:
                         continue
                     dev["_hello_until"] = 0
                     if self.monitor_only:
+                        # The flash window is over, but the receiver just holds
+                        # whatever pixel data it last got — it won't blackout on
+                        # its own once we stop streaming. Push one off frame
+                        # before releasing the transient connection, or the
+                        # identify flash stays lit red indefinitely.
+                        for universe, data in _device_flash_entries(
+                                dev, bytes([0, 0, 0])):
+                            send_queue.append((di, dev["sender"], universe, data))
+                        devices_sent.add(di)
                         dev["connected"] = False
                         continue
                 if device_frames_active:

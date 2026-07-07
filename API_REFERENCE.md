@@ -72,20 +72,38 @@ V3.6 nodes also append `B:<profile>` where profile is `v1`, `v2`, or `v31`, and 
 settings. Feature flags are appended as `F:<letters>`; current letters are `R`
 for remote rename via ArtAddress, `I` for remote IP configuration via
 ArtIPConfig, `O` for remote output configuration via ArtOutputConfig, `M` for
-remote receive mode configuration via ArtReceiveConfig, and `H` for
-the identify flash used by `POST /api/hello_device`. Receive layout is also
-reported as `U:S:<base>` (split: one universe per output starting at base) or
-`U:C:<base>` (combined: all outputs in one universe). Older nodes without this tag
-still fall back to the human-readable Long Name parser, and older PrimusV3 nodes
-without feature flags are treated as legacy-compatible for rename/hello/IP/output-config
-control.
+remote receive mode configuration via ArtReceiveConfig, `H` for
+the identify flash used by `POST /api/hello_device`, `B` for battery telemetry
+(UDP 6455 `PBT` packets), and `S` for receiver-backed show info storage
+(character/performer name) via `POST /api/device_show_info`. Receive layout is
+also reported as `U:S:<base>` (split: one universe per output starting at
+base) or `U:C:<base>` (combined: all outputs in one universe). Older nodes
+without this tag still fall back to the human-readable Long Name parser, and
+older PrimusV3 nodes without feature flags are treated as legacy-compatible
+for rename/hello/IP/output-config control.
 
-Example current V3.6 reports:
+The Node Report field is a hard 64-byte Art-Net limit, and with two active
+outputs, a 3-digit base universe, combined mode, and a static IP the full set
+of tokens can add up to more than that. Firmware **3.12+** therefore writes
+`F:<letters>` immediately after the `PV3CAP1` prefix — it gates nearly every
+capability above, so it must survive — followed by `B:`, `IP:`, and `U:`, with
+the per-output tuples last since they're the only tokens the sender tolerates
+losing (a refresh that comes back without them just keeps the last-known
+values). Firmware **3.11 and earlier** wrote the per-output tuples first and
+`F:` last, which could silently drop `F:` under the same conditions and make
+the sender fall back to treating the node as unconfirmed legacy hardware.
+
+Example historical reports (pre-3.8, no receive-mode token):
 
 ```text
 #0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|IP:D|F:RIOH
 #0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|IP:S|F:RIOH
-#0001 [0123] OK|PV3CAP1|0:4:100:1|1:2:100:72|B:v31|IP:D|U:C:100|F:RIOHM
+```
+
+Example current V3.6 report (firmware 3.12+):
+
+```text
+#0001 [0123] OK|PV3CAP1|F:RIOHBMS|B:v31|IP:D|U:C:100|0:4:100:1|1:2:100:72
 ```
 
 The ArtPollReply IP-address field remains the source of truth for the node's
@@ -274,11 +292,18 @@ Combined mode requires total **virtual** pixel counts ≤ **170** (512-byte ArtD
 ./V4/Arduino/upload.sh -v3 --compile --receivemode split --universe 0
 ```
 
-### Node Report examples (firmware 3.8+)
+### Node Report examples (firmware 3.8–3.11)
 
 ```text
 #0001 [0123] OK|PV3CAP1|0:4:6|1:2:7|B:v1|IP:D|U:S:6|F:RIOHBM
 #0001 [0123] OK|PV3CAP1|0:4:104|1:2:104|B:v31|IP:D|U:C:104|F:RIOHM
+```
+
+### Node Report examples (firmware 3.12+, reordered so `F:` fits within 64 bytes)
+
+```text
+#0001 [0123] OK|PV3CAP1|F:RIOHBM|B:v1|IP:D|U:S:6|0:4:6|1:2:7
+#0001 [0123] OK|PV3CAP1|F:RIOHM|B:v31|IP:D|U:C:104|0:4:104|1:2:104
 ```
 
 ---
@@ -320,10 +345,16 @@ Badge on output 0, and Collar (`long_strip`, 72 px) on output 1.
 | `vpx0` | uint16 | Virtual pixel count for output 0 |
 | `vpx1` | uint16 | Virtual pixel count for output 1 |
 
-### Node Report examples (firmware 3.11+)
+### Node Report examples (firmware 3.11, virtual pixel counts)
 
 ```text
 #0001 [0123] OK|PV3CAP1|0:4:100:1|1:2:100:72|B:v31|IP:D|U:C:100|F:RIOHM
+```
+
+Firmware **3.12+** reorders the same tokens (see §4 above) so `F:` fits within the 64-byte limit:
+
+```text
+#0001 [0123] OK|PV3CAP1|F:RIOHBMS|B:v31|IP:D|U:C:100|0:4:100:1|1:2:100:72
 ```
 
 The fourth tuple field is omitted on older firmware; the sender falls back to type defaults (`small_grid` → 1, others → physical count).
