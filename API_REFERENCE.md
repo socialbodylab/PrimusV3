@@ -12,6 +12,8 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 | **Discovery** (ArtPoll / ArtPollReply) | UDP / Art-Net | 6454 | Bidirectional |
 | **Device naming** (ArtAddress) | UDP / Art-Net | 6454 | Sender → Node |
 | **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
+| **Receive mode** (custom 0x8110) | UDP / Art-Net | 6454 | Sender → Node |
+| **Virtual resolution** (custom 0x8130) | UDP / Art-Net | 6454 | Sender → Node |
 | **IP config** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
 | **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
 | **Sender HTTP API** | TCP / HTTP JSON | 8080 or auto-selected | Browser/tool → Sender |
@@ -60,9 +62,12 @@ Key fields in the 239-byte reply:
 | 201–206 | 6 | MAC Address | Node's WiFi MAC |
 
 PrimusV3 sender discovery prefers the `PV3CAP1` capability tag in Node Report.
-Each output tuple is `port_index:type_id:universe`, where `type_id` matches the
-receiver `OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. V3.6 nodes
-also append `B:<profile>` where profile is `v1`, `v2`, or `v31`, and `IP:D` or
+Each output tuple is `port_index:type_id:universe` or, on firmware **3.11+**,
+`port_index:type_id:universe:virtual_pixels`. The `type_id` matches the receiver
+`OutputType` enum and the sender `LOOK_OUTPUT_TYPES` index. The optional fourth
+field reports how many RGB triplets the receiver expects on Art-Net for that
+output; the receiver upscales those values to fill the physical LED count.
+V3.6 nodes also append `B:<profile>` where profile is `v1`, `v2`, or `v31`, and `IP:D` or
 `IP:S` to report whether the receiver is currently using DHCP or saved static IP
 settings. Feature flags are appended as `F:<letters>`; current letters are `R`
 for remote rename via ArtAddress, `I` for remote IP configuration via
@@ -80,6 +85,7 @@ Example current V3.6 reports:
 ```text
 #0001 [0000] OK|PV3CAP1|0:4:0|1:2:1|B:v1|IP:D|F:RIOH
 #0001 [0000] OK|PV3CAP1|0:1:0|1:2:1|B:v31|IP:S|F:RIOH
+#0001 [0123] OK|PV3CAP1|0:4:100:1|1:2:100:72|B:v31|IP:D|U:C:100|F:RIOHM
 ```
 
 The ArtPollReply IP-address field remains the source of truth for the node's
@@ -225,8 +231,6 @@ PrimusV3 nodes support runtime output type changes via a custom Art-Net opcode. 
 | 4 | Small Grid 8×4 | 32 |
 | 5 | Extra Long Strip | 122 |
 
-| 5 | Extra Long Strip | 122 |
-
 ---
 
 ## 5.1 Remote Receive Mode — ArtReceiveConfig (custom opcode 0x8110)
@@ -242,7 +246,7 @@ all outputs share one contiguous universe (**combined**).
 | `0` | Split | Port A0 = base universe, A1 = base+1 (legacy default) |
 | `1` | Combined | Single universe at base; A0 bytes first, A1 bytes immediately after |
 
-Combined mode requires total active pixels ≤ **170** (512-byte ArtDmx limit).
+Combined mode requires total **virtual** pixel counts ≤ **170** (512-byte ArtDmx limit).
 
 ### ArtReceiveConfig Packet (sender → node)
 
@@ -276,6 +280,53 @@ Combined mode requires total active pixels ≤ **170** (512-byte ArtDmx limit).
 #0001 [0123] OK|PV3CAP1|0:4:6|1:2:7|B:v1|IP:D|U:S:6|F:RIOHBM
 #0001 [0123] OK|PV3CAP1|0:4:104|1:2:104|B:v31|IP:D|U:C:104|F:RIOHM
 ```
+
+---
+
+## 5.2 Virtual Send Resolution — ArtVirtualResolution (custom opcode 0x8130)
+
+Primus firmware **3.11+** supports per-output **virtual send resolution**. The
+sender renders clips, looks, and designer previews at full physical resolution,
+then downsamples RGB values before ArtDmx transport. The receiver stores the
+requested virtual pixel count in NVS, sizes its ArtDmx buffers from that count,
+and upscales received RGB triplets to fill all physical LEDs (nearest-neighbor).
+
+### Defaults
+
+| Output type | Physical pixels | Default virtual pixels |
+|-------------|----------------:|-----------------------:|
+| `small_grid` (Badge) | 32 | **1** (single RGB triplet) |
+| All other active types | physical count | physical count |
+
+Workshop firmware defaults (3.11+) also ship with **combined** receive mode,
+Badge on output 0, and Collar (`long_strip`, 72 px) on output 1.
+
+### ArtVirtualResolution Packet (sender → node)
+
+| Offset | Length | Field | Value |
+|--------|--------|-------|-------|
+| 0–7 | 8 | Header | `Art-Net\0` |
+| 8–9 | 2 | Opcode | `0x8130` (little-endian) |
+| 10–11 | 2 | ProtVer | `0x000E` (14, big-endian) |
+| 12 | 1 | NumOutputs | Number of outputs to configure (1–2) |
+| 13+ | N×2 | Virtual counts | One uint16 little-endian count per output |
+
+**Total: 13 + (NumOutputs × 2) bytes.** Each virtual count must be `1 … physical_pixel_count` for active outputs. The node persists counts to NVS, clears pixel buffers, and broadcasts an updated ArtPollReply. No reboot is required.
+
+### NVS keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `vpx0` | uint16 | Virtual pixel count for output 0 |
+| `vpx1` | uint16 | Virtual pixel count for output 1 |
+
+### Node Report examples (firmware 3.11+)
+
+```text
+#0001 [0123] OK|PV3CAP1|0:4:100:1|1:2:100:72|B:v31|IP:D|U:C:100|F:RIOHM
+```
+
+The fourth tuple field is omitted on older firmware; the sender falls back to type defaults (`small_grid` → 1, others → physical count).
 
 ---
 
@@ -442,6 +493,9 @@ The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V4/dis
 | `POST /api/hello_device` | `{device: N}` | Flash device red for 1 second to identify it physically, returns `409` if hello support is not advertised |
 | `POST /api/set_device_ip` | `{device: N, ip: "...", gateway: "...", subnet: "..."}` | Set static IP on device — sends ArtIPConfig, device reboots, returns `409` if IP-config support is not advertised |
 | `POST /api/revert_device_dhcp` | `{device: N}` | Revert device to DHCP — sends ArtIPConfig mode 0, device reboots, returns `409` if IP-config support is not advertised |
+| `POST /api/set_device_output` | `{device: N, output: O, type: "..."}` | Change a receiver output type — sends ArtOutputConfig, returns `409` if output-config support is not advertised |
+| `POST /api/set_device_receive_mode` | `{device: N, receive_mode: "split"\|"combined", base_universe?: N}` | Change receive mode/base universe — sends ArtReceiveConfig, returns `409` if receive-config support is not advertised |
+| `POST /api/set_device_virtual_resolution` | `{device: N, output: O, virtual_pixels?: N, virtual_percent?: 1-100}` | Change virtual send resolution for one output — sends ArtVirtualResolution (0x8130), persists to receiver NVS, returns `409` if output-config support is not advertised |
 | `POST /api/device_groups` | `{id, name, device_ips}` | Create or update a named device group |
 | `POST /api/set_playback_source` | `{source: "designer"\|"idle"}` | Set the active playback source |
 

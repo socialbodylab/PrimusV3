@@ -114,8 +114,10 @@ Current defaults:
 | Profile | Driver | Output 0 | Output 1 | Default types |
 | --- | --- | --- | --- | --- |
 | `v1` | Direct NeoPixel | GPIO32 | GPIO12 | `small_grid`, `long_strip` |
-| `v2` | Direct NeoPixel | GPIO32 | GPIO12 | `small_grid`, `short_strip` |
-| `v3` | NeoPXL8 | FeatherWing output 6 / GPIO14 | FeatherWing output 7 / GPIO15 | `short_strip`, `long_strip` |
+| `v2` | Direct NeoPixel | GPIO32 | GPIO12 | `small_grid`, `long_strip` |
+| `v3` | NeoPXL8 | FeatherWing output 6 / GPIO14 | FeatherWing output 7 / GPIO15 | `small_grid`, `long_strip` |
+
+Firmware **3.11+** defaults to **combined** receive mode. Badge (`small_grid`) defaults to **1 virtual pixel** on Art-Net; other active outputs default to their physical pixel count. The receiver upscales virtual RGB triplets to fill physical LEDs.
 
 ## LED Backend Abstraction
 
@@ -188,6 +190,8 @@ V3.6 receivers use standard Art-Net UDP 6454 plus existing Primus custom extensi
 | ArtDmx | `0x5000` | Writes RGB pixel bytes for the addressed universe. |
 | ArtAddress | `0x6000` | Stores remote name in NVS/preferences. |
 | ArtOutputConfig | `0x8100` | Stores selected output type IDs. |
+| ArtReceiveConfig | `0x8110` | Stores split/combined receive mode and base universe. |
+| ArtVirtualResolution | `0x8130` | Stores per-output virtual send pixel counts (firmware 3.11+). |
 | ArtIPConfig | `0x8200` | Stores static IP/DHCP configuration. |
 | FPS telemetry | UDP `6455` magic `PFP` | Reports receive/render FPS to sender. |
 
@@ -198,8 +202,14 @@ V3.6 dynamic brightness does not change this packet table. The sender scales RGB
 The V3.6 Node Report keeps the V3.1 `PV3CAP1` shape and adds parser-safe board and IP-mode segments:
 
 ```text
-PV3CAP1|port:type_id:universe|B:profile|IP:D|F:features
-PV3CAP1|port:type_id:universe|B:profile|IP:S|F:features
+PV3CAP1|port:type_id:universe[:virtual_pixels]|B:profile|IP:D|F:features
+PV3CAP1|port:type_id:universe[:virtual_pixels]|B:profile|IP:S|F:features
+```
+
+Example V3.1 report with virtual send resolution:
+
+```text
+#0001 [0123] OK|PV3CAP1|0:4:100:1|1:2:100:72|B:v31|IP:D|U:C:100|F:RIOHM
 ```
 
 Example V1 report:
@@ -217,6 +227,7 @@ Feature flags:
 | `R` | Remote rename via ArtAddress |
 | `I` | IP config via ArtIPConfig |
 | `O` | Runtime output config via ArtOutputConfig |
+| `M` | Receive mode config via ArtReceiveConfig |
 | `H` | Hello/identify flash |
 
 The sender must continue accepting older V3.1 `PV3CAP1` reports that do not include `B:<profile>`.
@@ -227,6 +238,8 @@ The firmware stores mutable receiver settings in ESP32 NVS/preferences:
 
 - Device name
 - Output type selections
+- Receive mode and base universe (`recvMode`, `univBase`)
+- Virtual send pixel counts (`vpx0`, `vpx1`; firmware 3.11+)
 - Static IP/DHCP settings
 
 V3.6 intentionally keeps the V3.5 persistence namespace (`primus35`) so upgraded receivers preserve saved device names, output type selections, and static IP/DHCP settings. Change this only with an explicit migration/reset plan.

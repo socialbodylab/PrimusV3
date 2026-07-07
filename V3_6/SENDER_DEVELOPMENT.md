@@ -148,6 +148,8 @@ Important device/control endpoints in `server.py`:
 | `POST /api/hello_device` | Identify flash through the live Art-Net output path. |
 | `POST /api/set_device_ip` | Static IP config. |
 | `POST /api/revert_device_dhcp` | Return device to DHCP. |
+| `POST /api/set_device_receive_mode` | Split/combined receive mode and base universe. |
+| `POST /api/set_device_virtual_resolution` | Virtual send pixel count for one output (ArtVirtualResolution 0x8130). |
 | `POST /api/update` | Designer/output type/effect settings. |
 | `GET /api/cues` / `POST /api/cues` | Read or replace the cue list. Cues should use assignment-based payloads. |
 | `POST /api/cues/go` / `POST /api/cues/goto` | Fire the next cue or a specific cue number through the controller source. |
@@ -184,7 +186,9 @@ V3_6/sender/web/
     └── settings.js
 ```
 
-Device profile fields are surfaced in `index.html` and managed through the `conn` Alpine store in `app.js`.
+Device profile fields are surfaced in `index-primus.html` / `index-devices.html` and managed through the `conn` Alpine store in `device-conn.js`.
+
+Each active output row in the device sidebar exposes **Send px** (virtual send resolution): a numeric input with the same blur/Enter save pattern as Base U, plus a live readout such as `3 RGB values · 32 LEDs`. Output type and Send px rows must share one Alpine `x-for` root element (`.device-output-group`) so both rows render.
 
 Guidelines:
 

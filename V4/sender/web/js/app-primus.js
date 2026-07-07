@@ -279,6 +279,7 @@ document.addEventListener("alpine:init", () => {
                 this.state = await api("GET", "/api/state");
                 Alpine.store("conn").syncShowInfoDrafts();
                 Alpine.store("conn").syncReceiveConfigDrafts();
+                Alpine.store("conn").syncVirtualConfigDrafts();
                 this._drawPreviews();
             } catch (e) { /* ignore */ }
         },

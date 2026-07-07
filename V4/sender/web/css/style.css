@@ -851,6 +851,12 @@ body {
     margin-top: 6px;
 }
 
+.device-output-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
 .device-output-row {
     display: flex;
     align-items: center;
@@ -878,15 +884,14 @@ body {
     cursor: not-allowed;
 }
 
-.device-virtual-range {
+.device-virtual-readout {
     flex: 1;
     min-width: 0;
-}
-
-.device-virtual-hint {
-    flex: 0 0 auto;
-    white-space: nowrap;
     font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .device-ip-config {

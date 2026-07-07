@@ -143,6 +143,7 @@ document.addEventListener("alpine:init", () => {
                 }
                 Alpine.store("conn").syncShowInfoDrafts();
                 Alpine.store("conn").syncReceiveConfigDrafts();
+                Alpine.store("conn").syncVirtualConfigDrafts();
             } catch (e) {
                 /* ignore */
             }

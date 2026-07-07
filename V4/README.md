@@ -133,6 +133,8 @@ See [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) for protocol notes on bot
 
 **Primus LED** (NeoPixel costume nodes):
 
+Firmware **3.11+** adds per-output **virtual send resolution** (ArtVirtualResolution `0x8130`): the sender downsamples ArtDmx to fewer RGB triplets (Badge defaults to 1), and the receiver upscales to physical LEDs. Configure per device in the PrimusCentral sidebar **Send px** field or via `POST /api/set_device_virtual_resolution`. See [API_REFERENCE.md](../API_REFERENCE.md) §5.2.
+
 ```bash
 ./V4/Arduino/upload.sh --board v3 --compile
 ./V4/Arduino/upload.sh -v3 --auto

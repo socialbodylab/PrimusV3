@@ -85,11 +85,13 @@ The sender and receiver must agree on:
 - **Pixel counts**: `OUTPUT_TYPES` dict (Python, in `state.py`) = `OUTPUT_TYPE_TABLE` (C++).
 - **Custom opcode 0x8100**: ArtOutputConfig for runtime output type changes.
 - **Custom opcode 0x8110**: ArtReceiveConfig for split/combined universe layout.
+- **Custom opcode 0x8130**: ArtVirtualResolution for per-output virtual send pixel counts (firmware 3.11+).
 - **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration.
-- **Discovery capability tag**: `PV3CAP1|...|B:<profile>|IP:D|U:S:0|F:RIOHM` in ArtPollReply Node Report (`U:C:N` for combined mode).
+- **Discovery capability tag**: `PV3CAP1|...|port:type:universe[:virtual]|B:<profile>|IP:D|U:S:0|F:RIOHM` in ArtPollReply Node Report (`U:C:N` for combined mode; optional fourth tuple field is virtual pixel count on firmware 3.11+).
 - **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config, `M` receive mode config.
 - **FPS telemetry**: 7-byte `PFP` packets on UDP 6455.
 - **Brightness**: sender-side RGB scaling only; no receiver brightness channel.
+- **Virtual resolution**: sender renders at full physical resolution; Art-Net transport uses `virtual_pixels` per output (Badge default 1); receiver upscales to physical LEDs.
 
 ## How to run and test
 
@@ -214,7 +216,7 @@ Cumulative rates include startup/browser/restore time, so calculate steady-state
 - V3.6 web UI is static files under `V3_6/sender/web/` (Alpine.js, no build step).
 - 0.7 workshop focus belongs in browser UI profiles, not firmware/protocol tables.
 - Keep output types table-driven on both sender and firmware sides.
-- Device-control UI is capability-aware: rename, hello, IP config, and output config are enabled from discovery capabilities, with legacy Primus fallback for older firmware.
+- Device-control UI is capability-aware: rename, hello, IP config, output config, receive mode, and virtual send resolution (`Send px`) are enabled from discovery capabilities, with legacy Primus fallback for older firmware.
 - Grid layout is always serpentine (even rows left-to-right, odd rows right-to-left).
 - RGB color order is always 3 bytes per pixel.
 - Custom Art-Net opcodes use the 0x8000+ range.
@@ -229,7 +231,7 @@ none, solid, pulse, linear, constrainbow, rainbow, noise, static_noise, sparkle_
 
 **GET**: `/`, `/api/runtime`, `/api/state`, `/api/performance`, `/api/network/status`, `/api/clips`, `/api/clips/<id>`, `/api/clips/<id>/export`, `/api/looks`, `/api/looks/<id>`, `/api/looks/<id>/export`, `/api/cues`, `/api/integrations/osc`, `/api/firmware/status`, `/api/firmware/jobs/<id>`
 
-**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_device_output`, `/api/set_device_receive_mode`, `/api/set_playback_source`, `/api/device_groups`
+**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_device_output`, `/api/set_device_receive_mode`, `/api/set_device_virtual_resolution`, `/api/set_playback_source`, `/api/device_groups`
 
 **POST (clips/looks/sharing)**: `/api/clip/preview`, `/api/clips/save`, `/api/clips/save_single`, `/api/import_bundle`, `/api/looks/save`, `/api/mixer/frame`, `/api/mixer/preview`, `/api/mixer/update`, `/api/mixer/stop_preview`
 

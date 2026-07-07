@@ -260,37 +260,46 @@
                               x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'base'))"></span>
                     </label>
                     <template x-for="(o, oi) in dev.outputs" :key="oi">
-                        <label class="device-output-row">
-                            <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
-                            <select class="form-input form-input-sm device-output-select"
-                                    :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'output', oi))"
-                                    :disabled="!$store.conn.canConfigureOutputs(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'output', oi))"
-                                    x-effect="$el.value = o.type || 'none'"
-                                    @change="$store.conn.setDeviceOutputType(di, oi, $event.target.value)">
-                                <template x-for="type in $store.conn.deviceOutputTypesFor(dev, oi)" :key="type">
-                                    <option :value="type"
-                                            x-text="$store.app.outputTypeLabel(type)"></option>
-                                </template>
-                            </select>
-                            <span class="device-config-status"
-                                  :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'output', oi))"
-                                  x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"
-                                  x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"></span>
-                        </label>
-                        <label class="device-output-row" x-show="o.type && o.type !== 'none'"
-                               title="Art-Net transport resolution (receiver upscales to full physical output)">
-                            <span class="device-config-label">Virt</span>
-                            <input class="form-range device-virtual-range" type="range" min="1" max="100"
-                                   :disabled="!$store.conn.canConfigureOutputs(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'virtual', oi))"
-                                   :value="$store.conn.virtualResolutionPercent(o)"
-                                   @change="$store.conn.setDeviceVirtualResolutionPercent(di, oi, $event.target.value)">
-                            <span class="text-sm text-muted device-virtual-hint"
-                                  x-text="$store.conn.virtualResolutionHint(o)"></span>
-                            <span class="device-config-status"
-                                  :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'virtual', oi))"
-                                  x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'virtual', oi))"
-                                  x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'virtual', oi))"></span>
-                        </label>
+                        <div class="device-output-group"
+                             x-init="$store.conn.initVirtualConfigDrafts(di)">
+                            <label class="device-output-row">
+                                <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
+                                <select class="form-input form-input-sm device-output-select"
+                                        :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'output', oi))"
+                                        :disabled="!$store.conn.canConfigureOutputs(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'output', oi))"
+                                        x-effect="$el.value = o.type || 'none'"
+                                        @change="$store.conn.setDeviceOutputType(di, oi, $event.target.value)">
+                                    <template x-for="type in $store.conn.deviceOutputTypesFor(dev, oi)" :key="type">
+                                        <option :value="type"
+                                                x-text="$store.app.outputTypeLabel(type)"></option>
+                                    </template>
+                                </select>
+                                <span class="device-config-status"
+                                      :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'output', oi))"
+                                      x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"
+                                      x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'output', oi))"></span>
+                            </label>
+                            <label class="device-output-row" x-show="o.type && o.type !== 'none'"
+                                   :title="$store.conn.virtualResolutionHint(dev)">
+                                <span class="device-config-label">Send px</span>
+                                <input class="form-input form-input-sm device-output-select device-config-input"
+                                       type="number"
+                                       min="1"
+                                       :max="Math.max(1, o.count || 1)"
+                                       :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                       :disabled="!$store.conn.canConfigureOutputs(dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                       x-model.number="$store.conn.virtualConfigDrafts[di][oi]"
+                                       @focus="$store.conn.virtualConfigFocus = di + ':' + oi"
+                                       @blur="$store.conn.finishVirtualConfigEdit(di, oi)"
+                                       @keydown.enter="$event.target.blur()">
+                                <span class="device-virtual-readout"
+                                      x-text="$store.conn.virtualTransportReadout(o, $store.conn.virtualConfigDrafts[di]?.[oi])"></span>
+                                <span class="device-config-status"
+                                      :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                      x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'virtual', oi))"
+                                      x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(di, 'virtual', oi))"></span>
+                            </label>
+                        </div>
                     </template>
                 </div>
                 <div class="device-footer-actions">

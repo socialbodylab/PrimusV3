@@ -34,6 +34,8 @@ document.addEventListener("alpine:init", () => {
         showInfoFocus: null,
         receiveConfigDrafts: {},
         receiveConfigFocus: null,
+        virtualConfigDrafts: {},
+        virtualConfigFocus: null,
         editingShowInfo: null,
         showInfoEditValue: "",
 
@@ -158,23 +160,95 @@ document.addEventListener("alpine:init", () => {
             return Math.max(1, Math.min(physical, virtual));
         },
 
-        virtualResolutionPercent(output) {
+        clampVirtualPixels(output, value) {
             const physical = Number(output?.count) || 0;
-            const virtual = this.resolveVirtualPixels(output);
             if (physical <= 0) {
-                return 100;
+                return 0;
             }
-            return Math.max(1, Math.round((virtual / physical) * 100));
+            let virtual = Math.round(Number(value));
+            if (!Number.isFinite(virtual) || virtual < 1) {
+                virtual = 1;
+            }
+            if (virtual > physical) {
+                virtual = physical;
+            }
+            return virtual;
         },
 
-        virtualResolutionHint(output) {
+        virtualTransportReadout(output, draftValue) {
             const physical = Number(output?.count) || 0;
-            const virtual = this.resolveVirtualPixels(output);
-            if (physical <= 0) {
+            if (physical <= 0 || output?.type === "none") {
                 return "";
             }
-            const pct = Math.round((virtual / physical) * 100);
-            return `${virtual}→${physical} px (${pct}%)`;
+            const virtual = draftValue === undefined || draftValue === null || draftValue === ""
+                ? this.resolveVirtualPixels(output)
+                : this.clampVirtualPixels(output, draftValue);
+            if (virtual <= 0) {
+                return "";
+            }
+            const rgbValues = virtual * 3;
+            const noun = rgbValues === 1 ? "value" : "values";
+            return `${rgbValues} RGB ${noun} · ${physical} LEDs`;
+        },
+
+        initVirtualConfigDrafts(di) {
+            if (!this.virtualConfigDrafts[di]) {
+                this.virtualConfigDrafts[di] = {};
+            }
+            const dev = this.devices[di];
+            (dev?.outputs || []).forEach((output, oi) => {
+                if (this.virtualConfigDrafts[di][oi] === undefined) {
+                    this.virtualConfigDrafts[di][oi] = this.resolveVirtualPixels(output);
+                }
+            });
+        },
+
+        syncVirtualConfigDrafts() {
+            if (connProduct() !== "primus") {
+                return;
+            }
+            const focusParts = (this.virtualConfigFocus || "").split(":");
+            const focusDi = focusParts[0] !== "" ? Number(focusParts[0]) : null;
+            const focusOi = focusParts[1] !== "" ? Number(focusParts[1]) : null;
+            const validIndices = new Set(this.devices.map((_, di) => String(di)));
+            for (const key of Object.keys(this.virtualConfigDrafts)) {
+                if (!validIndices.has(String(key))) {
+                    delete this.virtualConfigDrafts[key];
+                }
+            }
+            this.devices.forEach((dev, di) => {
+                if (!this.virtualConfigDrafts[di]) {
+                    this.virtualConfigDrafts[di] = {};
+                }
+                (dev.outputs || []).forEach((output, oi) => {
+                    if (focusDi === di && focusOi === oi) {
+                        return;
+                    }
+                    this.virtualConfigDrafts[di][oi] = this.resolveVirtualPixels(output);
+                });
+            });
+        },
+
+        finishVirtualConfigEdit(di, oi) {
+            this.virtualConfigFocus = null;
+            this.initVirtualConfigDrafts(di);
+            const dev = this.devices[di];
+            const output = dev?.outputs?.[oi];
+            if (!output || output.type === "none") {
+                return;
+            }
+            const draft = this.virtualConfigDrafts[di]?.[oi];
+            const virtual = this.clampVirtualPixels(output, draft);
+            if (virtual <= 0) {
+                this.virtualConfigDrafts[di][oi] = this.resolveVirtualPixels(output);
+                return;
+            }
+            this.virtualConfigDrafts[di][oi] = virtual;
+            const prior = this.resolveVirtualPixels(output);
+            if (prior === virtual) {
+                return;
+            }
+            this.setDeviceVirtualResolution(di, oi, virtual);
         },
 
         canUseCombinedMode(dev) {
@@ -199,9 +273,20 @@ document.addEventListener("alpine:init", () => {
         },
 
         outputConfigHint(dev) {
-            return this.canConfigureOutputs(dev)
-                ? "Configure physical output types on this receiver"
-                : "Remote output configuration is not advertised for this node";
+            if (this.canConfigureOutputs(dev)) {
+                return "Output type and virtual send resolution are stored on this receiver (NVS)";
+            }
+            return "Remote output configuration is not advertised for this node";
+        },
+
+        virtualResolutionHint(dev) {
+            if (this.canConfigureOutputs(dev)) {
+                return "Send pixels controls how many RGB triplets Primus sends on Art-Net; the receiver upscales to all physical LEDs";
+            }
+            if (dev?.outputs?.some((output) => output?.virtual_pixels != null)) {
+                return "Virtual send resolution reported from device discovery";
+            }
+            return "Flash firmware v3.11+ to configure virtual send resolution remotely";
         },
 
         configFeedbackKey(di, kind, oi) {
@@ -683,15 +768,18 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
-        async setDeviceVirtualResolutionPercent(di, oi, virtualPercent) {
+        async setDeviceVirtualResolution(di, oi, virtualPixels) {
             const dev = this.devices[di];
             const output = dev?.outputs?.[oi];
             if (!output || output.type === "none") {
                 return;
             }
-            const percent = Math.max(1, Math.min(100, Number(virtualPercent) || 100));
-            const priorPercent = this.virtualResolutionPercent(output);
-            if (priorPercent === percent) {
+            const virtual = this.clampVirtualPixels(output, virtualPixels);
+            if (virtual <= 0) {
+                return;
+            }
+            const prior = this.resolveVirtualPixels(output);
+            if (prior === virtual) {
                 return;
             }
             const key = this.configFeedbackKey(di, "virtual", oi);
@@ -700,11 +788,12 @@ document.addEventListener("alpine:init", () => {
                 const result = await api("POST", "/api/set_device_virtual_resolution", {
                     device: di,
                     output: oi,
-                    virtual_percent: percent,
+                    virtual_pixels: virtual,
                 });
                 this.setConfigFeedback(key, "ok", result?.message || "Applied");
             } catch (e) {
                 this.setConfigFeedback(key, "error", e.message || "Update failed");
+                this.virtualConfigDrafts[di][oi] = prior;
                 Alpine.store("app").showApiError("Virtual resolution update failed", e);
             } finally {
                 await Alpine.store("app").fetchState();
