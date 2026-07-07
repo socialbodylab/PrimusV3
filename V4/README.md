@@ -31,7 +31,7 @@ python3 V4/sender/run_devices.py
 python3 V4/sender/run.py --product primus --frontend devices
 ```
 
-DeviceManager attaches to an already-running PrimusCentral/DeviceManager server instead of starting a second one; if none is running it starts its own `primus`-product server.
+DeviceManager attaches to an already-running PrimusCentral/DeviceManager server instead of starting a second one; if none is running it starts its own `primus`-product server in `monitor_only` mode, so it never auto-connects to or drives Art-Net output on discovered devices — safe to run on the same network as a show already being driven by another sender or console.
 
 ```bash
 python3 -m py_compile V4/sender/*.py
@@ -82,7 +82,7 @@ Override with `RADIUSV4_DATA_DIR`, `PRIMUSV3_DATA_DIR`, or `* _USE_APP_DATA=1`.
 
 **RadiusCentral** (`--product radius`): Audio, Audio Cues, Cue Map, Net Log, Firmware, Settings
 
-**DeviceManager** (`--frontend devices`, `primus` backend): Monitor (auto-syncing device grid, bulk rename/apply), Firmware — no Look Designer/Cue Controller, no manual connect/disconnect
+**DeviceManager** (`--frontend devices`, `primus` backend): Monitor (auto-syncing device grid, bulk rename/apply), Firmware, Settings — no Look Designer/Cue Controller, no manual connect/disconnect. Runs `monitor_only` whenever it starts its own backend, so periodic sync never auto-connects to or drives Art-Net output on discovered devices.
 
 Each app serves its own frontend at `/primus`, `/radius`, or `/devices` on the **same unified server** — shared `/css/` and `/js/` assets, separate Alpine SPAs. DeviceManager reuses the same `device-conn.js` device-action store as PrimusCentral/RadiusCentral.
 

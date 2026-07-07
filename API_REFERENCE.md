@@ -412,7 +412,7 @@ The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a 
 | Route | Description |
 |---|---|
 | `GET /` | HTML control interface (Alpine.js SPA) |
-| `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership |
+| `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership and `monitor_only` (true when this backend never auto-connects to devices or drives Art-Net output — DeviceManager's safety mode when it starts its own fresh backend) |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
 | `GET /api/performance` | Rolling sender timing diagnostics, counters, and per-second rates for FPS/debug validation |
 | `GET /api/network/status` | Sender host network interfaces, selected/recommended Art-Net route, saved Settings profiles, and show-router network summaries |
@@ -481,11 +481,12 @@ The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V4/dis
 | Route | Body | Description |
 |---|---|---|
 | `POST /api/update` | Various fields | Update state: output type, effect, color, speed, FPS, device IP, grid rotation, angle, highlight_width, chase_origin, playback mode |
-| `POST /api/connect` | `{device: N}` | Connect device by index |
+| `POST /api/connect` | `{device: N}` | Connect device by index — returns `409` if the backend is running in `monitor_only` mode |
 | `POST /api/disconnect` | `{device: N}` | Disconnect device by index |
-| `POST /api/connect_all` | `{}` | Connect all devices |
+| `POST /api/connect_all` | `{}` | Connect all devices — returns `409` if the backend is running in `monitor_only` mode |
 | `POST /api/disconnect_all` | `{}` | Disconnect all devices |
 | `POST /api/discover` | `{}` | Run ArtPoll discovery, returns `[{ip, short_name, long_name, node_report, capabilities, num_ports, universes}]` |
+| `POST /api/devices/sync` | `{}` | Discover nodes, add newly-seen compatible devices, and (unless the backend is running in `monitor_only` mode) connect all reachable ones — this is what DeviceManager's `autoSyncNetwork` calls every 20 seconds; returns `{added, skipped, connected, nodes}` |
 | `POST /api/add_discovered` | `{ip, short_name, ...}` | Add discovered node as device and auto-connect |
 | `POST /api/add_manual` | `{ip: "..."}` | Add device by IP address (tries unicast discovery first, falls back to bare device) |
 | `POST /api/remove_device` | `{device: N}` | Remove device by index |
