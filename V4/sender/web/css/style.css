@@ -4189,8 +4189,8 @@ input[type="color"] {
 
 .device-manager-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
 }
 
 .device-manager-empty {
@@ -4207,4 +4207,338 @@ input[type="color"] {
 .navbar-tabs a.navbar-tab {
     text-decoration: none;
     color: inherit;
+}
+
+/* ── DEVICE MANAGER REDESIGN ──────────────────────────── */
+
+.dm-summary-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.dm-summary-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.dm-summary-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.dm-summary-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.dm-summary-warn .dm-summary-value { color: var(--warning); }
+.dm-summary-danger .dm-summary-value { color: var(--danger); }
+
+.dm-bulk-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-dim);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-bottom: 16px;
+}
+
+.dm-bulk-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.dm-bulk-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.dm-bulk-form .form-group.compact {
+    margin-bottom: 0;
+    min-width: 140px;
+}
+
+.dm-bulk-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 12px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.dm-bulk-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-family: monospace;
+}
+
+.dm-bulk-preview-disabled {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.dm-section {
+    margin-bottom: 20px;
+}
+
+.dm-section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.dm-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+.dm-section-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: monospace;
+}
+
+/* ── Device card (Device Manager variant) ─────────────── */
+
+.dm-card {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dm-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dm-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.dm-title:hover {
+    color: var(--accent);
+}
+
+.dm-title-fallback {
+    font-style: italic;
+}
+
+.dm-title-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 19px;
+    font-weight: 700;
+    padding: 3px 6px;
+    outline: none;
+}
+
+.dm-subheading {
+    margin-top: -4px;
+}
+
+.dm-subtitle-value {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 1px 4px;
+}
+
+.dm-subtitle-value:hover,
+.dm-subtitle-value:focus-visible {
+    background: var(--bg-secondary);
+    border-color: var(--border);
+}
+
+.dm-status-cluster {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 0;
+}
+
+.dm-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.dm-status-pill::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.dm-status-live {
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.dm-status-live::before {
+    animation: dm-pulse 1.6s ease-in-out infinite;
+}
+
+.dm-status-nosignal {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.dm-status-error {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+@keyframes dm-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+.dm-hello-btn {
+    margin-left: auto;
+    padding: 3px 10px;
+    font-size: 11px;
+}
+
+.dm-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dm-row-ip {
+    flex-wrap: wrap;
+}
+
+.dm-universe {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.dm-row-receive {
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+}
+
+.dm-outputs-table {
+    padding-top: 4px;
+}
+
+.dm-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+
+.dm-footer-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.dm-footer-name-value {
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: monospace;
+}
+
+.dm-footer-name-value:hover {
+    color: var(--accent);
+}
+
+/* ── Firmware panel (Device Manager linear step layout) ── */
+
+.dm-firmware-main {
+    display: block;
+    padding: 16px 20px 24px;
+    min-height: calc(100vh - 48px);
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.dm-firmware-step {
+    margin-bottom: 14px;
+}
+
+.dm-firmware-step-summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+.dm-firmware-step-summary::-webkit-details-marker {
+    display: none;
+}
+
+.dm-firmware-step-summary::before {
+    content: "▸";
+    margin-right: 6px;
+    color: var(--text-muted);
+}
+
+details[open] > .dm-firmware-step-summary::before {
+    content: "▾";
 }

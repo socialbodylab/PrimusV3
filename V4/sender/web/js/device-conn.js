@@ -334,6 +334,19 @@ document.addEventListener("alpine:init", () => {
             return String(label).replace("V3.1", "V3");
         },
 
+        // Device Manager only: the backend guesses a specific board (e.g. "V3.1 Reverse
+        // TFT") for older-firmware nodes that never returned a real board-code capability
+        // tag — profile "pv3cap1-legacy"/"primus-legacy" (see parse_node_capabilities in
+        // artnet.py). Showing that guess as fact is misleading in a monitoring view, so
+        // this reports it honestly instead of asserting an unconfirmed board.
+        monitorHardwareLabel(entity) {
+            const profile = entity?.capabilities?.profile;
+            if (profile === "pv3cap1-legacy" || profile === "primus-legacy") {
+                return "Unconfirmed hardware";
+            }
+            return this.hardwareLabel(entity);
+        },
+
         capabilityItems(entity) {
             const caps = entity?.capabilities || {};
             const items = [
@@ -373,6 +386,21 @@ document.addEventListener("alpine:init", () => {
                 return "";
             }
             return dev?.receiver_online ? "device-live-ok" : "device-live-warn";
+        },
+
+        // Connection-status readout for Device Manager's monitoring view — independent
+        // of the internal "connected" (DMX output) flag, which Device Manager no longer
+        // surfaces or lets the user toggle.
+        monitorStatusLabel(dev) {
+            if (dev?.transport_error) return "Error";
+            if (dev?.receiver_online) return "Live";
+            return "No Signal";
+        },
+
+        monitorStatusClass(dev) {
+            if (dev?.transport_error) return "dm-status-error";
+            if (dev?.receiver_online) return "dm-status-live";
+            return "dm-status-nosignal";
         },
 
         showInfoEnabled() {
@@ -733,6 +761,26 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
+        // Background heartbeat sync for Device Manager's automatic polling — does not
+        // toggle `syncing` (so the manual "Sync now" button doesn't flicker) and only
+        // surfaces a notice when something actually changed, since it fires every ~20s.
+        async autoSyncNetwork() {
+            try {
+                const result = await api("POST", "/api/devices/sync");
+                await Alpine.store("app").fetchState();
+                const added = result?.added?.length || 0;
+                if (added) {
+                    Alpine.store("app").showNotice(
+                        `Discovered ${added} new device${added === 1 ? "" : "s"} on the network.`,
+                        "success",
+                    );
+                }
+                return result;
+            } catch (e) {
+                return null;
+            }
+        },
+
         async helloDevice(di) {
             try {
                 const body = { device: di };
@@ -1080,6 +1128,137 @@ document.addEventListener("alpine:init", () => {
                 }
             }
             await Alpine.store("app").fetchState();
+        },
+
+        // ---- Device Manager bulk actions ----
+        // Additive only: client-side loops over the existing single-device endpoints
+        // above (rename_node, set_device_output, set_device_receive_mode). Not called
+        // from Primus/Radius markup — safe to extend without touching shared behavior.
+        groupDeviceIndices(group) {
+            const ips = group?.device_ips || [];
+            return ips
+                .map(ip => this.devices.findIndex(dev => dev.ip === ip))
+                .filter(di => di !== -1);
+        },
+
+        formatBulkName(pattern, n, padWidth) {
+            const num = padWidth > 0 ? String(n).padStart(padWidth, "0") : String(n);
+            return String(pattern || "").replace(/\{n\}/g, num).trim().slice(0, 17);
+        },
+
+        bulkRenamePreview(group, pattern, startNum, padWidth = 0) {
+            const indices = this.groupDeviceIndices(group);
+            return indices.map((di, i) => {
+                const dev = this.devices[di];
+                return {
+                    di,
+                    ip: dev?.ip,
+                    oldName: dev?.name || "",
+                    newName: this.formatBulkName(pattern, (startNum ?? 1) + i, padWidth),
+                    canRename: this.canRenameDevice(dev),
+                };
+            });
+        },
+
+        async bulkRenameApply(plan) {
+            let succeeded = 0;
+            let failed = 0;
+            for (const item of plan || []) {
+                if (!item.canRename || !item.newName || item.newName === item.oldName) continue;
+                try {
+                    await api("POST", "/api/rename_node", { device: item.di, name: item.newName });
+                    succeeded++;
+                } catch (e) {
+                    failed++;
+                }
+            }
+            await Alpine.store("app").fetchState();
+            const total = succeeded + failed;
+            Alpine.store("app").showNotice(
+                failed
+                    ? `Renamed ${succeeded}/${total} devices; ${failed} failed.`
+                    : `Renamed ${succeeded} device${succeeded === 1 ? "" : "s"}.`,
+                failed ? "warn" : "success",
+                4000,
+            );
+            return { succeeded, failed };
+        },
+
+        async bulkApplyOutputType(group, outputIndex, outputType) {
+            const indices = this.groupDeviceIndices(group);
+            let succeeded = 0;
+            let failed = 0;
+            let skipped = 0;
+            for (const di of indices) {
+                const dev = this.devices[di];
+                const output = dev?.outputs?.[outputIndex];
+                if (!this.canConfigureOutputs(dev) || !output) {
+                    skipped++;
+                    continue;
+                }
+                if (output.type === outputType) {
+                    succeeded++;
+                    continue;
+                }
+                try {
+                    await api("POST", "/api/set_device_output", {
+                        device: di,
+                        output: outputIndex,
+                        output_type: outputType,
+                    });
+                    succeeded++;
+                } catch (e) {
+                    failed++;
+                }
+            }
+            await Alpine.store("app").fetchState();
+            Alpine.store("app").showNotice(
+                `Output update applied to ${succeeded} device${succeeded === 1 ? "" : "s"}`
+                    + (failed ? `; ${failed} failed` : "")
+                    + (skipped ? `; ${skipped} skipped (unsupported)` : "") + ".",
+                failed ? "warn" : "success",
+                4000,
+            );
+            return { succeeded, failed, skipped };
+        },
+
+        async bulkApplyReceiveMode(group, mode, baseStart, baseStep = 0) {
+            const indices = this.groupDeviceIndices(group);
+            let succeeded = 0;
+            let failed = 0;
+            let skipped = 0;
+            for (let i = 0; i < indices.length; i++) {
+                const di = indices[i];
+                const dev = this.devices[di];
+                const base = Number(baseStart || 0) + i * Number(baseStep || 0);
+                if (!this.canConfigureReceiveMode(dev)) {
+                    skipped++;
+                    continue;
+                }
+                if (mode === "combined" && !this.canUseCombinedMode(dev)) {
+                    skipped++;
+                    continue;
+                }
+                try {
+                    await api("POST", "/api/set_device_receive_mode", {
+                        device: di,
+                        receive_mode: mode,
+                        base_universe: base,
+                    });
+                    succeeded++;
+                } catch (e) {
+                    failed++;
+                }
+            }
+            await Alpine.store("app").fetchState();
+            Alpine.store("app").showNotice(
+                `Receive mode applied to ${succeeded} device${succeeded === 1 ? "" : "s"}`
+                    + (failed ? `; ${failed} failed` : "")
+                    + (skipped ? `; ${skipped} skipped (unsupported or over pixel budget)` : "") + ".",
+                failed ? "warn" : "success",
+                4000,
+            );
+            return { succeeded, failed, skipped };
         },
     });
 });

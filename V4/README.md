@@ -1,9 +1,10 @@
 # PrimusV3 V4 Unified Sender
 
-V4 is the **canonical sender track** for PrimusV3. One Python tree builds **two apps**:
+V4 is the **canonical sender track** for PrimusV3. One Python tree builds **three apps**:
 
 - **PrimusCentral** — LED clip/look/cue workflow (Look Designer, Cue Controller, ArtDmx)
 - **RadiusCentral** — audio production workflow (Audio Cues, Cue Map, Net Log)
+- **DeviceManager** — network monitoring, device config, and firmware upload, on the same `primus`-product backend as PrimusCentral
 
 Shared: device discovery, firmware upload, and network settings. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -22,6 +23,15 @@ python3 V4/sender/run.py --product radius --no-browser --port 8098
 python3 V4/sender/run.py --product primus
 python3 V4/sender/run.py --product primus --no-browser --port 8090
 ```
+
+**DeviceManager (monitoring, config, firmware):**
+
+```bash
+python3 V4/sender/run_devices.py
+python3 V4/sender/run.py --product primus --frontend devices
+```
+
+DeviceManager attaches to an already-running PrimusCentral/DeviceManager server instead of starting a second one; if none is running it starts its own `primus`-product server.
 
 ```bash
 python3 -m py_compile V4/sender/*.py
@@ -72,7 +82,9 @@ Override with `RADIUSV4_DATA_DIR`, `PRIMUSV3_DATA_DIR`, or `* _USE_APP_DATA=1`.
 
 **RadiusCentral** (`--product radius`): Audio, Audio Cues, Cue Map, Net Log, Firmware, Settings
 
-Each app serves its own frontend at `/primus` or `/radius` on the **same unified server** — shared `/css/` and `/js/` assets, separate Alpine SPAs.
+**DeviceManager** (`--frontend devices`, `primus` backend): Monitor (auto-syncing device grid, bulk rename/apply), Firmware — no Look Designer/Cue Controller, no manual connect/disconnect
+
+Each app serves its own frontend at `/primus`, `/radius`, or `/devices` on the **same unified server** — shared `/css/` and `/js/` assets, separate Alpine SPAs. DeviceManager reuses the same `device-conn.js` device-action store as PrimusCentral/RadiusCentral.
 
 Shared: **Firmware** (product-specific profiles), **Settings** (network)
 

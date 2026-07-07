@@ -33,10 +33,22 @@ document.addEventListener("alpine:init", () => {
         runtime: null,
         polling: null,
         networkPolling: null,
+        syncPolling: null,
         notice: null,
         _noticeTimer: null,
         filterText: "",
         filterGroupId: "",
+        mode: "monitor",
+        bulkPanel: null,
+        bulkRenamePattern: "Device {n}",
+        bulkRenameStart: 1,
+        bulkRenamePad: 0,
+        bulkRenamePlan: [],
+        bulkOutputIndex: 0,
+        bulkOutputType: "none",
+        bulkReceiveMode: "split",
+        bulkReceiveBase: 0,
+        bulkReceiveStep: 2,
 
         get brandLabel() {
             const version = this.runtime?.app_version;
@@ -47,14 +59,79 @@ document.addEventListener("alpine:init", () => {
             return this.state?.device_groups || [];
         },
 
-        get connectedDeviceSummary() {
-            const devices = this.state?.devices || [];
-            const connected = devices.filter(d => d.connected).length;
-            return connected + "/" + devices.length + " devices";
+        get onlineDeviceSummary() {
+            return this.summaryOnline + "/" + this.summaryTotal + " online";
         },
 
         get outputTypes() {
             return this.state?.look_output_types || [];
+        },
+
+        setMode(m) {
+            this.mode = m;
+            document.dispatchEvent(new CustomEvent("primus:mode-changed", {
+                detail: { mode: m },
+            }));
+        },
+
+        deviceHasError(dev) {
+            return !!dev?.transport_error;
+        },
+
+        deviceLowBattery(dev) {
+            if (!dev?.capabilities?.battery) return false;
+            const mode = dev?.battery_power_mode;
+            if (mode === "fault" || mode === "switch_off") return true;
+            const pct = dev?.battery_pct;
+            return pct != null && pct <= 15;
+        },
+
+        deviceNeedsAttention(dev) {
+            return this.deviceHasError(dev) || this.deviceLowBattery(dev);
+        },
+
+        get groupedDevices() {
+            const attention = [];
+            const online = [];
+            const offline = [];
+            for (const entry of this.filteredDevices) {
+                if (this.deviceNeedsAttention(entry.dev)) {
+                    entry._section = "attention";
+                    attention.push(entry);
+                } else if (entry.dev.receiver_online) {
+                    entry._section = "online";
+                    online.push(entry);
+                } else {
+                    entry._section = "offline";
+                    offline.push(entry);
+                }
+            }
+            return { attention, online, offline };
+        },
+
+        get sectionList() {
+            const g = this.groupedDevices;
+            return [
+                { key: "attention", label: "Attention", entries: g.attention },
+                { key: "online", label: "Online", entries: g.online },
+                { key: "offline", label: "Offline / Unconfirmed", entries: g.offline },
+            ];
+        },
+
+        get summaryTotal() {
+            return (this.state?.devices || []).length;
+        },
+
+        get summaryOnline() {
+            return (this.state?.devices || []).filter(d => d.receiver_online).length;
+        },
+
+        get summaryLowBattery() {
+            return (this.state?.devices || []).filter(d => this.deviceLowBattery(d)).length;
+        },
+
+        get summaryErrors() {
+            return (this.state?.devices || []).filter(d => this.deviceHasError(d)).length;
         },
 
         get filteredDevices() {
@@ -118,8 +195,15 @@ document.addEventListener("alpine:init", () => {
             }
             await this.fetchNetworkStatus();
             this.networkPolling = setInterval(() => this.fetchNetworkStatus(), 15000);
-            await Alpine.store("conn").syncNetwork();
+            try {
+                await Alpine.store("conn").syncNetwork();
+            } catch (e) {
+                // Already surfaced to the user via showApiError inside syncNetwork();
+                // a failed first sync must not prevent monitoring from starting —
+                // the recurring autoSyncNetwork timer below will retry every 20s.
+            }
             this.polling = setInterval(() => this.fetchState(), 1000);
+            this.syncPolling = setInterval(() => Alpine.store("conn").autoSyncNetwork(), 20000);
             this.startRuntimeLifecycle();
         },
 
@@ -227,6 +311,52 @@ document.addEventListener("alpine:init", () => {
         deviceGroupNames(dev) {
             const groups = this.deviceGroups.filter(group => (group.device_ips || []).includes(dev.ip));
             return groups.map(group => group.name).join(", ");
+        },
+
+        // ---- Bulk actions (device group scoped) ----
+        currentBulkGroup() {
+            return this.deviceGroups.find(g => g.id === this.filterGroupId) || null;
+        },
+
+        openBulkRename() {
+            this.bulkPanel = "rename";
+            this.updateBulkRenamePreview();
+        },
+
+        updateBulkRenamePreview() {
+            const group = this.currentBulkGroup();
+            this.bulkRenamePlan = group
+                ? Alpine.store("conn").bulkRenamePreview(
+                    group, this.bulkRenamePattern, Number(this.bulkRenameStart) || 1, Number(this.bulkRenamePad) || 0)
+                : [];
+        },
+
+        async applyBulkRename() {
+            await Alpine.store("conn").bulkRenameApply(this.bulkRenamePlan);
+            this.bulkPanel = null;
+            this.bulkRenamePlan = [];
+        },
+
+        openBulkApply() {
+            this.bulkPanel = "apply";
+        },
+
+        async applyBulkOutputType() {
+            const group = this.currentBulkGroup();
+            if (!group) return;
+            await Alpine.store("conn").bulkApplyOutputType(group, Number(this.bulkOutputIndex) || 0, this.bulkOutputType);
+        },
+
+        async applyBulkReceiveMode() {
+            const group = this.currentBulkGroup();
+            if (!group) return;
+            await Alpine.store("conn").bulkApplyReceiveMode(
+                group, this.bulkReceiveMode, Number(this.bulkReceiveBase) || 0, Number(this.bulkReceiveStep) || 0);
+        },
+
+        closeBulkPanel() {
+            this.bulkPanel = null;
+            this.bulkRenamePlan = [];
         },
     });
 });

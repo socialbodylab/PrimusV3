@@ -4,7 +4,7 @@
 
 PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Python sender drives ESP32 receiver nodes over Art-Net (UDP 6454). The sender has a built-in web UI, clip/look workflow, cue controller, OSC input, firmware upload panel, and effects engine. The current V3.6 track supports reflashed V1, V2, and V3.1 hardware with one shared Art-Net protocol.
 
-## Active version: V4 (PrimusCentral + RadiusCentral)
+## Active version: V4 (PrimusCentral + RadiusCentral + DeviceManager)
 
 **V4 is the canonical sender and packaging track** under `V4/`. Shipped PrimusCentral releases (v0.81–v0.86+) are built from here with `--product primus`. V3.6 under `V3_6/` remains a historical/source reference for the V3.6 protocol line; do new PrimusCentral sender, firmware, packaging, and documentation work in `V4/` unless the user explicitly asks for an older track.
 
@@ -28,6 +28,19 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|IP:D|F:RA`
 - Track telemetry: UDP 6455 magic `PTR` for current filename
 
+### DeviceManager (network monitoring, device config, and firmware app)
+
+DeviceManager is not a separate backend — it is a third frontend served by the same unified server that hosts PrimusCentral, always running against the `primus` product. It exists to give a stage manager a live, monitoring-first view of every receiver on the network, plus device configuration and firmware upload, without the show-control workflow (Look Designer, Cue Controller) getting in the way.
+
+- Launch: `python3 V4/sender/run_devices.py` (attaches to an already-running PrimusCentral/DeviceManager server instead of starting a second one; falls back to starting its own `primus`-product server if none is running) — or `python3 V4/sender/run.py --product primus --frontend devices`.
+- Package: `python3 V4/build_sender_app.py --target macos --product devices --name DeviceManager` (bundle id `com.socialbodylab.DeviceManager`).
+- Web UI: `V4/sender/web/index-devices.html` + `V4/sender/web/js/app-devices.js` (served at `/devices`). Reuses the same shared `V4/sender/web/js/device-conn.js` store as PrimusCentral/RadiusCentral for all device actions (connect, rename, hello, IP config, output/receive-mode config, groups) — extend that file additively; do not change existing function signatures, since Primus and Radius both depend on them.
+- **Monitoring is automatic, not manual.** `app-devices.js` runs a recurring `POST /api/devices/sync` every 20 seconds (`autoSyncNetwork` in `device-conn.js`) to discover and auto-connect reachable devices in the background — there is no user-facing Connect/Disconnect control in this app. Live FPS/battery telemetry comes from the UDP 6455 listener and is already present in `/api/state` for any known device regardless of connect state (connect only gates whether the sender actively drives DMX output to that device, which is irrelevant to monitoring).
+- Cards are grouped into three status sections — **Attention** (transport error or low/faulted battery), **Online** (`receiver_online`), **Offline / Unconfirmed** — with a summary strip (online/total, low battery, error counts) above the grid. Card field order: Character Name (heading, falls back to device name), Performer Name (subheading), status pill + battery + Hello, IP + universe, Receive Mode, Outputs + virtual resolution, then Device (technical) name and hardware/firmware metadata in the footer.
+- **Bulk actions** are scoped to an existing device group (create/manage groups from PrimusCentral's own UI; DeviceManager only filters by them): Bulk Rename applies a `{n}`-numbered pattern across the group with a preview before committing; Bulk Apply sets an output type or receive-mode/base-universe (with an optional per-device universe increment) across the group. Both are client-side loops over the existing single-device endpoints (`bulkRenamePreview/Apply`, `bulkApplyOutputType`, `bulkApplyReceiveMode` in `device-conn.js`) — no new backend endpoints. Bulk static IP is intentionally not offered (would cause IP collisions).
+- **Firmware** is a second top-level tab (Monitor/Firmware) reusing PrimusCentral's existing `firmware.js` component and backend (`firmware.py`, `/api/firmware/*`) unchanged, laid out as a linear step flow (version/profile → device/port → collapsible overrides → compile/upload → log) instead of PrimusCentral's dense side-by-side grid.
+- `monitorHardwareLabel(entity)` in `device-conn.js` reports "Unconfirmed hardware" instead of a specific board name when a device's capability `profile` is `pv3cap1-legacy`/`primus-legacy` — those profiles mean the receiver never returned a real board-code capability tag and the backend (`parse_node_capabilities` in `artnet.py`) is guessing V3.1 hardware from a generic "primusv3" name match, which is not reliable for older/legacy firmware on V1 or V2 boards. PrimusCentral's own `hardwareLabel(entity)` is unchanged and still shows the guessed board name.
+
 See `V4/README.md` and `V4/PACKAGING.md` for quick start and release details.
 
 ### V3.6 reference track (`V3_6/`)
@@ -44,12 +57,12 @@ The 0.7 workshop release defaults the browser UI to a workshop profile that hide
 
 ### V4 Unified Sender (`V4/sender/`) — canonical track
 
-- `run.py` — Entry point for PrimusCentral (`--product primus`) and RadiusCentral (`--product radius`).
+- `run.py` — Entry point for PrimusCentral (`--product primus`), RadiusCentral (`--product radius`), and DeviceManager (`--product primus --frontend devices`, or `run_devices.py`).
 - `state.py` — Core runtime state, output tables, animation tick, device tracking, brightness scaling, Art-Net send loop, `/api/performance` diagnostics, and macOS thread QoS helpers.
 - `server.py` — HTTP server. Serves static web UI and JSON API endpoints.
 - `effects.py`, `clips.py`, `mixer.py`, `controller.py`, `sharing.py` — Primus clip/look/cue workflow.
 - `firmware.py`, `network_settings.py`, `osc_control.py`, `artnet.py`, `paths.py` — Shared infrastructure.
-- `web/` — Static Alpine.js UI (`index-primus.html`, `index.html`, shared CSS/JS).
+- `web/` — Static Alpine.js UI (`index-primus.html`, `index.html`, `index-devices.html`, shared CSS/JS).
 - `tests/` — Stdlib unittest coverage.
 
 ### V4 Sender Data
