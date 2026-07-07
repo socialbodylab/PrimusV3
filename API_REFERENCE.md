@@ -436,14 +436,14 @@ Each Look has two output slots matching the current V3.6 receiver profile contra
 
 ## 8. HTTP Control API (V4 PrimusCentral Sender)
 
-The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a web UI and exposes a JSON API. The historical V3.6 source tree (`V3_6/sender/run.py`) exposes the same Primus endpoints for comparison. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup.
+The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a web UI and exposes a JSON API. The historical V3.6 source tree (`V3_6/sender/run.py`) exposes the same Primus endpoints for comparison. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup. PrimusCentral and RadiusCentral always bind to `127.0.0.1` (loopback only). DeviceManager is the one exception: when it starts its own fresh backend (`run_devices.py`, or `run.py --lan`), it binds to `0.0.0.0` instead so a phone or tablet on the same network can reach its read-only Mobile View (see `lan_enabled` below) — it stays loopback-only if it instead attaches to an already-running Central server.
 
 ### GET Endpoints
 
 | Route | Description |
 |---|---|
 | `GET /` | HTML control interface (Alpine.js SPA) |
-| `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership and `monitor_only` (true when this backend never auto-connects to devices or drives Art-Net output — DeviceManager's safety mode when it starts its own fresh backend) |
+| `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership, `monitor_only` (true when this backend never auto-connects to devices or drives Art-Net output — DeviceManager's safety mode when it starts its own fresh backend), and `lan_enabled` (true when the HTTP server is bound to the LAN interface rather than loopback-only — DeviceManager's own fresh backend only, enabling its Mobile / Tablet View) |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
 | `GET /api/performance` | Rolling sender timing diagnostics, counters, and per-second rates for FPS/debug validation |
 | `GET /api/network/status` | Sender host network interfaces, selected/recommended Art-Net route, saved Settings profiles, and show-router network summaries |

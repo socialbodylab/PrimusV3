@@ -49,6 +49,8 @@ document.addEventListener("alpine:init", () => {
         bulkReceiveMode: "split",
         bulkReceiveBase: 0,
         bulkReceiveStep: 2,
+        mobileView: false,
+        _mobileQrCache: null,
         expandedCards: {},
 
         get brandLabel() {
@@ -66,6 +68,40 @@ document.addEventListener("alpine:init", () => {
 
         get outputTypes() {
             return this.state?.look_output_types || [];
+        },
+
+        get mobileAccessUrl() {
+            if (!this.runtime?.lan_enabled) return null;
+            const iface = this.network?.selected_interface || this.network?.recommended_interface;
+            const ip = iface?.source_ip;
+            if (!ip) return null;
+            return `http://${ip}:${window.location.port}/devices?mode=mobile`;
+        },
+
+        get mobileAccessUnavailableReason() {
+            if (this.runtime && !this.runtime.lan_enabled) {
+                return "This session isn't reachable from other devices. Restart Device Manager from its own launcher (not attached to an already-running PrimusCentral) to enable mobile/tablet access.";
+            }
+            if (!this.mobileAccessUrl) {
+                return "No active network connection was found to share with a phone or tablet.";
+            }
+            return null;
+        },
+
+        get mobileAccessSvg() {
+            const url = this.mobileAccessUrl;
+            if (!url) return "";
+            if (this._mobileQrCache?.url === url) return this._mobileQrCache.svg;
+            try {
+                const qr = qrcode(0, "M");
+                qr.addData(url);
+                qr.make();
+                const svg = qr.createSvgTag(6, 8);
+                this._mobileQrCache = { url, svg };
+                return svg;
+            } catch (e) {
+                return "";
+            }
         },
 
         setMode(m) {
@@ -193,6 +229,8 @@ document.addEventListener("alpine:init", () => {
         },
 
         async init() {
+            const params = new URLSearchParams(window.location.search);
+            this.mobileView = params.get("mode") === "mobile";
             try {
                 this.runtime = await api("GET", "/api/runtime");
                 this.product = this.runtime?.product || "primus";

@@ -28,6 +28,7 @@ from mixer import load_look, compute_look_frame
 from effects import blend_pixels
 from osc_control import OscControlServer
 from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path, sender_product
+from network_settings import get_artnet_interface
 from central_launcher import (
     CentralPortInUseByCentral,
     frontend_path_for,
@@ -177,7 +178,9 @@ def _create_server_with_fallback(host, port, state, cue_list, ui_lifecycle_enabl
             raise
         if exc.errno not in (errno.EADDRINUSE, 48, 98):
             raise
-        runtime = probe_central_server(host, port)
+        # Any Central server on this machine is reachable via loopback
+        # regardless of what host it bound to, so always probe there.
+        runtime = probe_central_server("127.0.0.1", port)
         if runtime:
             raise CentralPortInUseByCentral(port, runtime)
         print(f"Port {port} is busy; using an auto-selected port instead.")
@@ -638,6 +641,14 @@ def main():
              "(only applies when this process starts a fresh backend; inert if "
              "it attaches to an already-running server)",
     )
+    parser.add_argument(
+        "--lan",
+        action="store_true",
+        help="Bind the HTTP server to all interfaces (0.0.0.0) instead of "
+             "127.0.0.1, so other devices on the same network can reach it "
+             "(only applies when this process starts a fresh backend; inert if "
+             "it attaches to an already-running server)",
+    )
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -673,9 +684,10 @@ def main():
 
     ui_lifecycle_enabled = is_bundled() and not args.no_browser
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
+    bind_host = "0.0.0.0" if args.lan else "127.0.0.1"
     try:
         server = _create_server_with_fallback(
-            "127.0.0.1", args.port, state, cue_list,
+            bind_host, args.port, state, cue_list,
             ui_lifecycle_enabled=ui_lifecycle_enabled,
             osc_service=osc_service)
     except CentralPortInUseByCentral:
@@ -691,7 +703,17 @@ def main():
             return
         raise
     port = server.server_address[1]
+    server.lan_enabled = args.lan
     url = f"http://127.0.0.1:{port}{frontend_path}"
+    lan_url = None
+    if args.lan:
+        try:
+            lan_interface = get_artnet_interface()
+        except Exception:
+            lan_interface = None
+        lan_ip = (lan_interface or {}).get("source_ip")
+        if lan_ip:
+            lan_url = f"http://{lan_ip}:{port}{frontend_path}"
     register_central_server(port, sender_product())
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
@@ -714,6 +736,8 @@ def main():
 
     print(_launcher_display_name())
     print(f"  URL: {url}")
+    if args.lan:
+        print(f"  LAN URL: {lan_url or '(no active network interface found)'}")
     print(f"  Devices: {len(state.devices)}")
     osc_status = osc_service.status()
     if osc_status.get("enabled"):

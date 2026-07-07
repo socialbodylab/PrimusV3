@@ -6,6 +6,7 @@
 <title>Device Manager</title>
 <link rel="stylesheet" href="/css/style.css">
 <script defer src="/js/alpine.min.js"></script>
+<script src="/js/qrcode.js"></script>
 <script src="/js/ui-lifecycle.js"></script>
 <script src="/js/app-devices.js"></script>
 <script src="/js/device-conn.js"></script>
@@ -18,7 +19,7 @@
     <div class="navbar-brand" x-data x-text="$store.app.brandLabel"></div>
     <div class="navbar-tabs navbar-tabs-primary"></div>
     <div class="navbar-tabs navbar-tabs-secondary" x-data>
-        <template x-for="m in ['monitor', 'firmware', 'settings']">
+        <template x-for="m in ($store.app.mobileView ? ['monitor'] : ['monitor', 'firmware', 'settings'])">
             <div class="navbar-tab"
                  :class="{ active: $store.app.mode === m }"
                  @click="$store.app.setMode(m)"
@@ -72,13 +73,13 @@
                     :disabled="$store.conn.syncing"
                     x-text="$store.conn.syncing ? 'Syncing…' : 'Sync now'"></button>
             <button class="btn btn-sm"
-                    x-show="$store.app.product === 'primus' && $store.app.filterGroupId"
+                    x-show="!$store.app.mobileView && $store.app.product === 'primus' && $store.app.filterGroupId"
                     @click="$store.app.openBulkRename()">Bulk Rename</button>
             <button class="btn btn-sm"
-                    x-show="$store.app.product === 'primus' && $store.app.filterGroupId"
+                    x-show="!$store.app.mobileView && $store.app.product === 'primus' && $store.app.filterGroupId"
                     @click="$store.app.openBulkApply()">Bulk Apply</button>
         </div>
-        <div class="device-manager-manual-add">
+        <div class="device-manager-manual-add" x-show="!$store.app.mobileView">
             <input type="text"
                    class="form-input form-input-sm"
                    placeholder="IP address"
@@ -266,7 +267,8 @@
                                 <button type="button" class="dm-subtitle-value"
                                         :class="{ 'device-identity-empty': !entry.dev.performer_name }"
                                         :title="$store.conn.showInfoHint('performer_name')"
-                                        @click="$store.conn.startShowInfoEdit(entry._index, 'performer_name')"
+                                        :disabled="$store.app.mobileView"
+                                        @click="!$store.app.mobileView && $store.conn.startShowInfoEdit(entry._index, 'performer_name')"
                                         x-text="$store.conn.showInfoDisplay(entry.dev, 'performer_name')"></button>
                             </template>
                             <template x-if="$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
@@ -791,6 +793,34 @@
                         </button>
                     </template>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group: Mobile / Tablet View -->
+    <div class="dm-section" x-data>
+        <div class="dm-section-header">
+            <span class="dm-section-title">Mobile / Tablet View</span>
+        </div>
+        <div class="settings-grid">
+            <div class="output-section settings-section">
+                <div class="output-header">
+                    <span class="output-name">Scan to view on a phone or tablet</span>
+                </div>
+                <div class="text-sm text-muted" style="margin-bottom:8px">
+                    Connect the phone or tablet to the same network as this computer, then scan
+                    this code for a live, read-only view of device status. No internet connection
+                    is needed on either device.
+                </div>
+                <template x-if="$store.app.mobileAccessUrl">
+                    <div class="dm-mobile-qr-wrap">
+                        <div class="dm-mobile-qr" x-html="$store.app.mobileAccessSvg"></div>
+                        <div class="settings-current-meta" x-text="$store.app.mobileAccessUrl"></div>
+                    </div>
+                </template>
+                <template x-if="!$store.app.mobileAccessUrl">
+                    <div class="firmware-empty-state" x-text="$store.app.mobileAccessUnavailableReason"></div>
+                </template>
             </div>
         </div>
     </div>

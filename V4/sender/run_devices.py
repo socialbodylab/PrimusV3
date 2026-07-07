@@ -22,6 +22,13 @@ if "--frontend" not in sys.argv:
 if "--monitor-only" not in sys.argv:
     sys.argv[1:1] = ["--monitor-only"]
 
+# Device Manager is meant to be viewed from a phone/tablet on the same
+# network (see Settings > Mobile / Tablet View), so its own fresh backend
+# binds to the LAN interface instead of loopback-only. Also inert when
+# attaching to an already-running server.
+if "--lan" not in sys.argv:
+    sys.argv[1:1] = ["--lan"]
+
 from run_primus import main
 
 

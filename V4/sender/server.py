@@ -172,6 +172,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "default_frontend": default_frontend_path(),
                 "monitor_only": bool(getattr(self._device_state(), "monitor_only", False)),
+                "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
             })
             return
         if path == "/api/state":

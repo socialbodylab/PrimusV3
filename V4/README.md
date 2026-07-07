@@ -33,6 +33,8 @@ python3 V4/sender/run.py --product primus --frontend devices
 
 DeviceManager attaches to an already-running PrimusCentral/DeviceManager server instead of starting a second one; if none is running it starts its own `primus`-product server in `monitor_only` mode, so it never auto-connects to or drives Art-Net output on discovered devices — safe to run on the same network as a show already being driven by another sender or console.
 
+**Mobile / Tablet View:** when DeviceManager starts its own fresh backend (the default `python3 V4/sender/run_devices.py` case above), it also binds the HTTP server to the local network (`0.0.0.0`) instead of loopback-only, so a phone or tablet on the same network can view a live, read-only copy of the Monitor tab. Scan the QR code under Settings > "Mobile / Tablet View" to open it — no internet connection is needed on either device. Expect a one-time OS firewall prompt the first time this runs. This does not apply when DeviceManager attaches to an already-running PrimusCentral/RadiusCentral server, which stays loopback-only.
+
 ```bash
 python3 -m py_compile V4/sender/*.py
 python3 -m unittest discover -s V4/sender/tests
