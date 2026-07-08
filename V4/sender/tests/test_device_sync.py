@@ -93,7 +93,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
 
         mock_discover.assert_called_once_with(
             known_ips=["192.168.1.10"],
-            timeout=2.0,
+            timeout=3.5,
             interface="en0",
         )
         state.refresh_devices_from_nodes.assert_called_once()

@@ -24,6 +24,8 @@ from artnet import (
     send_art_address,
     send_ip_config,
     send_show_info,
+    sync_show_info_to_device,
+    sync_device_name_to_receiver,
     send_audio_cmd,
     AUDIO_CMD_TEST_TONE,
     ipv4_octets,
@@ -327,8 +329,18 @@ def _show_info_from_saved(saved):
 
 def _apply_saved_show_info(dev, saved):
     character_name, performer_name = _show_info_from_saved(saved)
-    dev["character_name"] = character_name
-    dev["performer_name"] = performer_name
+    if character_name and not dev.get("character_name"):
+        dev["character_name"] = character_name
+    if performer_name and not dev.get("performer_name"):
+        dev["performer_name"] = performer_name
+
+
+def _preferred_device_name(dev, node_info=None, saved_name=None):
+    return show_info_store.preferred_device_name(
+        (node_info or {}).get("short_name"),
+        saved_name if saved_name is not None else (dev or {}).get("name"),
+        fallback="Radius" if (dev or {}).get("is_radius") else "Node",
+    )
 
 
 def _read_state_data():
@@ -859,7 +871,7 @@ class ControllerState:
                 if ip and ip not in seen_ips:
                     known_ips.append(ip)
                     seen_ips.add(ip)
-        nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0)
+        nodes = discover_artnet_nodes(known_ips=known_ips, timeout=3.5)
         node_map = {n["ip"]: n for n in nodes}
         nodes_by_name = {}
         duplicate_node_names = set()
@@ -879,10 +891,11 @@ class ControllerState:
                 continue
             node = node_map.get(ip) or nodes_by_name.get(sd.get("name"))
             if node:
-                node["short_name"] = node.get("short_name") or sd.get("name") or "Node"
                 result = self.add_device_from_node(node, auto_save=False)
-                _apply_saved_show_info(self.devices[result["device_index"]], sd)
-                _apply_persisted_show_info(self.devices[result["device_index"]], node)
+                dev = self.devices[result["device_index"]]
+                dev["name"] = _preferred_device_name(dev, node, sd.get("name"))
+                _apply_saved_show_info(dev, sd)
+                _apply_persisted_show_info(dev, node)
                 if node.get("ip") != ip:
                     refreshed = True
             else:
@@ -942,6 +955,64 @@ class ControllerState:
             for dev in self.devices:
                 if hasattr(dev["sender"], "set_source_ip"):
                     dev["sender"].set_source_ip(source_ip)
+
+    def refresh_after_firmware_upload(self, overrides=None):
+        """Re-discover devices after firmware upload and push name overrides over Art-Net."""
+        from artnet import discover_artnet_nodes, sync_device_name_to_receiver, sync_show_info_to_device
+        overrides = overrides or {}
+        device_name = overrides.get("device_name")
+        character_name = overrides.get("character_name")
+        performer_name = overrides.get("performer_name")
+        has_name_overrides = any((device_name, character_name, performer_name))
+
+        time.sleep(8)
+
+        interface = None
+        try:
+            from network_settings import get_artnet_interface
+            interface = get_artnet_interface()
+        except Exception:
+            pass
+        known_ips = self.discovery_targets()
+        nodes = discover_artnet_nodes(
+            known_ips=known_ips,
+            timeout=3.0,
+            interface=interface,
+        )
+        online_ips = {node.get("ip") for node in nodes if node.get("ip")}
+        self.refresh_devices_from_nodes(nodes)
+
+        if not has_name_overrides or not online_ips:
+            return
+
+        with self.lock:
+            for dev in self.devices:
+                ip = dev.get("ip")
+                if not ip or ip not in online_ips:
+                    continue
+                if device_name:
+                    sync_device_name_to_receiver(
+                        ip, device_name, source_ip=self.artnet_source_ip)
+                    dev["name"] = str(device_name)[:17]
+                char = dev.get("character_name", "")
+                perf = dev.get("performer_name", "")
+                if character_name is not None:
+                    char = show_info_store.normalize_show_info_value(character_name)
+                    dev["character_name"] = char
+                if performer_name is not None:
+                    perf = show_info_store.normalize_show_info_value(performer_name)
+                    dev["performer_name"] = perf
+                if character_name is not None or performer_name is not None:
+                    sync_show_info_to_device(
+                        ip, char, perf, source_ip=self.artnet_source_ip)
+                _persist_device_show_info(
+                    ip,
+                    dev.get("name"),
+                    dev.get("character_name", ""),
+                    dev.get("performer_name", ""),
+                    is_radius=dev.get("is_radius"),
+                )
+            _save_devices(self.devices)
 
     def refresh_devices_from_nodes(self, nodes, auto_save=True):
         """Refresh matching existing devices from discovery without adding new ones."""
@@ -1622,7 +1693,11 @@ class ControllerState:
                     is_radius=True,
                 )
                 dev = {
-                    "name": node_info.get("short_name", "Radius"),
+                    "name": _preferred_device_name(
+                        {"is_radius": True},
+                        node_info,
+                        node_info.get("short_name", "Radius"),
+                    ),
                     "character_name": character_name,
                     "performer_name": performer_name,
                     "ip": node_info["ip"],
@@ -1646,8 +1721,6 @@ class ControllerState:
                 _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
                 _apply_persisted_show_info(dev, node_info)
                 self.devices.append(dev)
-                if dev.get("character_name") or dev.get("performer_name"):
-                    self._sync_show_info_to_device_unlocked(dev)
                 if auto_save:
                     _save_devices(self.devices)
                 return {"status": "added", "device_index": len(self.devices) - 1}
@@ -1669,7 +1742,7 @@ class ControllerState:
             )
 
             dev = {
-                "name": node_info.get("short_name", "Node"),
+                "name": _preferred_device_name(None, node_info, node_info.get("short_name", "Node")),
                 "character_name": character_name,
                 "performer_name": performer_name,
                 "ip": node_info["ip"],
@@ -1694,8 +1767,6 @@ class ControllerState:
                 node_info, output_cfgs, base_u, receive_mode=receive_mode)
             _apply_persisted_show_info(dev, node_info)
             self.devices.append(dev)
-            if dev.get("character_name") or dev.get("performer_name"):
-                self._sync_show_info_to_device_unlocked(dev)
             if auto_save:
                 _save_devices(self.devices)
             return {"status": "added", "device_index": len(self.devices) - 1}
@@ -1779,8 +1850,9 @@ class ControllerState:
         if _is_radius_capabilities(capabilities):
             _promote_device_to_radius(dev)
         short_name = node_info.get("short_name")
-        if short_name:
-            dev["name"] = short_name
+        preferred = _preferred_device_name(dev, node_info)
+        if preferred and preferred != dev.get("name"):
+            dev["name"] = preferred
         dev["capabilities"] = capabilities
         dev["hardware_profile"] = node_info.get(
             "hardware_profile", capabilities.get("hardware_profile", "unknown"))
@@ -1794,10 +1866,16 @@ class ControllerState:
         char, perf = _show_info_from_node(node_info)
         char, perf = _merge_show_info_fields(
             char, perf, dev.get("ip"), dev.get("name"), is_radius=dev.get("is_radius"))
-        if char:
+        if show_info_store.discovery_show_info_may_apply(dev):
             dev["character_name"] = char
-        if perf:
             dev["performer_name"] = perf
+            _persist_device_show_info(
+                dev.get("ip"),
+                dev.get("name"),
+                dev.get("character_name", ""),
+                dev.get("performer_name", ""),
+                is_radius=dev.get("is_radius"),
+            )
 
         if dev.get("is_radius"):
             return True
@@ -1878,15 +1956,29 @@ class ControllerState:
                 return status
             dev = self.devices[di]
             try:
-                send_art_address(dev["ip"], new_name, source_ip=self.artnet_source_ip)
+                ok, error = sync_device_name_to_receiver(
+                    dev["ip"], new_name, source_ip=self.artnet_source_ip)
             except OSError as error:
                 if dev.get("is_radius"):
                     dev["transport_error"] = str(error)
                     return {"ok": False, "error": dev.get("transport_error")}
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
+            if not ok:
+                if dev.get("is_radius"):
+                    dev["transport_error"] = error
+                else:
+                    self._mark_transport_error_unlocked(dev, OSError(error))
+                return {"ok": False, "error": error}
             dev["name"] = new_name
             self._clear_transport_error_unlocked(dev)
+            _persist_device_show_info(
+                dev["ip"],
+                dev.get("name"),
+                dev.get("character_name"),
+                dev.get("performer_name"),
+                is_radius=dev.get("is_radius"),
+            )
             _save_devices(self.devices)
             return {"ok": True}
 
@@ -1895,7 +1987,7 @@ class ControllerState:
         if not caps.get("show_info") and not dev.get("is_radius"):
             return True
         try:
-            send_show_info(
+            ok, error = sync_show_info_to_device(
                 dev["ip"],
                 dev.get("character_name", ""),
                 dev.get("performer_name", ""),
@@ -1903,6 +1995,9 @@ class ControllerState:
             )
         except OSError as error:
             self._mark_transport_error_unlocked(dev, error)
+            return False
+        if not ok:
+            dev["transport_error"] = error
             return False
         self._clear_transport_error_unlocked(dev)
         return True
@@ -1929,6 +2024,7 @@ class ControllerState:
                 dev.get("performer_name"),
                 is_radius=dev.get("is_radius"),
             )
+            dev["show_info_edited_at"] = time.time()
             _save_devices(self.devices)
             return {"ok": True, "applied_to_device": applied_to_device}
 

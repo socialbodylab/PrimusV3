@@ -38,6 +38,21 @@ class RadiusArtNetTests(unittest.TestCase):
         self.assertTrue(caps["ftp"])
         self.assertTrue(caps["ip_config"])
         self.assertTrue(caps["show_info"])
+        self.assertEqual(caps["ip_mode"], "dhcp")
+
+    def test_pvrad1_firmware_node_report_parses_static_ip(self):
+        report = "#0001 [0042] PVRAD1|B:v1|IP:S|F:RIHAS"
+        caps = parse_node_capabilities(report, "Audio-1", "Radius Central V1")
+        self.assertEqual(caps["profile"], "pvrad1")
+        self.assertEqual(caps["ip_mode"], "static")
+        self.assertTrue(caps["rename"])
+        self.assertTrue(caps["show_info"])
+
+    def test_pvrad1_ok_prefixed_node_report_parses_static_ip(self):
+        report = "#0001 [0042] OK|PVRAD1|B:v2|IP:S|F:RIHAS"
+        caps = parse_node_capabilities(report, "Audio-1", "Radius Central V2")
+        self.assertEqual(caps["hardware_profile"], "v2")
+        self.assertEqual(caps["ip_mode"], "static")
 
     def test_audio_cmd_packet_builder(self):
         sent = []

@@ -366,7 +366,7 @@ class FirmwareJobManager:
                 raise FirmwareRequestError(404, "firmware job not found")
             return job.to_json()
 
-    def start_job(self, data):
+    def start_job(self, data, device_state=None):
         data = data or {}
         scope = data.get("scope", "product")
         command = self.build_command(data)
@@ -398,7 +398,7 @@ class FirmwareJobManager:
 
         thread = threading.Thread(
             target=self._run_job,
-            args=(job, command),
+            args=(job, command, device_state),
             daemon=True,
         )
         thread.start()
@@ -702,7 +702,26 @@ class FirmwareJobManager:
                 raise FirmwareRequestError(400, f"invalid {name}")
         return text
 
-    def _run_job(self, job, firmware_command):
+    def _has_name_overrides(self, metadata):
+        overrides = (metadata or {}).get("overrides") or {}
+        return bool(
+            overrides.get("device_name")
+            or overrides.get("character_name")
+            or overrides.get("performer_name")
+        )
+
+    def _refresh_device_state_after_upload(self, device_state, metadata):
+        if not device_state or not hasattr(device_state, "refresh_after_firmware_upload"):
+            return
+        if not self._has_name_overrides(metadata):
+            return
+        try:
+            overrides = (metadata or {}).get("overrides") or {}
+            device_state.refresh_after_firmware_upload(overrides)
+        except Exception as exc:
+            return str(exc)
+
+    def _run_job(self, job, firmware_command, device_state=None):
         raw_lines = []
         job.set_status("running", started_at=time.time())
         try:
@@ -750,6 +769,22 @@ class FirmwareJobManager:
                 result=result,
                 error=error,
             )
+            if (
+                status == "succeeded"
+                and firmware_command.action == "upload"
+                and device_state is not None
+            ):
+                overrides = (firmware_command.metadata or {}).get("overrides") or {}
+                if self._has_name_overrides(firmware_command.metadata):
+                    job.append_output(
+                        "Waiting for receiver reboot, then applying name overrides...")
+                refresh_error = self._refresh_device_state_after_upload(
+                    device_state, firmware_command.metadata)
+                if refresh_error:
+                    job.append_output(
+                        f"Upload succeeded, but device refresh failed: {refresh_error}")
+                elif self._has_name_overrides(firmware_command.metadata):
+                    job.append_output("Name overrides applied to online receivers.")
         except Exception as exc:
             job.append_output(redact_text(str(exc), firmware_command.secrets))
             job.set_status(

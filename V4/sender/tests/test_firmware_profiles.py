@@ -204,6 +204,41 @@ class FirmwareProfileTests(unittest.TestCase):
         parsed = firmware.parse_ports_json_output(raw)
         self.assertEqual(parsed["ports"][0]["address"], "/dev/cu.usbserial-1")
 
+    def test_upload_refresh_called_when_name_overrides_present(self):
+        class FakeDeviceState:
+            def __init__(self):
+                self.called = False
+                self.overrides = None
+
+            def refresh_after_firmware_upload(self, overrides=None):
+                self.called = True
+                self.overrides = overrides
+
+        manager = firmware.FirmwareJobManager()
+        device_state = FakeDeviceState()
+        metadata = {
+            "overrides": {
+                "character_name": "Narrator",
+                "performer_name": "Jamie",
+            }
+        }
+        manager._refresh_device_state_after_upload(device_state, metadata)
+        self.assertTrue(device_state.called)
+        self.assertEqual(device_state.overrides["character_name"], "Narrator")
+
+    def test_upload_refresh_skipped_without_name_overrides(self):
+        class FakeDeviceState:
+            def __init__(self):
+                self.called = False
+
+            def refresh_after_firmware_upload(self, overrides=None):
+                self.called = True
+
+        manager = firmware.FirmwareJobManager()
+        device_state = FakeDeviceState()
+        manager._refresh_device_state_after_upload(device_state, {"overrides": {}})
+        self.assertFalse(device_state.called)
+
 
 if __name__ == "__main__":
     unittest.main()

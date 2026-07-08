@@ -500,7 +500,7 @@ def _discovery_destinations(known_ips=None, interface=None):
     return destinations
 
 
-def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
+def discover_artnet_nodes(known_ips=None, timeout=3.5, interface=None):
     """Send ArtPoll and collect ArtPollReply responses.
 
     known_ips: list of IP strings to unicast to in addition to broadcast.
@@ -530,9 +530,10 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
                 pass
 
         nodes = {}
-        node_list = []
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        poll_budget = max(0.5, timeout * 0.6)
+        poll_deadline = time.monotonic() + poll_budget
+        show_deadline = time.monotonic() + timeout
+        while time.monotonic() < poll_deadline:
             try:
                 raw, addr = sock.recvfrom(600)
             except socket.timeout:
@@ -581,16 +582,25 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
             }
 
         node_list = list(nodes.values())
-        for node in node_list:
-            caps = node.get("capabilities") or {}
-            if not caps.get("show_info") and caps.get("device_class") != "radius":
-                continue
-            remaining = deadline - time.monotonic()
+        show_info_nodes = [
+            node for node in node_list
+            if (node.get("capabilities") or {}).get("show_info")
+            or (node.get("capabilities") or {}).get("device_class") == "radius"
+        ]
+        known = set(known_ips or [])
+        if known:
+            show_info_nodes.sort(key=lambda node: 0 if node.get("ip") in known else 1)
+        per_node_timeout = 0.35
+        if show_info_nodes:
+            remaining_budget = max(0.0, show_deadline - time.monotonic())
+            per_node_timeout = min(0.35, remaining_budget / len(show_info_nodes))
+        for node in show_info_nodes:
+            remaining = show_deadline - time.monotonic()
             if remaining <= 0:
                 break
             show = query_show_info(
                 node["ip"],
-                timeout=min(0.35, remaining),
+                timeout=min(per_node_timeout, remaining),
                 sock=sock,
             )
             if show:
@@ -638,9 +648,18 @@ def _parse_radius_capability_parts(node_report):
     if not node_report:
         return []
     parts = [part.strip() for part in node_report.split("|") if part.strip()]
-    try:
-        caps_start = parts.index(NODE_CAPS_PREFIX_RADIUS)
-    except ValueError:
+    caps_start = -1
+    for idx, part in enumerate(parts):
+        if part == NODE_CAPS_PREFIX_RADIUS:
+            caps_start = idx
+            break
+        if part.endswith(" " + NODE_CAPS_PREFIX_RADIUS):
+            caps_start = idx
+            break
+        if part.endswith(NODE_CAPS_PREFIX_RADIUS) and NODE_CAPS_PREFIX_RADIUS in part:
+            caps_start = idx
+            break
+    if caps_start < 0:
         return []
     return parts[caps_start + 1:]
 
@@ -1180,20 +1199,121 @@ def send_show_info(ip, character_name="", performer_name="", source_ip=None):
     _send_udp_packet(ip, pkt, source_ip=source_ip)
 
 
+def _normalize_show_info_compare(value):
+    return str(value or "").strip()[:SHOW_INFO_FIELD_LEN]
+
+
+def sync_show_info_to_device(
+    ip,
+    character_name="",
+    performer_name="",
+    source_ip=None,
+    timeout=0.5,
+):
+    """Write show info and verify the receiver stored the expected values."""
+    send_show_info(
+        ip,
+        character_name=character_name,
+        performer_name=performer_name,
+        source_ip=source_ip,
+    )
+    result = query_show_info(ip, timeout=timeout, source_ip=source_ip)
+    if not result:
+        return False, "receiver did not respond to show info read"
+    expected_char = _normalize_show_info_compare(character_name)
+    expected_perf = _normalize_show_info_compare(performer_name)
+    actual_char = _normalize_show_info_compare(result.get("character_name"))
+    actual_perf = _normalize_show_info_compare(result.get("performer_name"))
+    if actual_char != expected_char or actual_perf != expected_perf:
+        return False, "receiver did not confirm show info save"
+    return True, ""
+
+
+def _bind_artnet_query_socket(source_ip=None):
+    """Bind a UDP socket for Art-Net request/response pairs.
+
+    Receivers reply to UDP 6454 (controller port), not the ephemeral source port.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    bind_addrs = []
+    if source_ip:
+        bind_addrs.append((source_ip, ARTNET_PORT))
+    bind_addrs.append(("", ARTNET_PORT))
+    if source_ip:
+        bind_addrs.append((source_ip, 0))
+    bind_addrs.append(("", 0))
+    for addr in bind_addrs:
+        try:
+            sock.bind(addr)
+            return sock
+        except OSError:
+            continue
+    sock.close()
+    raise OSError("unable to bind Art-Net query socket")
+
+
+def query_node_short_name(ip, timeout=0.5, source_ip=None):
+    """Read the short name advertised by a single receiver."""
+    sock = _bind_artnet_query_socket(source_ip=source_ip)
+    recv_timeout = min(0.25, max(0.05, timeout))
+    sock.settimeout(recv_timeout)
+    try:
+        poll = bytearray()
+        poll += ARTNET_HEADER
+        poll += struct.pack("<H", ARTNET_OPCODE_POLL)
+        poll += struct.pack(">H", ARTNET_VERSION)
+        poll += bytes([0x00, 0x00])
+        sock.sendto(bytes(poll), (ip, ARTNET_PORT))
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw, addr = sock.recvfrom(600)
+            except socket.timeout:
+                continue
+            if addr[0] != ip:
+                continue
+            if len(raw) < 44 or raw[:8] != ARTNET_HEADER:
+                continue
+            opcode = struct.unpack("<H", raw[8:10])[0]
+            if opcode != ARTNET_OPCODE_POLLREPLY:
+                continue
+            return raw[26:44].split(b"\x00")[0].decode("ascii", errors="replace")
+    finally:
+        sock.close()
+    return None
+
+
+def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5):
+    """Send ArtAddress and verify the receiver advertised the new short name."""
+    send_art_address(ip, short_name, source_ip=source_ip)
+    expected = str(short_name or "").strip()[:17]
+    # Radius nodes may still be finishing NVS/display updates when the first
+    # ArtPollReply arrives; retry briefly before reporting failure.
+    time.sleep(0.08)
+    deadline = time.monotonic() + max(0.5, timeout)
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        actual = query_node_short_name(
+            ip,
+            timeout=min(0.5, remaining),
+            source_ip=source_ip,
+        )
+        if actual and actual.strip()[:17] == expected:
+            return True, ""
+        time.sleep(0.08)
+    return False, "receiver did not confirm name save"
+
+
 def query_show_info(ip, timeout=0.35, sock=None, source_ip=None):
     """Read character/performer strings stored on a receiver."""
     owns_sock = sock is None
     if owns_sock:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock = _bind_artnet_query_socket(source_ip=source_ip)
         sock.settimeout(max(0.05, timeout))
-        try:
-            if source_ip:
-                sock.bind((source_ip, 0))
-            else:
-                sock.bind(("", 0))
-        except OSError:
-            sock.bind(("", 0))
     else:
         sock.settimeout(max(0.05, timeout))
 
@@ -1205,7 +1325,7 @@ def query_show_info(ip, timeout=0.35, sock=None, source_ip=None):
             try:
                 raw, addr = sock.recvfrom(512)
             except socket.timeout:
-                break
+                continue
             if addr[0] != ip:
                 continue
             parsed = parse_show_info_packet(raw)

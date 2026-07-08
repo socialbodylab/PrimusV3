@@ -72,7 +72,7 @@ def _sync_network_devices(device_state, interface=None):
     """Discover nodes, add compatible new devices, and connect all online targets."""
     product = sender_product()
     known_ips = device_state.discovery_targets()
-    nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+    nodes = discover_artnet_nodes(known_ips=known_ips, timeout=3.5, interface=interface)
     if nodes:
         device_state.refresh_devices_from_nodes(nodes)
 
@@ -384,6 +384,17 @@ class Handler(BaseHTTPRequestHandler):
             close_session(self.server, data.get("session_id"))
             self._ok()
 
+        elif path == "/api/ui/focus":
+            callback = getattr(self.server, "ui_focus_callback", None)
+            if not callable(callback):
+                self._json_error(404, "ui focus not available")
+                return
+            try:
+                callback()
+            except Exception:
+                pass
+            self._ok()
+
         elif path == "/api/update":
             primus = self._primus_state()
             if primus is not None:
@@ -426,7 +437,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             known_ips = self._device_state().discovery_targets()
             interface = self._sync_artnet_source()
-            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=3.5, interface=interface)
             if nodes:
                 self._device_state().refresh_devices_from_nodes(nodes)
             online_ips = {node.get("ip") for node in nodes if node.get("ip")}
@@ -444,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/discover":
             known_ips = self._device_state().discovery_targets()
             interface = self._sync_artnet_source()
-            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=3.5, interface=interface)
             self._device_state().refresh_devices_from_nodes(nodes)
             self._json_response(nodes)
 
@@ -469,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # Try unicast discovery first to get node info
             interface = self._sync_artnet_source()
-            nodes = discover_artnet_nodes(known_ips=[ip], timeout=2.0, interface=interface)
+            nodes = discover_artnet_nodes(known_ips=[ip], timeout=3.5, interface=interface)
             node = next((n for n in nodes if n["ip"] == ip), None)
             if node:
                 result = self._device_state().add_device_from_node(node)
@@ -931,7 +942,8 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/api/firmware/jobs":
             try:
-                self._json_response(firmware_jobs.start_job(data))
+                self._json_response(
+                    firmware_jobs.start_job(data, device_state=self._device_state()))
             except FirmwareRequestError as exc:
                 self._json_error(exc.code, exc.message)
 

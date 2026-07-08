@@ -4,11 +4,24 @@ show_info_store.py — Shared character/performer persistence for Primus and Rad
 
 import json
 import os
+import time
 
 import paths
 
 
 FIELD_MAX_LENGTH = 64
+SHOW_INFO_EDIT_GRACE_SECONDS = 30
+GENERIC_DEVICE_NAMES = frozenset({"", "Radius", "PrimusV3", "Primus", "Node"})
+
+
+def preferred_device_name(discovered="", saved="", fallback="Node"):
+    discovered = str(discovered or "").strip()
+    saved = str(saved or "").strip()
+    if discovered and discovered not in GENERIC_DEVICE_NAMES:
+        return discovered[:17]
+    if saved:
+        return saved[:17]
+    return (discovered or saved or fallback)[:17]
 
 
 def primus_state_path():
@@ -27,6 +40,11 @@ def storage_path_for_device(is_radius=False):
 
 def normalize_show_info_value(value):
     return str(value or "").strip()[:FIELD_MAX_LENGTH]
+
+
+def discovery_show_info_may_apply(dev, grace_seconds=SHOW_INFO_EDIT_GRACE_SECONDS):
+    edited_at = float((dev or {}).get("show_info_edited_at") or 0)
+    return (time.time() - edited_at) >= grace_seconds
 
 
 def show_info_from_saved(saved):
@@ -82,6 +100,18 @@ def lookup_device_show_info(state_path, ip=None, device_name=None):
     return "", ""
 
 
+def lookup_device_show_info_entry(state_path, ip=None, device_name=None):
+    info_map = device_show_info_map_from_data(read_state_data(state_path))
+    entry = info_map.get(ip) if ip else None
+    if isinstance(entry, dict):
+        return entry
+    if device_name:
+        for candidate in info_map.values():
+            if isinstance(candidate, dict) and candidate.get("device_name") == device_name:
+                return candidate
+    return None
+
+
 def persist_device_show_info(state_path, ip, device_name, character_name, performer_name):
     if not ip:
         return
@@ -126,10 +156,28 @@ def merge_show_info_fields(state_path, character_name, performer_name, ip=None, 
 
 
 def apply_persisted_show_info(state_path, dev, node_info=None):
+    node_char, node_perf = show_info_from_node(node_info or {})
+    if node_char:
+        dev["character_name"] = node_char
+    if node_perf:
+        dev["performer_name"] = node_perf
+
     ip = dev.get("ip") or (node_info or {}).get("ip")
     name = dev.get("name") or (node_info or {}).get("short_name")
-    character_name, performer_name = lookup_device_show_info(state_path, ip, name)
-    if character_name:
-        dev["character_name"] = character_name
-    if performer_name:
-        dev["performer_name"] = performer_name
+    entry = lookup_device_show_info_entry(state_path, ip, name)
+    if isinstance(entry, dict):
+        if "character_name" in entry and not dev.get("character_name"):
+            dev["character_name"] = normalize_show_info_value(entry.get("character_name"))
+        if "performer_name" in entry and not dev.get("performer_name"):
+            dev["performer_name"] = normalize_show_info_value(entry.get("performer_name"))
+
+    if ip and (dev.get("character_name") or dev.get("performer_name") or (
+            isinstance(entry, dict) and (
+                "character_name" in entry or "performer_name" in entry))):
+        persist_device_show_info(
+            state_path,
+            ip,
+            name,
+            dev.get("character_name", ""),
+            dev.get("performer_name", ""),
+        )
