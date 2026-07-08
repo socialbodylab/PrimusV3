@@ -40,10 +40,19 @@ class DeviceShowInfoPersistenceTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.state_path = os.path.join(self.temp_dir.name, ".primus_state.json")
+        self.radius_state_path = os.path.join(self.temp_dir.name, ".radius_state.json")
         self.state_patch = patch.object(state, "_state_file", return_value=self.state_path)
+        self.primus_path_patch = patch.object(
+            state.show_info_store, "primus_state_path", return_value=self.state_path)
+        self.radius_path_patch = patch.object(
+            state.show_info_store, "radius_state_path", return_value=self.radius_state_path)
         self.state_patch.start()
+        self.primus_path_patch.start()
+        self.radius_path_patch.start()
 
     def tearDown(self):
+        self.radius_path_patch.stop()
+        self.primus_path_patch.stop()
         self.state_patch.stop()
         self.temp_dir.cleanup()
 
@@ -153,6 +162,20 @@ class DeviceShowInfoPersistenceTests(unittest.TestCase):
         character_name, performer_name = _lookup_device_show_info("192.168.1.50", "Badge-A")
         self.assertEqual(character_name, "Lead")
         self.assertEqual(performer_name, "Alex Kim")
+
+    def test_radius_show_info_persists_in_radius_state_file(self):
+        radius_path = self.radius_state_path
+        show_info_store = state.show_info_store
+        show_info_store.persist_device_show_info(
+            radius_path, "192.168.1.60", "Radius-A", "Narrator", "Jamie")
+        char, perf = show_info_store.lookup_device_show_info(
+            radius_path, "192.168.1.60", "Radius-A")
+        self.assertEqual(char, "Narrator")
+        self.assertEqual(perf, "Jamie")
+        with open(radius_path, "r") as f:
+            data = json.load(f)
+        self.assertIn("device_show_info", data)
+        self.assertEqual(data["device_show_info"]["192.168.1.60"]["character_name"], "Narrator")
 
     @patch("state._save_devices")
     def test_readded_device_restores_persisted_show_info(self, save_devices):

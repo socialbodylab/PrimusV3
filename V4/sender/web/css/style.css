@@ -4197,6 +4197,7 @@ input[type="color"] {
 .dm-character-filters {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
     flex: 1 1 auto;
     min-width: 0;
@@ -4362,6 +4363,38 @@ input[type="color"] {
     font-size: 12px;
     color: var(--text-muted);
     font-family: monospace;
+}
+
+.dm-product-section {
+    margin-bottom: 28px;
+}
+
+.dm-product-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.dm-product-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.dm-product-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: monospace;
+}
+
+.dm-character-filter-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-right: 4px;
 }
 
 .dm-mobile-qr-wrap {

@@ -104,6 +104,60 @@
                     </template>
                     <span class="audio-badge" x-show="dev.is_radius" title="Radius audio node">&#9834;</span>
                 </div>
+                <div class="device-identity" x-show="$store.conn.showInfoEnabled(dev)" x-cloak>
+                    <div class="device-identity-note text-sm text-muted"
+                         x-text="$store.conn.showInfoStorageHint(dev)"></div>
+                    <div class="device-identity-row">
+                        <span class="device-identity-label">Character</span>
+                        <template x-if="!$store.conn.isEditingShowInfo(di, 'character_name')">
+                            <button type="button"
+                                    class="device-identity-value"
+                                    :class="{ 'device-identity-empty': !dev.character_name }"
+                                    :title="$store.conn.showInfoHint('character_name')"
+                                    @click="$store.conn.startShowInfoEdit(di, 'character_name')"
+                                    x-text="$store.conn.showInfoDisplay(dev, 'character_name')"></button>
+                        </template>
+                        <template x-if="$store.conn.isEditingShowInfo(di, 'character_name')">
+                            <input class="device-rename-input device-identity-input"
+                                   type="text"
+                                   maxlength="64"
+                                   x-model="$store.conn.showInfoEditValue"
+                                   @keydown.enter="$store.conn.finishShowInfoEdit(di, 'character_name')"
+                                   @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                                   @blur="$store.conn.finishShowInfoEdit(di, 'character_name')"
+                                   x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                        </template>
+                        <span class="device-config-status"
+                              :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(di, 'character'))"
+                              x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(di, 'character'))"
+                              x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(di, 'character'))"></span>
+                    </div>
+                    <div class="device-identity-row">
+                        <span class="device-identity-label">Performer</span>
+                        <template x-if="!$store.conn.isEditingShowInfo(di, 'performer_name')">
+                            <button type="button"
+                                    class="device-identity-value"
+                                    :class="{ 'device-identity-empty': !dev.performer_name }"
+                                    :title="$store.conn.showInfoHint('performer_name')"
+                                    @click="$store.conn.startShowInfoEdit(di, 'performer_name')"
+                                    x-text="$store.conn.showInfoDisplay(dev, 'performer_name')"></button>
+                        </template>
+                        <template x-if="$store.conn.isEditingShowInfo(di, 'performer_name')">
+                            <input class="device-rename-input device-identity-input"
+                                   type="text"
+                                   maxlength="64"
+                                   x-model="$store.conn.showInfoEditValue"
+                                   @keydown.enter="$store.conn.finishShowInfoEdit(di, 'performer_name')"
+                                   @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                                   @blur="$store.conn.finishShowInfoEdit(di, 'performer_name')"
+                                   x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                        </template>
+                        <span class="device-config-status"
+                              :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(di, 'performer'))"
+                              x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(di, 'performer'))"
+                              x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(di, 'performer'))"></span>
+                    </div>
+                </div>
                 <div class="device-meta">
                     <button class="device-ip-button"
                             :class="{ active: $store.conn.ipConfigDevice === di }"
@@ -127,7 +181,9 @@
                             @click="dev.connected ? $store.conn.disconnect(di) : $store.conn.connect(di)"
                             x-text="dev.connected ? 'Disconnect' : 'Connect'"></button>
                     <button class="btn btn-sm device-action-main" x-show="dev.connected"
-                            @click="api('POST', '/api/hello_device', { device: di, volume: $store.audio.getVolume(di) })">Hello</button>
+                            :disabled="!$store.conn.canHelloDevice(dev)"
+                            :title="$store.conn.helloHint(dev)"
+                            @click="$store.conn.helloDevice(di)">Hello</button>
                 </div>
                 <div class="device-ip-config" x-show="$store.conn.ipConfigDevice === di" x-cloak>
                     <div class="form-group compact">

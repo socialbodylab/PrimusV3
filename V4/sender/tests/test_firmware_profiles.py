@@ -15,15 +15,15 @@ class FirmwareProfileTests(unittest.TestCase):
     def test_full_catalog_registered(self):
         self.assertEqual(
             firmware.BOARD_PROFILES,
-            {"v1", "v2", "v3", "radius_v1"},
+            {"v1", "v2", "v3", "radius_v1", "radius_v2"},
         )
 
     def test_radius_product_exposes_radius_profiles_only(self):
         os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
-        self.assertEqual(firmware.active_board_profiles(), {"radius_v1"})
+        self.assertEqual(firmware.active_board_profiles(), {"radius_v1", "radius_v2"})
         data = firmware.firmware_profiles_json()
         self.assertEqual(data["product"], "radius")
-        self.assertEqual(len(data["profiles"]), 1)
+        self.assertEqual(len(data["profiles"]), 2)
         self.assertEqual(data["profiles"][0]["id"], "radius_v1")
 
     def test_primus_product_exposes_primus_profiles_only(self):
@@ -36,11 +36,51 @@ class FirmwareProfileTests(unittest.TestCase):
         finally:
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
 
+    def test_mixed_scope_exposes_all_profiles(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            self.assertEqual(
+                firmware.active_board_profiles("mixed"),
+                {"v1", "v2", "v3", "radius_v1", "radius_v2"},
+            )
+            data = firmware.firmware_profiles_json("mixed")
+            self.assertEqual(data["scope"], "mixed")
+            self.assertEqual(len(data["profiles"]), 5)
+            self.assertEqual(len(data["families"]["primus"]), 3)
+            self.assertEqual(len(data["families"]["radius"]), 2)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_mixed_scope_allows_radius_profile_on_primus_product(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            manager = firmware.FirmwareJobManager()
+            cmd = manager.build_command({
+                "action": "compile",
+                "profile": "radius_v2",
+                "scope": "mixed",
+            })
+            self.assertIn("radius_upload.sh", cmd.command[1])
+            self.assertIn("radius_v2", cmd.command)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_product_scope_rejects_cross_family_profile(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            manager = firmware.FirmwareJobManager()
+            with self.assertRaises(FirmwareRequestError):
+                manager.build_command({"action": "compile", "profile": "radius_v1"})
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
     def test_script_routing(self):
         primus = firmware.upload_script_path("v3")
         radius = firmware.upload_script_path("radius_v1")
+        radius_v2 = firmware.upload_script_path("radius_v2")
         self.assertTrue(primus.endswith(os.path.join("Arduino", "upload.sh")))
         self.assertTrue(radius.endswith(os.path.join("Arduino", "radius_upload.sh")))
+        self.assertTrue(radius_v2.endswith(os.path.join("Arduino", "radius_upload.sh")))
         self.assertTrue(os.path.isfile(primus))
         self.assertTrue(os.path.isfile(radius))
 
@@ -55,11 +95,25 @@ class FirmwareProfileTests(unittest.TestCase):
             manager.build_command({"action": "compile", "profile": "v3"})
 
     def test_availability_includes_profiles(self):
-        manager = firmware.FirmwareJobManager()
-        status = manager.availability()
-        self.assertIn("profiles", status)
-        self.assertEqual(len(status["profiles"]), 1)
-        self.assertTrue(status["can_install_tools"])
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "radius"
+        try:
+            manager = firmware.FirmwareJobManager()
+            status = manager.availability()
+            self.assertIn("profiles", status)
+            self.assertEqual(len(status["profiles"]), 2)
+            self.assertTrue(status["can_install_tools"])
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_mixed_availability_includes_all_profiles(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            manager = firmware.FirmwareJobManager()
+            status = manager.availability("mixed")
+            self.assertEqual(status["scope"], "mixed")
+            self.assertEqual(len(status["profiles"]), 5)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
 
     def test_build_command_includes_receive_mode_override(self):
         os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
@@ -77,6 +131,29 @@ class FirmwareProfileTests(unittest.TestCase):
             self.assertIn("12", cmd.command)
             self.assertEqual(cmd.metadata["overrides"]["receive_mode_mode"], "combined")
             self.assertEqual(cmd.metadata["overrides"]["base_universe"], 12)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_radius_profile_skips_receive_mode_override(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "radius"
+        try:
+            manager = firmware.FirmwareJobManager()
+            cmd = manager.build_command({
+                "action": "compile",
+                "profile": "radius_v1",
+                "receive_mode_mode": "combined",
+                "base_universe": 12,
+            })
+            self.assertNotIn("--receivemode", cmd.command)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_setup_tools_mixed_scope_metadata(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            manager = firmware.FirmwareJobManager()
+            cmd = manager.build_command({"action": "setup_tools", "scope": "mixed"})
+            self.assertEqual(cmd.metadata["scope"], "mixed")
         finally:
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
 

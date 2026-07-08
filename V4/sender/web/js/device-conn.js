@@ -10,6 +10,10 @@ function connProductLabel() {
     return connProduct() === "radius" ? "Radius Central" : "Primus";
 }
 
+function isRadiusDevice(dev) {
+    return !!(dev?.is_radius || dev?.capabilities?.device_class === "radius");
+}
+
 document.addEventListener("alpine:init", () => {
     Alpine.store("conn", {
         discovering: false,
@@ -56,6 +60,9 @@ document.addEventListener("alpine:init", () => {
         },
 
         canHelloDevice(dev) {
+            if (isRadiusDevice(dev)) {
+                return !!dev?.capabilities?.hello || !!dev?.capabilities?.audio;
+            }
             return !!dev?.capabilities?.hello;
         },
 
@@ -64,11 +71,11 @@ document.addEventListener("alpine:init", () => {
         },
 
         canConfigureOutputs(dev) {
-            return connProduct() === "primus" && !!dev?.capabilities?.output_config;
+            return !isRadiusDevice(dev) && !!dev?.capabilities?.output_config;
         },
 
         canConfigureReceiveMode(dev) {
-            return connProduct() === "primus" && !!dev?.capabilities?.receive_config;
+            return !isRadiusDevice(dev) && !!dev?.capabilities?.receive_config;
         },
 
         receiveModeLabel(dev) {
@@ -350,8 +357,8 @@ document.addEventListener("alpine:init", () => {
         // Device Manager card footer only: a stage manager scanning the grid cares
         // whether a node is a Primus (LED) or Radius (audio) receiver, not its exact
         // board/firmware version — that detail is one tap away in the expanded card.
-        monitorProductLabel() {
-            return connProduct() === "radius" ? "Radius" : "Primus";
+        monitorProductLabel(dev) {
+            return isRadiusDevice(dev) ? "Radius" : "Primus";
         },
 
         capabilityItems(entity) {
@@ -360,12 +367,16 @@ document.addEventListener("alpine:init", () => {
                 { key: "rename", label: "Rename", supported: !!caps.rename },
                 { key: "ip_config", label: "IP", supported: !!caps.ip_config },
             ];
-            if (connProduct() === "primus") {
+            if (!isRadiusDevice(entity)) {
                 items.splice(1, 0,
                     { key: "hello", label: "Hello", supported: !!caps.hello },
                     { key: "output_config", label: "Outputs", supported: !!caps.output_config },
                     { key: "receive_config", label: "Receive", supported: !!caps.receive_config },
                     { key: "battery", label: "Battery", supported: !!caps.battery },
+                );
+            } else {
+                items.splice(1, 0,
+                    { key: "hello", label: "Hello", supported: !!caps.hello || !!caps.audio },
                 );
             }
             return items;
@@ -428,11 +439,14 @@ document.addEventListener("alpine:init", () => {
         },
 
         monitorShowBattery(dev) {
-            return connProduct() === "primus" && !!dev?.capabilities?.battery;
+            return !isRadiusDevice(dev) && !!dev?.capabilities?.battery;
         },
 
-        showInfoEnabled() {
-            return connProduct() === "primus";
+        showInfoEnabled(dev) {
+            if (dev) {
+                return isRadiusDevice(dev) || !!dev?.capabilities?.show_info;
+            }
+            return connProduct() === "primus" || connProduct() === "radius";
         },
 
         initShowInfoDrafts(di) {
@@ -447,9 +461,7 @@ document.addEventListener("alpine:init", () => {
         },
 
         syncShowInfoDrafts() {
-            if (!this.showInfoEnabled()) {
-                return;
-            }
+            const enabled = (dev) => this.showInfoEnabled(dev);
             const focusParts = (this.showInfoFocus || "").split(":");
             const focusDi = focusParts[0] !== "" ? Number(focusParts[0]) : null;
             const focusField = focusParts[1] || null;
@@ -460,6 +472,10 @@ document.addEventListener("alpine:init", () => {
                 }
             }
             this.devices.forEach((dev, di) => {
+                if (!enabled(dev)) {
+                    delete this.showInfoDrafts[di];
+                    return;
+                }
                 if (!this.showInfoDrafts[di]) {
                     this.showInfoDrafts[di] = {
                         character_name: dev.character_name || "",
@@ -534,11 +550,8 @@ document.addEventListener("alpine:init", () => {
         },
 
         async saveShowInfoField(di, field) {
-            if (!this.showInfoEnabled()) {
-                return;
-            }
             const dev = this.devices[di];
-            if (!dev) {
+            if (!dev || !this.showInfoEnabled(dev)) {
                 return;
             }
             this.initShowInfoDrafts(di);
@@ -643,6 +656,11 @@ document.addEventListener("alpine:init", () => {
         },
 
         helloHint(dev) {
+            if (isRadiusDevice(dev)) {
+                return this.canHelloDevice(dev)
+                    ? "Send test tone"
+                    : "Test tone is not advertised for this node";
+            }
             return this.canHelloDevice(dev)
                 ? "Send identify flash"
                 : "Identify flash is not advertised for this node";
@@ -811,8 +829,9 @@ document.addEventListener("alpine:init", () => {
 
         async helloDevice(di) {
             try {
+                const dev = this.devices[di];
                 const body = { device: di };
-                if (connProduct() === "radius") {
+                if (isRadiusDevice(dev)) {
                     body.volume = Alpine.store("audio")?.getVolume?.(di) ?? 80;
                 }
                 await api("POST", "/api/hello_device", body);

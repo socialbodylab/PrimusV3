@@ -13,10 +13,12 @@ if SENDER_DIR not in sys.path:
 from artnet import (
     _parse_capability_outputs,
     build_virtual_resolution_packet,
+    parse_node_outputs,
 )
 from state import (
     ControllerState,
     LOOK_OUTPUT_TYPES,
+    OUTPUT_TYPES,
     _combined_pixel_total,
     _queue_device_frame_sends,
     _validate_receive_mode_for_device,
@@ -112,6 +114,40 @@ class VirtualResolutionDiscoveryTests(unittest.TestCase):
         outputs = _parse_capability_outputs(report, LOOK_OUTPUT_TYPES)
         self.assertEqual(len(outputs), 2)
         self.assertNotIn("virtual_pixels", outputs[0])
+
+    def test_parse_node_outputs_merges_truncated_312_report_with_long_name(self):
+        report = (
+            "#0001 [0123] OK|PV3CAP1|F:RIOHBMS|B:v31|IP:D|U:C:0|0:4:0:1|1:2:0"
+        )
+        long_name = "PrimusV3.6 LED Node | A0:Grid 8x4 A1:Short Strip "
+        outputs = parse_node_outputs(
+            long_name,
+            [0, 0],
+            OUTPUT_TYPES,
+            node_report=report,
+            type_keys=LOOK_OUTPUT_TYPES,
+        )
+        self.assertEqual(len(outputs), 2)
+        self.assertEqual(outputs[0]["name"], "A0")
+        self.assertEqual(outputs[0]["type"], "small_grid")
+        self.assertEqual(outputs[0]["universe"], 0)
+        self.assertEqual(outputs[0]["virtual_pixels"], 1)
+        self.assertEqual(outputs[1]["name"], "A1")
+        self.assertEqual(outputs[1]["type"], "short_strip")
+
+    def test_parse_node_outputs_keeps_capability_universe_when_long_name_lacks_it(self):
+        report = "#0001 [0001] OK|PV3CAP1|F:RIOHBMS|B:v31|IP:D|U:C:0|0:4:0:1"
+        long_name = "PrimusV3.6 LED Node | A0:Grid 8x4 A1:Short Strip "
+        outputs = parse_node_outputs(
+            long_name,
+            [0, 0],
+            OUTPUT_TYPES,
+            node_report=report,
+            type_keys=LOOK_OUTPUT_TYPES,
+        )
+        self.assertEqual(outputs[0]["universe"], 0)
+        self.assertEqual(outputs[0]["virtual_pixels"], 1)
+        self.assertEqual(outputs[1]["type"], "short_strip")
 
 
 class VirtualResolutionPacketTests(unittest.TestCase):

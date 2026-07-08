@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.12.0"
+#define FIRMWARE_VERSION "3.13.0"
 
 // =====================================================================
 //  Board Profile
@@ -79,6 +79,12 @@ enum OutputType {
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A13
   #define BOARD_BATTERY_FEATURES  "RIOHBMS"
+  #ifndef DEFAULT_SHOW_CHARACTER_NAME
+  #define DEFAULT_SHOW_CHARACTER_NAME "Character"
+  #endif
+  #ifndef DEFAULT_SHOW_PERFORMER_NAME
+  #define DEFAULT_SHOW_PERFORMER_NAME "Performer"
+  #endif
 #elif defined(PRIMUS_PROFILE_V2)
   #define BOARD_PROFILE_ID        "v2_feather"
   #define BOARD_PROFILE_CODE      "v2"
@@ -329,6 +335,12 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define SHOW_INFO_MODE_WRITE       1
 #define SHOW_INFO_MODE_RESPONSE    2
 #define SHOW_INFO_PACKET_LEN       143
+#ifndef DEFAULT_SHOW_CHARACTER_NAME
+#define DEFAULT_SHOW_CHARACTER_NAME ""
+#endif
+#ifndef DEFAULT_SHOW_PERFORMER_NAME
+#define DEFAULT_SHOW_PERFORMER_NAME "Performer"
+#endif
 #define ARTNET_PROTOCOL_VER    14
 
 // Device identity — reported in ArtPollReply
@@ -338,7 +350,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEVICE_LONG_NAME   "PrimusV3.6 LED Node"  // max 63 chars + null
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
-#define FIRMWARE_VERSION_L 12
+#define FIRMWARE_VERSION_L 13
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 

@@ -20,13 +20,13 @@ class IsCompatibleNodeTests(unittest.TestCase):
         }
         self.assertTrue(is_compatible_node(node, "primus"))
 
-    def test_primus_rejects_radius_tag(self):
+    def test_primus_accepts_radius_tag(self):
         node = {
             "ip": "10.0.0.2",
             "node_report": "PVRAD1|B:v1|IP:D|F:RA",
             "short_name": "Radius",
         }
-        self.assertFalse(is_compatible_node(node, "primus"))
+        self.assertTrue(is_compatible_node(node, "primus"))
 
     def test_primus_accepts_legacy_without_radius_name(self):
         node = {
@@ -97,14 +97,14 @@ class SyncNetworkDevicesTests(unittest.TestCase):
             interface="en0",
         )
         state.refresh_devices_from_nodes.assert_called_once()
-        state.add_device_from_node.assert_called_once()
+        self.assertEqual(state.add_device_from_node.call_count, 2)
         state.connect_all.assert_called_once_with(
             only_ips={"192.168.1.10", "192.168.1.11"},
         )
-        self.assertEqual(len(result["added"]), 1)
-        self.assertEqual(result["added"][0]["ip"], "192.168.1.10")
-        self.assertEqual(len(result["skipped"]), 1)
-        self.assertEqual(result["skipped"][0]["reason"], "incompatible")
+        self.assertEqual(len(result["added"]), 2)
+        added_ips = {item["ip"] for item in result["added"]}
+        self.assertEqual(added_ips, {"192.168.1.10", "192.168.1.11"})
+        self.assertEqual(result["skipped"], [])
 
     @patch("server.discover_artnet_nodes")
     @patch("server.sender_product")

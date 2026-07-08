@@ -23,9 +23,9 @@ import paths
 import firmware_source
 
 
-BOARD_PROFILES = {"v1", "v2", "v3", "radius_v1"}
+BOARD_PROFILES = {"v1", "v2", "v3", "radius_v1", "radius_v2"}
 PRIMUS_PROFILES = {"v1", "v2", "v3"}
-RADIUS_PROFILES = {"radius_v1"}
+RADIUS_PROFILES = {"radius_v1", "radius_v2"}
 FIRMWARE_PROFILES = {
     "v1": {
         "family": "primus",
@@ -51,18 +51,29 @@ FIRMWARE_PROFILES = {
         "label": "Radius V1",
         "detail": "Feather HUZZAH32 + Music Maker FeatherWing",
     },
+    "radius_v2": {
+        "family": "radius",
+        "script": "radius_upload.sh",
+        "label": "Radius V2",
+        "detail": "ESP32-S3 Reverse TFT Feather + Music Maker FeatherWing",
+    },
 }
 DEFAULT_PROFILE = "radius_v1"
+FIRMWARE_SCOPES = {"product", "mixed"}
 
 
-def active_board_profiles():
+def active_board_profiles(scope="product"):
+    if scope not in FIRMWARE_SCOPES:
+        scope = "product"
+    if scope == "mixed":
+        return set(BOARD_PROFILES)
     if paths.sender_product() == "primus":
         return set(PRIMUS_PROFILES)
     return set(RADIUS_PROFILES)
 
 
-def default_profile():
-    profiles = active_board_profiles()
+def default_profile(scope="product"):
+    profiles = active_board_profiles(scope)
     if DEFAULT_PROFILE in profiles:
         return DEFAULT_PROFILE
     if "v3" in profiles:
@@ -182,8 +193,10 @@ def default_upload_script_path():
     return upload_script_path("v3")
 
 
-def firmware_profiles_json():
-    active = active_board_profiles()
+def firmware_profiles_json(scope="product"):
+    if scope not in FIRMWARE_SCOPES:
+        scope = "product"
+    active = active_board_profiles(scope)
     families = {"primus": [], "radius": []}
     profiles = []
     for profile_id, meta in FIRMWARE_PROFILES.items():
@@ -200,6 +213,7 @@ def firmware_profiles_json():
         families[meta["family"]].append(entry)
     return {
         "product": paths.sender_product(),
+        "scope": scope,
         "profiles": profiles,
         "families": families,
     }
@@ -269,14 +283,16 @@ class FirmwareJobManager:
         found = shutil.which("arduino-cli", path=search_path)
         return found
 
-    def availability(self):
+    def availability(self, scope="product"):
+        if scope not in FIRMWARE_SCOPES:
+            scope = "product"
         if self.availability_checker:
             return self.availability_checker()
 
         env = self._path_env()
         required_scripts = sorted({
             upload_script_path(profile)
-            for profile in active_board_profiles()
+            for profile in active_board_profiles(scope)
         })
         scripts_ok = all(os.path.isfile(path) for path in required_scripts)
         bash_available = shutil.which("bash", path=env.get("PATH")) is not None
@@ -316,15 +332,15 @@ class FirmwareJobManager:
             "tool_status": tool_status,
             "can_install_tools": scripts_ok and bash_available,
             "source_only": False,
-            **firmware_profiles_json(),
+            **firmware_profiles_json(scope),
         }
 
-    def status(self):
+    def status(self, scope="product"):
         with self._lock:
             current = self._running_job_locked()
             last = self._jobs.get(self._last_job_id) if self._last_job_id else None
             status = {
-                **self.availability(),
+                **self.availability(scope),
                 "current_job": current.to_json() if current else None,
                 "last_job": last.to_json() if last else None,
             }
@@ -351,8 +367,10 @@ class FirmwareJobManager:
             return job.to_json()
 
     def start_job(self, data):
-        command = self.build_command(data or {})
-        availability = self.availability()
+        data = data or {}
+        scope = data.get("scope", "product")
+        command = self.build_command(data)
+        availability = self.availability(scope)
         if command.action not in ("setup_tools", "download_firmware") and not availability.get("available"):
             raise FirmwareRequestError(503, availability.get("message", "Firmware upload tools are unavailable."))
 
@@ -387,10 +405,14 @@ class FirmwareJobManager:
         return job.to_json()
 
     def build_command(self, data):
+        data = data or {}
+        scope = data.get("scope", "product")
+        if scope not in FIRMWARE_SCOPES:
+            raise FirmwareRequestError(400, "invalid scope")
         action = self._validate_choice(data.get("action"), ACTIONS, "action")
         profile = self._validate_choice(
-            data.get("profile", default_profile()),
-            active_board_profiles(),
+            data.get("profile", default_profile(scope)),
+            active_board_profiles(scope),
             "profile",
         )
         script_path = upload_script_path(profile)
@@ -401,7 +423,7 @@ class FirmwareJobManager:
                 profile=profile,
                 command=command,
                 redacted_command=command,
-                metadata=self._build_metadata(action, profile),
+                metadata={**self._build_metadata(action, profile), "scope": scope},
             )
         if action == "download_firmware":
             if not paths.is_primus_product():
@@ -797,7 +819,7 @@ class ArduinoCliInstaller:
         env = self.manager._path_env()
         self._run_cli(job, ["version"], env=env, check=False)
         self._configure_esp32(job, env)
-        for profile in sorted(active_board_profiles()):
+        for profile in sorted(active_board_profiles((job.metadata or {}).get("scope", "product"))):
             self._run_upload_install(job, profile, env)
         job.append_output("Firmware tools are ready.")
         return {

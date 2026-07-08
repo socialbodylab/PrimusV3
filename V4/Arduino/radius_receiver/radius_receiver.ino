@@ -1,15 +1,12 @@
 /*
  * radius_receiver.ino — Radius Central V4 Audio Receiver
  * ======================================================
- * V1: Feather HUZZAH32 + Adafruit Music Maker FeatherWing (VS1053).
+ * V1: Feather HUZZAH32 + Music Maker FeatherWing (headless)
+ * V2: ESP32-S3 Reverse TFT Feather + Music Maker FeatherWing
  *
- * Art-Net opcodes:
- *   0x6000  ArtAddress   — rename (NVS)
- *   0x8200  ArtIPConfig  — static IP / DHCP (NVS, reboot)
- *   0x8300  ArtAudioCmd  — play / loop / stop / pause / volume + filename
- *   0x8301  ArtFtpCmd    — start / stop FTP server
- *
- * Back-channel UDP 6455: PFP packet rate, PTR track name + playback state.
+ * Art-Net: 0x6000 rename, 0x8200 IP, 0x8210 show info, 0x8300 audio, 0x8301 FTP
+ * Back-channel UDP 6455: PFP packet rate, PTR track telemetry, optional 0x8302 audio status
+ * OSC port 53001: /cue/N, /stop, /hello
  */
 
 #include <WiFi.h>
@@ -24,13 +21,18 @@
 #include "cues.h"
 #include "ftp.h"
 #include "telemetry.h"
+#include "marius.h"
 
 bool sdBusy = false;
 
-#define MAX_UDP_PACKET 256
+#define MAX_UDP_PACKET 600
 WiFiUDP udp;
 WiFiUDP udpFps;
+WiFiUDP udpOsc;
 uint8_t udpBuf[MAX_UDP_PACKET];
+
+#define MAX_OSC_PACKET 512
+uint8_t oscBuf[MAX_OSC_PACKET];
 
 #define ARTNET_HEADER_LEN  8
 static const uint8_t ARTNET_MAGIC[ARTNET_HEADER_LEN] =
@@ -48,6 +50,9 @@ bool senderKnown = false;
 Preferences prefs;
 char customShortName[18] = {0};
 bool hasCustomName = false;
+
+char showCharacterName[SHOW_INFO_FIELD_LEN + 1] = {0};
+char showPerformerName[SHOW_INFO_FIELD_LEN + 1] = {0};
 
 bool useStaticIP = false;
 bool activeStaticIP = false;
@@ -68,8 +73,6 @@ unsigned long diagWindowStartMs = 0;
 static const uint8_t FPS_MAGIC[3] = { 'P', 'F', 'P' };
 static const uint8_t TRACK_MAGIC[3] = { 'P', 'T', 'R' };
 
-// ── NVS / network helpers ────────────────────────────────────────────
-
 void printIpBytes(const uint8_t* bytes) {
   Serial.print(bytes[0]); Serial.print(".");
   Serial.print(bytes[1]); Serial.print(".");
@@ -84,9 +87,6 @@ void loadStoredDeviceName() {
   hasCustomName = customShortName[0] != '\0';
   if (hasCustomName) {
     prefs.putString("shortName", customShortName);
-    Serial.print("Firmware name override stored: \"");
-    Serial.print(customShortName);
-    Serial.println("\"");
   }
   return;
 #endif
@@ -100,13 +100,36 @@ void loadStoredDeviceName() {
   }
 }
 
+void loadStoredShowInfo() {
+  if (prefs.isKey("characterName")) {
+    String stored = prefs.getString("characterName", "");
+    stored.toCharArray(showCharacterName, sizeof(showCharacterName));
+  }
+  if (prefs.isKey("performerName")) {
+    String stored = prefs.getString("performerName", "");
+    stored.toCharArray(showPerformerName, sizeof(showPerformerName));
+  }
+
+  if (!prefs.isKey("characterName")) {
+    const char* source = hasCustomName && customShortName[0] != '\0'
+      ? customShortName : DEVICE_SHORT_NAME;
+    strncpy(showCharacterName, source, SHOW_INFO_FIELD_LEN);
+    showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+    prefs.putString("characterName", showCharacterName);
+  }
+  if (!prefs.isKey("performerName")) {
+    strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
+    showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+    prefs.putString("performerName", showPerformerName);
+  }
+}
+
 void loadStoredNetworkConfig() {
 #ifdef PRIMUSV3_FORCE_DHCP_OVERRIDE
   useStaticIP = false;
   prefs.remove("staticIP");
   prefs.remove("gateway");
   prefs.remove("subnet");
-  Serial.println("Firmware DHCP override: cleared saved static IP.");
   return;
 #endif
 
@@ -121,9 +144,6 @@ void loadStoredNetworkConfig() {
   prefs.putBytes("staticIP", storedIP, 4);
   prefs.putBytes("gateway", storedGateway, 4);
   prefs.putBytes("subnet", storedSubnet, 4);
-  Serial.print("Firmware static IP override stored: ");
-  printIpBytes(storedIP);
-  Serial.println();
   return;
 #endif
 
@@ -151,12 +171,19 @@ void buildNodeReport(char* reportBuf, size_t reportLen) {
   } else {
     pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:D");
   }
-  if (pos >= 0 && (size_t)pos < reportLen) {
-    snprintf(reportBuf + pos, reportLen - pos, "|F:%s", NODE_CAPS_FEATURES);
+  if (pos < 0 || (size_t)pos >= reportLen) return;
+
+  pos += snprintf(reportBuf + pos, reportLen - pos, "|F:%s", NODE_CAPS_FEATURES);
+  if (pos < 0 || (size_t)pos >= reportLen) return;
+
+  if (mariusIsConfigured()) {
+    if (mariusIsConnected()) {
+      snprintf(reportBuf + pos, reportLen - pos, "|MC:1|MP:%s", mariusPuckName());
+    } else {
+      snprintf(reportBuf + pos, reportLen - pos, "|MC:0");
+    }
   }
 }
-
-// ── WiFi ─────────────────────────────────────────────────────────────
 
 void startWifiConnect() {
 #ifdef PRIMUSV3_FORCE_WIFI_CREDENTIAL_OVERRIDE
@@ -183,7 +210,6 @@ void startWifiConnect() {
   wifiConnecting = true;
   wifiConnectStart = millis();
   lastReconnectAttempt = millis();
-  Serial.println("WiFi connecting (non-blocking)...");
 }
 
 void checkWifiConnection() {
@@ -195,9 +221,9 @@ void checkWifiConnection() {
     if (!wifiConnected) {
       wifiConnected = true;
       wifiConnecting = false;
-      Serial.print("WiFi connected! IP: ");
-      Serial.println(WiFi.localIP());
+      WiFi.setSleep(false);
       udp.begin(ARTNET_PORT);
+      udpOsc.begin(OSC_PORT);
       broadcastArtPollReply();
       if (infoScreenIndex == 0)
         displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), true, WiFi.RSSI());
@@ -207,13 +233,11 @@ void checkWifiConnection() {
 
   if (wifiConnected) {
     wifiConnected = false;
-    Serial.println("WiFi lost.");
   }
 
   if (wifiConnecting) {
     if (now - wifiConnectStart > CONNECTION_TIMEOUT) {
       wifiConnecting = false;
-      Serial.println("WiFi connection timed out.");
       if (infoScreenIndex == 0)
         displayConnection(DEFAULT_WIFI_SSID, IPAddress(0, 0, 0, 0), false, 0);
     }
@@ -221,12 +245,9 @@ void checkWifiConnection() {
   }
 
   if (now - lastReconnectAttempt > RECONNECT_INTERVAL) {
-    Serial.println("Retrying WiFi...");
     startWifiConnect();
   }
 }
-
-// ── Art-Net ArtPollReply ─────────────────────────────────────────────
 
 void sendArtPollReply(IPAddress dest) {
   uint8_t reply[239];
@@ -279,8 +300,6 @@ void broadcastArtPollReply() {
   sendArtPollReply(IPAddress(255, 255, 255, 255));
 }
 
-// ── ArtAddress (0x6000) ────────────────────────────────────────────
-
 void handleArtAddress(uint8_t* data, uint16_t len) {
   if (len < 107) return;
 
@@ -293,16 +312,11 @@ void handleArtAddress(uint8_t* data, uint16_t len) {
     customShortName[17] = '\0';
     hasCustomName = true;
     prefs.putString("shortName", customShortName);
-    Serial.print("ArtAddress: name set to \"");
-    Serial.print(customShortName);
-    Serial.println("\"");
     setDisplayName(customShortName);
   }
 
   broadcastArtPollReply();
 }
-
-// ── ArtIPConfig (0x8200) ─────────────────────────────────────────────
 
 void handleArtIPConfig(uint8_t* data, uint16_t len) {
   if (len < 25) return;
@@ -314,7 +328,6 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
     prefs.remove("staticIP");
     prefs.remove("gateway");
     prefs.remove("subnet");
-    Serial.println("ArtIPConfig: reverted to DHCP — rebooting...");
     broadcastArtPollReply();
     delay(200);
     ESP.restart();
@@ -326,26 +339,76 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
     prefs.putBytes("staticIP", storedIP, 4);
     prefs.putBytes("gateway", storedGateway, 4);
     prefs.putBytes("subnet", storedSubnet, 4);
-    Serial.print("ArtIPConfig: static IP set to ");
-    printIpBytes(storedIP);
-    Serial.println(" — rebooting...");
     broadcastArtPollReply();
     delay(200);
     ESP.restart();
   }
 }
 
-// ── ArtFtpCmd (0x8301) ───────────────────────────────────────────────
+void sendShowInfoReply(IPAddress dest) {
+  uint8_t reply[SHOW_INFO_PACKET_LEN];
+  memset(reply, 0, sizeof(reply));
+  memcpy(reply, ARTNET_MAGIC, 8);
+  reply[8] = (ARTNET_OPCODE_SHOW_INFO) & 0xFF;
+  reply[9] = (ARTNET_OPCODE_SHOW_INFO >> 8) & 0xFF;
+  reply[10] = 0;
+  reply[11] = ARTNET_PROTOCOL_VER;
+  reply[12] = SHOW_INFO_MODE_RESPONSE;
+  uint8_t charLen = strnlen(showCharacterName, SHOW_INFO_FIELD_LEN);
+  uint8_t perfLen = strnlen(showPerformerName, SHOW_INFO_FIELD_LEN);
+  reply[13] = charLen;
+  memcpy(reply + 14, showCharacterName, charLen);
+  reply[78] = perfLen;
+  memcpy(reply + 79, showPerformerName, perfLen);
+
+  udp.beginPacket(dest, ARTNET_PORT);
+  udp.write(reply, sizeof(reply));
+  udp.endPacket();
+}
+
+void handleArtShowInfo(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
+  if (len < SHOW_INFO_PACKET_LEN) return;
+
+  uint8_t mode = data[12];
+  if (mode == SHOW_INFO_MODE_READ) {
+    sendShowInfoReply(remoteAddr);
+    return;
+  }
+
+  if (mode != SHOW_INFO_MODE_WRITE) return;
+
+  char newCharacter[SHOW_INFO_FIELD_LEN + 1] = {0};
+  char newPerformer[SHOW_INFO_FIELD_LEN + 1] = {0};
+  uint8_t charLen = data[13];
+  if (charLen > SHOW_INFO_FIELD_LEN) charLen = SHOW_INFO_FIELD_LEN;
+  if (charLen > 0) {
+    memcpy(newCharacter, data + 14, charLen);
+    newCharacter[charLen] = '\0';
+  }
+  uint8_t perfLen = data[78];
+  if (perfLen > SHOW_INFO_FIELD_LEN) perfLen = SHOW_INFO_FIELD_LEN;
+  if (perfLen > 0) {
+    memcpy(newPerformer, data + 79, perfLen);
+    newPerformer[perfLen] = '\0';
+  }
+
+  strncpy(showCharacterName, newCharacter, SHOW_INFO_FIELD_LEN);
+  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+  strncpy(showPerformerName, newPerformer, SHOW_INFO_FIELD_LEN);
+  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("characterName", showCharacterName);
+  prefs.putString("performerName", showPerformerName);
+
+  sendShowInfoReply(remoteAddr);
+  broadcastArtPollReply();
+}
 
 void handleArtFtpCmd(uint8_t* data, uint16_t len) {
   if (len < 13) return;
   uint8_t cmd = data[12];
 
   if (cmd == 1) {
-    if (audioIsPlaying()) {
-      Serial.println("[ArtFTP] Stopping audio to start FTP");
-      audioStop();
-    }
+    if (audioIsPlaying()) audioStop();
     ftpStart();
   } else {
     ftpStop();
@@ -355,7 +418,21 @@ void handleArtFtpCmd(uint8_t* data, uint16_t len) {
     displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
 }
 
-// ── ArtAudioCmd (0x8300) ─────────────────────────────────────────────
+void sendAudioStatus(uint8_t status, const char* filename) {
+  if (!senderKnown || !wifiConnected) return;
+  uint8_t buf[46];
+  memset(buf, 0, sizeof(buf));
+  memcpy(buf, ARTNET_MAGIC, 8);
+  buf[8]  = ARTNET_OPCODE_AUDIO_STATUS & 0xFF;
+  buf[9]  = (ARTNET_OPCODE_AUDIO_STATUS >> 8) & 0xFF;
+  buf[10] = 0x00;
+  buf[11] = 0x0E;
+  buf[12] = status;
+  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 32);
+  udpFps.beginPacket(senderIP, AUDIO_REPORT_PORT);
+  udpFps.write(buf, 46);
+  udpFps.endPacket();
+}
 
 void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (len < 15) return;
@@ -392,19 +469,58 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
       if (cueLookup(volume, &cue)) {
         if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
         else          audioLoop(cue.filename, _audioVolume, cue.duration);
-      } else {
-        Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
       break;
     }
     default: audioStop(); break;
   }
 
+  sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
   if (infoScreenIndex == 2)
     displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
 }
 
-// ── Art-Net router ───────────────────────────────────────────────────
+void dispatchOscCue(uint8_t cueNum) {
+  AudioCue cue;
+  if (!cueLookup(cueNum, &cue)) return;
+  audioPlay(cue.filename, _audioVolume, cue.duration);
+  sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
+  if (infoScreenIndex == 2)
+    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+}
+
+void handleOscPacket() {
+  int len = udpOsc.parsePacket();
+  if (len <= 0) return;
+  if (len > MAX_OSC_PACKET) { udpOsc.flush(); return; }
+  int n = udpOsc.readBytes((char*)oscBuf, len);
+  if (n < 2 || oscBuf[0] != '/') return;
+  oscBuf[n < MAX_OSC_PACKET ? n : MAX_OSC_PACKET - 1] = '\0';
+  const char* addr = (const char*)oscBuf;
+
+  if (strcmp(addr, "/stop") == 0) {
+    audioStop();
+    sendAudioStatus(0, "");
+    if (infoScreenIndex == 2)
+      displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+    return;
+  }
+
+  if (strcmp(addr, "/hello") == 0 || strcmp(addr, "/radius/hello") == 0
+      || strcmp(addr, "/primus/hello") == 0) {
+    audioTestTone();
+    if (infoScreenIndex == 2)
+      displayAudioStatus("TEST TONE", _audioVolume, true);
+    return;
+  }
+
+  if (strncmp(addr, "/cue/", 5) == 0) {
+    int cueNum = atoi(addr + 5);
+    if (cueNum <= 0 || cueNum > 255) return;
+    dispatchOscCue((uint8_t)cueNum);
+    return;
+  }
+}
 
 void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   if (len < 10) return;
@@ -425,6 +541,10 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     handleArtIPConfig(data, len);
     return;
   }
+  if (opcode == ARTNET_OPCODE_SHOW_INFO) {
+    handleArtShowInfo(data, len, remoteAddr);
+    return;
+  }
   if (opcode == ARTNET_OPCODE_AUDIO_CMD) {
     handleArtAudioCmd(data, len);
     return;
@@ -434,8 +554,6 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     return;
   }
 }
-
-// ── Telemetry (UDP 6455) ─────────────────────────────────────────────
 
 void sendTrackTelemetry(uint8_t state, const char* filename) {
   if (!TRACK_TELEMETRY_ENABLED) return;
@@ -451,9 +569,7 @@ void sendTrackTelemetry(uint8_t state, const char* filename) {
   buf[2] = TRACK_MAGIC[2];
   buf[3] = state;
   buf[4] = (uint8_t)nameLen;
-  if (nameLen > 0) {
-    memcpy(buf + 5, track, nameLen);
-  }
+  if (nameLen > 0) memcpy(buf + 5, track, nameLen);
 
   udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
   udpFps.write(buf, 5 + nameLen);
@@ -489,10 +605,9 @@ void telemetryHeartbeat() {
   sendTrackTelemetry(audioPlaybackState(), audioCurrentFile());
 }
 
-// ── Buttons ──────────────────────────────────────────────────────────
-
 void handleScreenCycle() {
-  infoScreenIndex = (infoScreenIndex + 1) % NUM_INFO_SCREENS;
+  uint8_t maxScreens = mariusIsConfigured() ? NUM_INFO_SCREENS + 1 : NUM_INFO_SCREENS;
+  infoScreenIndex = (infoScreenIndex + 1) % maxScreens;
   switch (infoScreenIndex) {
     case 0:
       displayConnection(DEFAULT_WIFI_SSID, WiFi.localIP(), wifiConnected,
@@ -510,6 +625,8 @@ void handleScreenCycle() {
     case 3:
       displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
       break;
+    default:
+      break;
   }
 }
 
@@ -520,9 +637,8 @@ void handleD1Press() {
       displayAudioStatus("TEST TONE", _audioVolume, true);
       break;
     case 3:
-      if (ftpIsRunning()) {
-        ftpStop();
-      } else {
+      if (ftpIsRunning()) ftpStop();
+      else {
         if (audioIsPlaying()) audioStop();
         ftpStart();
       }
@@ -533,17 +649,12 @@ void handleD1Press() {
   }
 }
 
-// ── Setup / loop ─────────────────────────────────────────────────────
-
 void setup() {
   Serial.begin(115200);
   delay(500);
 
-  Serial.println("=============================");
   Serial.println(FIRMWARE_NAME);
   Serial.print("Firmware v"); Serial.println(FIRMWARE_VERSION);
-  Serial.println("Radius Central V4 — Art-Net + Audio + FTP");
-  Serial.println("=============================");
 
   buttonsInit();
   displayInit();
@@ -551,6 +662,7 @@ void setup() {
 
   prefs.begin("artnet", false);
   loadStoredDeviceName();
+  loadStoredShowInfo();
   loadStoredNetworkConfig();
   setDisplayName(hasCustomName ? customShortName : DEVICE_SHORT_NAME);
 
@@ -564,26 +676,27 @@ void setup() {
   cuesLoad();
   ftpInit(SD);
 
-  lastFpsTime = millis();
-#if RADIUS_DIAG
-  diagWindowStartMs = millis();
-#endif
+  mariusLoad();
+  if (mariusIsConfigured()) mariusInit();
 
-  Serial.println("Setup complete.");
+  lastFpsTime = millis();
 }
 
 void loop() {
-#if RADIUS_DIAG
-  unsigned long loopStartUs = micros();
-#endif
-
-  // Priority 1: keep VS1053 fed
   audioUpdate();
-
-  // Priority 2: FTP when active
   ftpUpdate();
+  mariusUpdate();
 
-  // Priority 3: Art-Net (bounded drain)
+  {
+    static bool wasAudioActive = false;
+    bool isAudioActive = audioIsPlaying();
+    if (wasAudioActive && !isAudioActive) {
+      sendAudioStatus(0, "");
+      sendTrackTelemetry(TRACK_STATE_STOPPED, "");
+    }
+    wasAudioActive = isAudioActive;
+  }
+
   int pktSize;
   while ((pktSize = udp.parsePacket()) > 0) {
     if (pktSize > MAX_UDP_PACKET) {
@@ -601,18 +714,15 @@ void loop() {
     }
   }
 
-  // Throttled WiFi health
+  handleOscPacket();
   checkWifiConnection();
 
-  // Buttons
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1 = false; handleD1Press(); }
 
-  // Track telemetry heartbeat (decoupled from debug Serial)
   telemetryHeartbeat();
 
-  // Periodic PFP + optional diag
   unsigned long now = millis();
   if (now - lastFpsTime >= FPS_INTERVAL) {
     unsigned long elapsed = now - lastFpsTime;
@@ -621,29 +731,7 @@ void loop() {
     sendFpsTelemetry((uint16_t)pktRate);
     displayUpdateFooter(pktRate, senderKnown ? senderIP : IPAddress(0, 0, 0, 0));
 
-#if RADIUS_DIAG
-    Serial.print("diag,loop_us_max,heap,min_heap,playing,ftp,pkt_rate:");
-    Serial.print(diagLoopMaxUs);
-    Serial.print(",");
-    Serial.print(ESP.getFreeHeap());
-    Serial.print(",");
-    Serial.print(ESP.getMinFreeHeap());
-    Serial.print(",");
-    Serial.print(audioIsPlaying() ? 1 : 0);
-    Serial.print(",");
-    Serial.print(ftpIsRunning() ? 1 : 0);
-    Serial.print(",");
-    Serial.println(pktRate, 1);
-    diagLoopMaxUs = 0;
-    diagWindowStartMs = now;
-#endif
-
     packetCount = 0;
     lastFpsTime = now;
   }
-
-#if RADIUS_DIAG
-  unsigned long loopUs = micros() - loopStartUs;
-  if (loopUs > diagLoopMaxUs) diagLoopMaxUs = loopUs;
-#endif
 }

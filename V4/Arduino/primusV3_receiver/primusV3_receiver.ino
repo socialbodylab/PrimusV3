@@ -149,6 +149,30 @@ void loadStoredShowInfo() {
     String stored = prefs.getString("performerName", "");
     stored.toCharArray(showPerformerName, sizeof(showPerformerName));
   }
+
+  // First boot (or pre-show-info NVS): seed editable defaults so Device Manager
+  // cards are readable before anyone sets show metadata manually. V1 boards use
+  // "Character"/"Performer" unless the device has a custom short name or was
+  // flashed with a compile-time DEVICE_SHORT_NAME override.
+  if (!prefs.isKey("characterName")) {
+    const char* source = DEVICE_SHORT_NAME;
+    if (hasCustomName && customShortName[0] != '\0') {
+      source = customShortName;
+    } else if (strcmp(DEVICE_SHORT_NAME, "PrimusV3") != 0) {
+      source = DEVICE_SHORT_NAME;
+    } else if (DEFAULT_SHOW_CHARACTER_NAME[0] != '\0') {
+      source = DEFAULT_SHOW_CHARACTER_NAME;
+    }
+    strncpy(showCharacterName, source, SHOW_INFO_FIELD_LEN);
+    showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+    prefs.putString("characterName", showCharacterName);
+  }
+  if (!prefs.isKey("performerName")) {
+    strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
+    showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+    prefs.putString("performerName", showPerformerName);
+  }
+
   if (showCharacterName[0] != '\0' || showPerformerName[0] != '\0') {
     Serial.print("Loaded show info: character=\"");
     Serial.print(showCharacterName);
@@ -810,6 +834,11 @@ void sendArtPollReply(IPAddress dest) {
   reportPos = buildReceiveModeCapabilityToken(reportBuf, sizeof(reportBuf), reportPos);
   for (uint8_t i = 0; i < NUM_OUTPUTS && reportPos < (int)sizeof(reportBuf) - 1; i++) {
     if (outputs[i].type == OUTPUT_OFF) continue;
+    // Only append a tuple when the full token fits — a truncated port:type:universe
+    // fragment looks valid to the sender but can mis-report the output type.
+    int tupleLen = snprintf(nullptr, 0, "|%u:%u:%u:%u", i, (uint8_t)outputs[i].type,
+                            outputs[i].universe, outputs[i].virtualPixelCount);
+    if (reportPos + tupleLen >= (int)sizeof(reportBuf) - 1) break;
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|%u:%u:%u:%u", i, (uint8_t)outputs[i].type,
                           outputs[i].universe, outputs[i].virtualPixelCount);

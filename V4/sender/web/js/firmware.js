@@ -6,6 +6,9 @@ document.addEventListener("alpine:init", () => {
         profiles: [
             { id: "radius_v1", label: "Radius V1", family: "radius", detail: "Feather HUZZAH32 + Music Maker FeatherWing" },
         ],
+        multiFamily: false,
+        family: "primus",
+        families: { primus: [], radius: [] },
         available: false,
         availabilityMessage: "Checking firmware tools...",
         sourceOnly: true,
@@ -70,6 +73,33 @@ document.addEventListener("alpine:init", () => {
                 this.firmwareTabActive = true;
                 this.startUpdatePolling();
             }
+        },
+
+        get firmwareScope() {
+            return this.multiFamily ? "mixed" : "product";
+        },
+
+        get familyProfiles() {
+            if (this.multiFamily) {
+                return this.families?.[this.family] || [];
+            }
+            return this.profiles;
+        },
+
+        get showReceiveModeOverrides() {
+            if (this.multiFamily) {
+                return this.family === "primus";
+            }
+            const prof = this.profiles.find(item => item.id === this.profile);
+            return prof?.family === "primus";
+        },
+
+        get deviceNamePlaceholder() {
+            if (this.multiFamily) {
+                return this.family === "primus" ? "PrimusV3" : "Radius";
+            }
+            const prof = this.profiles.find(item => item.id === this.profile);
+            return prof?.family === "radius" ? "Radius" : "PrimusV3";
         },
 
         get updateAvailable() {
@@ -179,7 +209,7 @@ document.addEventListener("alpine:init", () => {
                 if (!this.isIpv4(this.gatewayOverride)) return "Gateway is not a valid IPv4 address.";
                 if (!this.isIpv4(this.subnetOverride)) return "Subnet is not a valid IPv4 address.";
             }
-            if (this.receiveModeMode !== "keep") {
+            if (this.showReceiveModeOverrides && this.receiveModeMode !== "keep") {
                 const base = Number(this.receiveBaseUniverse);
                 if (!Number.isFinite(base) || base < 0 || base > 32767) {
                     return "Base universe must be 0–32767.";
@@ -219,9 +249,9 @@ document.addEventListener("alpine:init", () => {
             } else if (this.ipMode === "dhcp") {
                 parts.push("IP: DHCP");
             }
-            if (this.receiveModeMode === "split") {
+            if (this.showReceiveModeOverrides && this.receiveModeMode === "split") {
                 parts.push("Receive: Split · U" + this.receiveBaseUniverse + "/" + (Number(this.receiveBaseUniverse) + 1));
-            } else if (this.receiveModeMode === "combined") {
+            } else if (this.showReceiveModeOverrides && this.receiveModeMode === "combined") {
                 parts.push("Receive: Combined · U" + this.receiveBaseUniverse);
             }
             return parts.length ? "This job will use " + parts.join("; ") + "." : "Using firmware defaults from config.h.";
@@ -249,7 +279,7 @@ document.addEventListener("alpine:init", () => {
 
         async refreshStatus() {
             try {
-                const status = await api("GET", "/api/firmware/status");
+                const status = await api("GET", "/api/firmware/status?scope=" + encodeURIComponent(this.firmwareScope));
                 this.syncProfilesFromStatus(status);
                 this.available = !!status.available;
                 this.availabilityMessage = status.message || "Firmware upload status unknown.";
@@ -346,9 +376,23 @@ document.addEventListener("alpine:init", () => {
             }
         },
 
+        setFamily(family) {
+            if (this.running || !this.multiFamily || this.family === family) return;
+            this.family = family;
+            this.receiveModeMode = "keep";
+            const first = (this.families?.[family] || [])[0];
+            if (first) {
+                this.setProfile(first.id);
+            }
+        },
+
         setProfile(profile) {
             if (this.running) return;
             this.profile = profile;
+            const item = this.profiles.find(entry => entry.id === profile);
+            if (item?.family && this.multiFamily) {
+                this.family = item.family;
+            }
             this.ports = [];
             this.selectedPort = "";
             this.portMode = "selected";
@@ -359,10 +403,20 @@ document.addEventListener("alpine:init", () => {
         },
 
         syncProfilesFromStatus(status) {
+            if (status?.families) {
+                this.families = status.families;
+            }
             if (!Array.isArray(status?.profiles) || !status.profiles.length) return;
             this.profiles = status.profiles;
-            if (!this.profiles.some(item => item.id === this.profile)) {
-                this.profile = this.profiles[0].id;
+            const visible = this.multiFamily ? this.familyProfiles : this.profiles;
+            if (!visible.some(item => item.id === this.profile)) {
+                const next = visible[0] || this.profiles[0];
+                if (next) {
+                    this.profile = next.id;
+                    if (next.family && this.multiFamily) {
+                        this.family = next.family;
+                    }
+                }
             }
         },
 
@@ -432,12 +486,14 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").showNotice(this.overrideValidationMessage, "error", 4000);
                 return;
             }
-            const body = { action, profile: this.profile };
+            const body = { action, profile: this.profile, scope: this.firmwareScope };
             if (action === "compile" || action === "upload") {
                 this.addDeviceNameField(body);
                 this.addWifiFields(body);
                 this.addIpFields(body);
-                this.addReceiveModeFields(body);
+                if (this.showReceiveModeOverrides) {
+                    this.addReceiveModeFields(body);
+                }
             }
             if (action === "upload") {
                 body.port_mode = this.portMode;

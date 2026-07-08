@@ -127,13 +127,17 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -v1|--radius-v1)
+    -v1|--radius-v1|-rv1)
       BOARD_PROFILE="radius_v1"
+      shift
+      ;;
+    -v2|--radius-v2|-rv2|-radius)
+      BOARD_PROFILE="radius_v2"
       shift
       ;;
     --board)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        err "--board requires a value: radius_v1"
+        err "--board requires a value: radius_v1 or radius_v2"
         exit 1
       fi
       BOARD_PROFILE="${2:-}"
@@ -266,20 +270,35 @@ if [[ "$ALL_PORTS" == true && ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
 fi
 
 case "$BOARD_PROFILE" in
-  radius_v1|v1|v1_huzzah)
+  radius_v1|rv1|radius-v1|v1|v1_huzzah)
     BOARD_PROFILE="radius_v1"
     FQBN="esp32:esp32:featheresp32"
-    EXTRA_FLAGS="-DTARGET_BOARD=2"
+    EXTRA_FLAGS="-DTARGET_BOARD=2 -DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
     DEFAULT_BAUD=460800
     REQUIRED_LIBS=(
       "Adafruit VS1053 Library"
       "SimpleFTPServer"
       "ArduinoJson"
+      "NimBLE-Arduino"
+    )
+    ;;
+  radius_v2|rv2|radius-v2|v2)
+    BOARD_PROFILE="radius_v2"
+    FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
+    EXTRA_FLAGS="-DTARGET_BOARD=1 -DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
+    DEFAULT_BAUD=921600
+    REQUIRED_LIBS=(
+      "Adafruit ST7735 and ST7789 Library"
+      "Adafruit GFX Library"
+      "Adafruit VS1053 Library"
+      "SimpleFTPServer"
+      "ArduinoJson"
+      "NimBLE-Arduino"
     )
     ;;
   *)
     err "Unknown board profile: $BOARD_PROFILE"
-    err "Expected: radius_v1"
+    err "Expected: radius_v1 or radius_v2"
     exit 1
     ;;
 esac

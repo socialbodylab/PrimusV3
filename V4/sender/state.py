@@ -24,9 +24,12 @@ from artnet import (
     send_art_address,
     send_ip_config,
     send_show_info,
+    send_audio_cmd,
+    AUDIO_CMD_TEST_TONE,
     ipv4_octets,
 )
 from paths import state_file
+import show_info_store
 from virtual_resolution import (
     default_virtual_pixels,
     resolve_virtual_pixels,
@@ -307,16 +310,19 @@ def _normalize_device_capabilities(capabilities=None):
 
 
 def _normalize_show_info_value(value):
-    return str(value or "").strip()[:DEVICE_SHOW_INFO_MAX_LENGTH]
+    return show_info_store.normalize_show_info_value(value)
+
+
+def _show_info_storage_path(dev=None, is_radius=None):
+    if is_radius is None and isinstance(dev, dict):
+        is_radius = dev.get("is_radius") or (
+            (dev.get("capabilities") or {}).get("device_class") == "radius"
+        )
+    return show_info_store.storage_path_for_device(bool(is_radius))
 
 
 def _show_info_from_saved(saved):
-    if not isinstance(saved, dict):
-        return "", ""
-    return (
-        _normalize_show_info_value(saved.get("character_name")),
-        _normalize_show_info_value(saved.get("performer_name")),
-    )
+    return show_info_store.show_info_from_saved(saved)
 
 
 def _apply_saved_show_info(dev, saved):
@@ -342,81 +348,57 @@ def _write_state_data(data):
 
 
 def _device_show_info_map_from_data(data):
-    info_map = data.get("device_show_info")
-    return dict(info_map) if isinstance(info_map, dict) else {}
+    return show_info_store.device_show_info_map_from_data(data)
 
 
 def _show_info_entry(device_name, character_name, performer_name):
-    return {
-        "device_name": str(device_name or "")[:17],
-        "character_name": _normalize_show_info_value(character_name),
-        "performer_name": _normalize_show_info_value(performer_name),
-    }
+    return show_info_store.show_info_entry(device_name, character_name, performer_name)
 
 
-def _lookup_device_show_info(ip=None, device_name=None):
-    info_map = _device_show_info_map_from_data(_read_state_data())
-    entry = info_map.get(ip) if ip else None
-    if isinstance(entry, dict):
-        return _show_info_from_saved(entry)
-    if device_name:
-        for candidate in info_map.values():
-            if isinstance(candidate, dict) and candidate.get("device_name") == device_name:
-                return _show_info_from_saved(candidate)
-    return "", ""
+def _lookup_device_show_info(ip=None, device_name=None, is_radius=False):
+    return show_info_store.lookup_device_show_info(
+        _show_info_storage_path(is_radius=is_radius), ip, device_name)
 
 
-def _persist_device_show_info(ip, device_name, character_name, performer_name):
-    if not ip:
-        return
-    data = _read_state_data()
-    info_map = _device_show_info_map_from_data(data)
-    info_map[ip] = _show_info_entry(device_name, character_name, performer_name)
-    data["device_show_info"] = info_map
-    _write_state_data(data)
-
-
-def _migrate_device_show_info_key(old_ip, new_ip, device_name=None):
-    if not old_ip or not new_ip or old_ip == new_ip:
-        return
-    data = _read_state_data()
-    info_map = _device_show_info_map_from_data(data)
-    entry = info_map.pop(old_ip, None)
-    if not isinstance(entry, dict):
-        return
-    if device_name:
-        entry["device_name"] = str(device_name)[:17]
-    info_map[new_ip] = entry
-    data["device_show_info"] = info_map
-    _write_state_data(data)
-
-
-def _show_info_from_node(node_info):
-    if not isinstance(node_info, dict):
-        return "", ""
-    return (
-        _normalize_show_info_value(node_info.get("character_name")),
-        _normalize_show_info_value(node_info.get("performer_name")),
+def _persist_device_show_info(ip, device_name, character_name, performer_name, is_radius=False):
+    show_info_store.persist_device_show_info(
+        _show_info_storage_path(is_radius=is_radius),
+        ip,
+        device_name,
+        character_name,
+        performer_name,
     )
 
 
-def _merge_show_info_fields(character_name, performer_name, ip=None, device_name=None):
-    lookup_char, lookup_perf = _lookup_device_show_info(ip, device_name)
-    if not character_name and lookup_char:
-        character_name = lookup_char
-    if not performer_name and lookup_perf:
-        performer_name = lookup_perf
-    return character_name, performer_name
+def _migrate_device_show_info_key(old_ip, new_ip, device_name=None, is_radius=False):
+    show_info_store.migrate_device_show_info_key(
+        _show_info_storage_path(is_radius=is_radius),
+        old_ip,
+        new_ip,
+        device_name,
+    )
+
+
+def _show_info_from_node(node_info):
+    return show_info_store.show_info_from_node(node_info)
+
+
+def _merge_show_info_fields(character_name, performer_name, ip=None, device_name=None, is_radius=False):
+    return show_info_store.merge_show_info_fields(
+        _show_info_storage_path(is_radius=is_radius),
+        character_name,
+        performer_name,
+        ip,
+        device_name,
+    )
 
 
 def _apply_persisted_show_info(dev, node_info=None):
-    ip = dev.get("ip") or (node_info or {}).get("ip")
-    name = dev.get("name") or (node_info or {}).get("short_name")
-    character_name, performer_name = _lookup_device_show_info(ip, name)
-    if character_name:
-        dev["character_name"] = character_name
-    if performer_name:
-        dev["performer_name"] = performer_name
+    show_info_store.apply_persisted_show_info(
+        _show_info_storage_path(dev),
+        dev,
+        node_info,
+    )
 
 
 def _save_devices(devices):
@@ -441,6 +423,7 @@ def _save_devices(devices):
         saved_devices.append({
             "ip": d["ip"],
             "name": d["name"],
+            "is_radius": bool(d.get("is_radius")),
             "hardware_profile": d.get("hardware_profile", "unknown"),
             "hardware_label": d.get("hardware_label", "Unknown hardware"),
             "firmware_version": d.get("firmware_version"),
@@ -455,16 +438,27 @@ def _save_devices(devices):
             "performer_name": _normalize_show_info_value(d.get("performer_name")),
             "outputs": saved_outputs,
         })
-        ip = d.get("ip")
-        if ip:
-            info_map[ip] = _show_info_entry(
-                d.get("name"),
-                d.get("character_name"),
-                d.get("performer_name"),
-            )
     data["devices"] = saved_devices
     data["device_show_info"] = info_map
+    radius_data = show_info_store.read_state_data(show_info_store.radius_state_path())
+    radius_info_map = show_info_store.device_show_info_map_from_data(radius_data)
+    for d in devices:
+        ip = d.get("ip")
+        if not ip:
+            continue
+        entry = _show_info_entry(
+            d.get("name"),
+            d.get("character_name"),
+            d.get("performer_name"),
+        )
+        if d.get("is_radius"):
+            radius_info_map[ip] = entry
+        else:
+            info_map[ip] = entry
+    data["device_show_info"] = info_map
+    radius_data["device_show_info"] = radius_info_map
     _write_state_data(data)
+    show_info_store.write_state_data(show_info_store.radius_state_path(), radius_data)
 
 
 def _load_devices():
@@ -916,6 +910,11 @@ class ControllerState:
             if ip and ip not in seen:
                 targets.append(ip)
                 seen.add(ip)
+        for ip in show_info_store.device_show_info_map_from_data(
+                show_info_store.read_state_data(show_info_store.radius_state_path())):
+            if ip and ip not in seen:
+                targets.append(ip)
+                seen.add(ip)
         return targets
 
     def set_artnet_source(self, source_ip=None):
@@ -1134,7 +1133,8 @@ class ControllerState:
                     "character_name": _normalize_show_info_value(dev.get("character_name")),
                     "performer_name": _normalize_show_info_value(dev.get("performer_name")),
                     "ip": dev["ip"],
-                    "base_universe": dev["base_universe"],
+                    "is_radius": bool(dev.get("is_radius")),
+                    "base_universe": dev.get("base_universe", 0),
                     "receive_mode": dev.get("receive_mode", "split"),
                     "hardware_profile": dev.get("hardware_profile", "unknown"),
                     "hardware_label": dev.get("hardware_label", "Unknown hardware"),
@@ -1169,7 +1169,15 @@ class ControllerState:
                         d["battery_power_mode"] = rx.get("battery_power_mode")
                     if "battery_warning" in rx:
                         d["battery_warning"] = rx.get("battery_warning")
-                for o in dev["outputs"]:
+                if dev.get("is_radius"):
+                    if rx:
+                        if "current_track" in rx:
+                            d["current_track"] = rx.get("current_track") or ""
+                        if "playback_state" in rx:
+                            d["playback_state"] = rx.get("playback_state", 0)
+                    out["devices"].append(d)
+                    continue
+                for o in dev.get("outputs", []):
                     d["outputs"].append({
                         "name": o["name"],
                         "type": o["type"],
@@ -1528,6 +1536,10 @@ class ControllerState:
     def connect(self, di):
         with self.lock:
             dev = self.devices[di]
+            if dev.get("is_radius"):
+                dev["connected"] = True
+                self._clear_transport_error_unlocked(dev)
+                return {"ok": True}
             if not self._ensure_sender_connected_unlocked(dev):
                 return {
                     "ok": False,
@@ -1548,6 +1560,9 @@ class ControllerState:
     def disconnect(self, di):
         with self.lock:
             dev = self.devices[di]
+            if dev.get("is_radius"):
+                dev["connected"] = False
+                return
             if dev["sender"].connected:
                 info = _device_blackout_info(dev)
                 dev["sender"].blackout(info)
@@ -1565,7 +1580,8 @@ class ControllerState:
                     old_ip = dev["ip"]
                     dev["ip"] = node_info["ip"]
                     dev["sender"].ip = dev["ip"]
-                    _migrate_device_show_info_key(old_ip, dev["ip"], dev.get("name"))
+                    _migrate_device_show_info_key(old_ip, dev["ip"], dev.get("name"),
+                                                  is_radius=dev.get("is_radius"))
                     groups_changed = self._replace_device_ip_references_unlocked(old_ip, dev["ip"])
                 updated = self._refresh_device_from_node_unlocked(dev, node_info)
                 if (updated or ip_changed) and auto_save:
@@ -1579,6 +1595,46 @@ class ControllerState:
 
             output_cfgs = _output_configs_from_node(node_info)
             capabilities = _capabilities_from_node(node_info)
+            if capabilities.get("device_class") == "radius":
+                character_name, performer_name = _show_info_from_node(node_info)
+                character_name, performer_name = _merge_show_info_fields(
+                    character_name,
+                    performer_name,
+                    node_info.get("ip"),
+                    node_info.get("short_name"),
+                    is_radius=True,
+                )
+                dev = {
+                    "name": node_info.get("short_name", "Radius"),
+                    "character_name": character_name,
+                    "performer_name": performer_name,
+                    "ip": node_info["ip"],
+                    "connected": False,
+                    "is_radius": True,
+                    "transport_error": None,
+                    "capabilities": capabilities,
+                    "hardware_profile": node_info.get(
+                        "hardware_profile", capabilities.get("hardware_profile", "v1")),
+                    "hardware_label": node_info.get(
+                        "hardware_label", capabilities.get("hardware_label", "V1 Huzzah32")),
+                    "firmware_version": node_info.get(
+                        "firmware_version", capabilities.get("firmware_version")),
+                    "ip_mode": capabilities.get("ip_mode", "unknown"),
+                    "static_ip": capabilities.get("static_ip"),
+                    "gateway": capabilities.get("gateway"),
+                    "subnet": capabilities.get("subnet"),
+                    "current_track": "",
+                    "playback_state": 0,
+                }
+                _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
+                _apply_persisted_show_info(dev, node_info)
+                self.devices.append(dev)
+                if dev.get("character_name") or dev.get("performer_name"):
+                    self._sync_show_info_to_device_unlocked(dev)
+                if auto_save:
+                    _save_devices(self.devices)
+                return {"status": "added", "device_index": len(self.devices) - 1}
+
             base_u = (
                 output_cfgs[0].get("universe", 0)
                 if output_cfgs else
@@ -1717,11 +1773,15 @@ class ControllerState:
         dev["ip_config_pending"] = None
 
         char, perf = _show_info_from_node(node_info)
-        char, perf = _merge_show_info_fields(char, perf, dev.get("ip"), dev.get("name"))
+        char, perf = _merge_show_info_fields(
+            char, perf, dev.get("ip"), dev.get("name"), is_radius=dev.get("is_radius"))
         if char:
             dev["character_name"] = char
         if perf:
             dev["performer_name"] = perf
+
+        if dev.get("is_radius"):
+            return True
 
         output_cfgs = _output_configs_from_node(node_info)
         if output_cfgs:
@@ -1765,7 +1825,7 @@ class ControllerState:
         with self.lock:
             if 0 <= di < len(self.devices):
                 dev = self.devices[di]
-                if dev["sender"].connected:
+                if not dev.get("is_radius") and dev["sender"].connected:
                     info = _device_blackout_info(dev)
                     dev["sender"].blackout(info)
                     dev["sender"].disconnect()
@@ -1801,6 +1861,9 @@ class ControllerState:
             try:
                 send_art_address(dev["ip"], new_name, source_ip=self.artnet_source_ip)
             except OSError as error:
+                if dev.get("is_radius"):
+                    dev["transport_error"] = str(error)
+                    return {"ok": False, "error": dev.get("transport_error")}
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
             dev["name"] = new_name
@@ -1810,7 +1873,7 @@ class ControllerState:
 
     def _sync_show_info_to_device_unlocked(self, dev):
         caps = _normalize_device_capabilities(dev.get("capabilities"))
-        if not caps.get("show_info"):
+        if not caps.get("show_info") and not dev.get("is_radius"):
             return True
         try:
             send_show_info(
@@ -1836,7 +1899,7 @@ class ControllerState:
                 dev["performer_name"] = _normalize_show_info_value(performer_name)
             caps = _normalize_device_capabilities(dev.get("capabilities"))
             applied_to_device = False
-            if caps.get("show_info"):
+            if caps.get("show_info") or dev.get("is_radius"):
                 if not self._sync_show_info_to_device_unlocked(dev):
                     return {"ok": False, "error": dev.get("transport_error")}
                 applied_to_device = True
@@ -1845,6 +1908,7 @@ class ControllerState:
                 dev.get("name"),
                 dev.get("character_name"),
                 dev.get("performer_name"),
+                is_radius=dev.get("is_radius"),
             )
             _save_devices(self.devices)
             return {"ok": True, "applied_to_device": applied_to_device}
@@ -1861,6 +1925,9 @@ class ControllerState:
                 ipv4_octets(subnet, "subnet")
                 send_ip_config(dev["ip"], 1, static_ip, gateway, subnet, source_ip=self.artnet_source_ip)
             except (OSError, ValueError) as error:
+                if dev.get("is_radius"):
+                    dev["transport_error"] = str(error)
+                    return {"ok": False, "error": dev.get("transport_error")}
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
             dev["ip_mode"] = "static"
@@ -1881,6 +1948,9 @@ class ControllerState:
             try:
                 send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip)
             except (OSError, ValueError) as error:
+                if dev.get("is_radius"):
+                    dev["transport_error"] = str(error)
+                    return {"ok": False, "error": dev.get("transport_error")}
                 self._mark_transport_error_unlocked(dev, error)
                 return {"ok": False, "error": dev.get("transport_error")}
             dev["ip_mode"] = "dhcp"
@@ -1906,6 +1976,14 @@ class ControllerState:
                         "error": None,
                     })
                     continue
+                if dev.get("is_radius"):
+                    dev["connected"] = True
+                    results.append({
+                        "device_index": idx,
+                        "ok": True,
+                        "error": None,
+                    })
+                    continue
                 ok = self._ensure_sender_connected_unlocked(dev)
                 if ok:
                     caps = _normalize_device_capabilities(dev.get("capabilities"))
@@ -1924,6 +2002,9 @@ class ControllerState:
     def disconnect_all(self):
         with self.lock:
             for dev in self.devices:
+                if dev.get("is_radius"):
+                    dev["connected"] = False
+                    continue
                 if dev["sender"].connected:
                     info = _device_blackout_info(dev)
                     dev["sender"].blackout(info)
@@ -1957,9 +2038,23 @@ class ControllerState:
             _save_device_groups(self.device_groups)
             return True
 
-    def hello_device(self, di):
-        """Send a quick red flash to all outputs on a device to help locate it."""
+    def hello_device(self, di, volume=80):
+        """Send identify flash (Primus) or test tone (Radius)."""
         with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return False
+            dev = self.devices[di]
+            if dev.get("is_radius"):
+                try:
+                    send_audio_cmd(
+                        dev["ip"],
+                        AUDIO_CMD_TEST_TONE,
+                        volume=int(volume),
+                        source_ip=self.artnet_source_ip,
+                    )
+                    return True
+                except OSError:
+                    return False
             status = self._device_capability_status_unlocked(di, "hello")
             if not status["ok"]:
                 return False
@@ -2210,6 +2305,8 @@ class ControllerState:
             for di, dev in enumerate(self.devices):
                 if not dev.get("connected"):
                     continue
+                if dev.get("is_radius"):
+                    continue
                 if not dev["sender"].connected:
                     if not self._ensure_sender_connected_unlocked(dev):
                         continue
@@ -2375,6 +2472,8 @@ class ControllerState:
     def shutdown(self):
         self.running = False
         for dev in self.devices:
+            if dev.get("is_radius"):
+                continue
             if dev["sender"].connected:
                 info = _device_blackout_info(dev)
                 dev["sender"].blackout(info)

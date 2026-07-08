@@ -455,7 +455,7 @@ The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a 
 | `GET /api/looks/:id/export` | Download a portable Look bundle JSON file, including referenced Clips when available |
 | `GET /api/cues` | Get cue list state (cues, current index, playing flag) |
 | `GET /api/integrations/osc` | OSC listener settings, bound endpoint, recent message history, examples, and per-cue trigger hints |
-| `GET /api/firmware/status` | Firmware upload availability, installed receiver firmware version/source, GitHub update info, and current/last job state |
+| `GET /api/firmware/status` | Firmware upload availability, profiles, families, installed receiver firmware version/source, GitHub update info, and current/last job state. Query `?scope=mixed` returns all Primus + Radius board profiles (DeviceManager only; default `product` scope is unchanged). |
 | `POST /api/firmware/updates/check` | `{force?: true}` — refresh GitHub firmware release scan (15-minute cache unless `force` is true) |
 | `GET /api/firmware/jobs/:id` | Poll a firmware upload job, including redacted output and structured results |
 
@@ -719,11 +719,13 @@ Cue lookup for name-based OSC triggers is exact case-insensitive name first, the
 
 ### POST Endpoints — Firmware Upload
 
-These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V3_6/Arduino/upload.sh`, run one job at a time, and redact WiFi passwords from job output. The Firmware tab uses the simple flow of firmware version, selected device or all devices, independently optional device-name and WiFi overrides, then compile/upload with an output window. If Arduino CLI is missing, the Firmware tab can start a one-time setup job that installs managed firmware tools outside the app bundle.
+These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V4/Arduino/upload.sh` or `radius_upload.sh` per profile, run one job at a time, and redact WiFi passwords from job output.
+
+**Profile scope:** default `product` scope filters profiles by sender product (`primus` → `v1`/`v2`/`v3`; `radius` → `radius_v1`/`radius_v2`). DeviceManager passes `"scope": "mixed"` (or `GET /api/firmware/status?scope=mixed`) to expose all five board profiles from one panel. PrimusCentral and RadiusCentral keep product-scoped behavior.
 
 | Route | Body | Description |
 |---|---|---|
-| `POST /api/firmware/jobs` | `{action:"setup_tools", profile:"v3"}` | Download Arduino CLI into the managed tools directory, configure ESP32 board support, and install receiver firmware libraries. |
+| `POST /api/firmware/jobs` | `{action:"setup_tools", profile:"v3", scope?:"mixed"}` | Download Arduino CLI into the managed tools directory, configure ESP32 board support, and install receiver firmware libraries. |
 | `POST /api/firmware/jobs` | `{action:"list_ports", profile:"v3"}` | Run `upload.sh --board <profile> --ports-json` and return structured serial port data in the job result. |
 | `POST /api/firmware/jobs` | `{action:"install", profile:"v3"}` | Run `upload.sh --board <profile> --install`. |
 | `POST /api/firmware/jobs` | `{action:"compile", profile:"v3", device_name?, wifi_ssid?, wifi_password?, ip_mode?, static_ip?, gateway?, subnet?}` | Run compile-only verification with optional default device-name, WiFi credential, and static/DHCP IP overrides. |
@@ -920,7 +922,7 @@ Radius Central firmware uses the shared `0x8200` ArtIPConfig opcode from V3.6 Pr
 
 **ArtAudioCmd cmd values:** 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 5=test tone, 6=play cue number (byte 13), 7=loop cue number. Filename is null-terminated ASCII after byte 13; optional uint16 LE duration (seconds) follows the null when non-zero.
 
-Discovery capability tag: `PVRAD1|B:v1|IP:D|F:RA` where `R`=rename, `A`=audio, `F`=FTP.
+Discovery capability tag: `PVRAD1|B:v1|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info (`0x8210` character/performer). Optional Marius tokens on V2: `MC:` / `MP:`.
 
 Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][name:utf8...]`.
 

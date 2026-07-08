@@ -36,6 +36,8 @@ inline void displayError(const char*, const char*)               {}
 inline void displayAudioStatus(const char*, uint8_t, bool)       {}
 inline void displayFtpStatus(bool, IPAddress, uint16_t)          {}
 inline void displayUpdateFooter(float, IPAddress = IPAddress(0,0,0,0)) {}
+#define MARIUS_DISPLAY_REVERTED 255
+inline void displayMariusUpdate(uint8_t, const char*, const char*) {}
 
 #else  // full TFT implementation below
 
@@ -369,6 +371,14 @@ void displayUpdateFooter(float pktRate, IPAddress sourceIP = IPAddress(0,0,0,0))
   tft.setTextSize(1);
   tft.setTextColor(ST77XX_CYAN);
   if (pktRate > 0) tft.print(pktRate, 1); else tft.print("--");
+}
+
+#define MARIUS_DISPLAY_REVERTED 255
+
+void displayMariusUpdate(uint8_t state, const char* puckName, const char* lastEvent) {
+  (void)state;
+  (void)puckName;
+  (void)lastEvent;
 }
 
 #endif // NO_DISPLAY

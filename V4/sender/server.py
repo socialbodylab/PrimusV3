@@ -192,7 +192,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response(get_network_status())
             return
         if path == "/api/firmware/status":
-            self._json_response(firmware_jobs.status())
+            params = self._query_params()
+            scope = params.get("scope", "product")
+            self._json_response(firmware_jobs.status(scope=scope))
             return
         if path == "/api/serial/status":
             self._json_response(serial_monitor.status())

@@ -37,6 +37,8 @@ document.addEventListener("alpine:init", () => {
         notice: null,
         _noticeTimer: null,
         filterCharacterName: "",
+        filterPrimusCharacter: "",
+        filterRadiusCharacter: "",
         mode: "monitor",
         bulkPanel: null,
         bulkRenamePattern: "Device {n}",
@@ -123,14 +125,32 @@ document.addEventListener("alpine:init", () => {
         },
 
         deviceNeedsAttention(dev) {
+            if (this.isRadiusDevice(dev)) {
+                return this.deviceHasError(dev);
+            }
             return this.deviceHasError(dev) || this.deviceLowBattery(dev);
         },
 
+        isRadiusDevice(dev) {
+            return !!(dev?.is_radius || dev?.capabilities?.device_class === "radius");
+        },
+
+        deviceProductType(dev) {
+            return this.isRadiusDevice(dev) ? "radius" : "primus";
+        },
+
         get groupedDevices() {
+            return this.groupDevicesForProduct(null);
+        },
+
+        groupDevicesForProduct(product) {
             const attention = [];
             const online = [];
             const offline = [];
             for (const entry of this.filteredDevices) {
+                if (product && this.deviceProductType(entry.dev) !== product) {
+                    continue;
+                }
                 if (this.deviceNeedsAttention(entry.dev)) {
                     entry._section = "attention";
                     attention.push(entry);
@@ -143,6 +163,23 @@ document.addEventListener("alpine:init", () => {
                 }
             }
             return { attention, online, offline };
+        },
+
+        get productSectionList() {
+            const products = [
+                { key: "primus", label: "Primus" },
+                { key: "radius", label: "Radius" },
+            ];
+            return products.map(product => {
+                const g = this.groupDevicesForProduct(product.key);
+                const sections = [
+                    { key: "attention", label: "Attention", entries: g.attention },
+                    { key: "online", label: "Online", entries: g.online },
+                    { key: "offline", label: "Offline / Unconfirmed", entries: g.offline },
+                ];
+                const count = g.attention.length + g.online.length + g.offline.length;
+                return { ...product, count, sections };
+            }).filter(product => product.count > 0);
         },
 
         get sectionList() {
@@ -170,9 +207,30 @@ document.addEventListener("alpine:init", () => {
             return (this.state?.devices || []).filter(d => this.deviceHasError(d)).length;
         },
 
+        get summaryPrimusCount() {
+            return (this.state?.devices || []).filter(d => !this.isRadiusDevice(d)).length;
+        },
+
+        get summaryRadiusCount() {
+            return (this.state?.devices || []).filter(d => this.isRadiusDevice(d)).length;
+        },
+
         get characterFilterOptions() {
+            return this.primusCharacterFilterOptions;
+        },
+
+        get primusCharacterFilterOptions() {
+            return this._characterFilterOptionsFor("primus");
+        },
+
+        get radiusCharacterFilterOptions() {
+            return this._characterFilterOptionsFor("radius");
+        },
+
+        _characterFilterOptionsFor(product) {
             const names = new Set();
             for (const dev of (this.state?.devices || [])) {
+                if (this.deviceProductType(dev) !== product) continue;
                 const name = (dev.character_name || "").trim();
                 if (name) names.add(name);
             }
@@ -181,9 +239,12 @@ document.addEventListener("alpine:init", () => {
 
         get filteredDevices() {
             const devices = this.state?.devices || [];
-            const filter = this.filterCharacterName.trim().toLowerCase();
 
             return devices.reduce((entries, dev, index) => {
+                const product = this.deviceProductType(dev);
+                const filter = product === "radius"
+                    ? this.filterRadiusCharacter.trim().toLowerCase()
+                    : this.filterPrimusCharacter.trim().toLowerCase();
                 if (filter) {
                     const character = (dev.character_name || "").trim().toLowerCase();
                     if (character !== filter) {
@@ -197,10 +258,33 @@ document.addEventListener("alpine:init", () => {
 
         toggleCharacterFilter(name) {
             this.filterCharacterName = this.filterCharacterName === name ? "" : name;
+            this.filterPrimusCharacter = this.filterCharacterName;
+        },
+
+        togglePrimusCharacterFilter(name) {
+            this.filterPrimusCharacter = this.filterPrimusCharacter === name ? "" : name;
+            this.filterCharacterName = this.filterPrimusCharacter;
+        },
+
+        toggleRadiusCharacterFilter(name) {
+            this.filterRadiusCharacter = this.filterRadiusCharacter === name ? "" : name;
         },
 
         clearCharacterFilter() {
             this.filterCharacterName = "";
+            this.filterPrimusCharacter = "";
+            this.filterRadiusCharacter = "";
+        },
+
+        clearPrimusCharacterFilter() {
+            this.filterPrimusCharacter = "";
+            if (!this.filterRadiusCharacter) {
+                this.filterCharacterName = "";
+            }
+        },
+
+        clearRadiusCharacterFilter() {
+            this.filterRadiusCharacter = "";
         },
 
         isCardExpanded(index) {

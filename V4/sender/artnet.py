@@ -317,6 +317,18 @@ class PrimusTelemetryListener:
                         entry.update(parsed)
                         entry["ts"] = time.monotonic()
                 continue
+            if len(raw) >= 5 and raw[:3] == TRACK_MAGIC:
+                state = raw[3]
+                name_len = raw[4]
+                name = raw[5:5 + name_len].decode("utf-8", errors="replace") if name_len else ""
+                with self.lock:
+                    entry = self.data.setdefault(ip, {})
+                    entry.update({
+                        "playback_state": state,
+                        "current_track": name,
+                        "ts": time.monotonic(),
+                    })
+                continue
             if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
                 parsed = parse_pfp_packet(raw)
                 if parsed:
@@ -571,7 +583,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
         node_list = list(nodes.values())
         for node in node_list:
             caps = node.get("capabilities") or {}
-            if not caps.get("show_info"):
+            if not caps.get("show_info") and caps.get("device_class") != "radius":
                 continue
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -677,6 +689,7 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
         caps["ip_config"] = caps["ip_config"] or "I" in features
         caps["audio"] = "A" in features
         caps["ftp"] = caps["ftp"] or "F" in features or "A" in features
+        caps["show_info"] = "S" in features
     return caps
 
 
@@ -699,7 +712,7 @@ def is_compatible_node(node_info, product):
         return "radius" in name_blob
 
     if NODE_CAPS_PREFIX_RADIUS in node_report:
-        return False
+        return True
     if NODE_CAPS_PREFIX in node_report:
         return True
     if "radius" in name_blob and NODE_CAPS_PREFIX not in node_report:
@@ -877,16 +890,7 @@ def _parse_capability_outputs(node_report, type_keys):
     return outputs
 
 
-def parse_node_outputs(long_name, universes, output_types, node_report="", type_keys=None):
-    """Parse ArtPollReply output configuration.
-
-    Preferred source is a versioned capability tag in Node Report. Legacy
-    firmware falls back to parsing the human-readable Long Name.
-    """
-    outputs = _parse_capability_outputs(node_report, type_keys or list(output_types.keys()))
-    if outputs:
-        return outputs
-
+def _parse_long_name_outputs(long_name, universes, output_types):
     outputs = []
     parts = long_name.split("|")
     if len(parts) >= 2:
@@ -899,6 +903,77 @@ def parse_node_outputs(long_name, universes, output_types, node_report="", type_
         for i in range(len(universes)):
             outputs.append({"name": "A{}".format(i), "type": "long_strip"})
     return outputs
+
+
+def _output_port_index(name):
+    text = str(name or "")
+    if text.startswith("A") and text[1:].isdigit():
+        return int(text[1:])
+    return None
+
+
+def _merge_output_configs(capability_outputs, fallback_outputs):
+    """Merge capability tuples with Long Name (or prior) outputs.
+
+    Firmware 3.12+ puts F:/B:/IP:/U: before per-output tuples so feature
+    discovery survives the 64-byte Node Report limit, but two active outputs
+    routinely truncate the trailing tuples. Capability fields win when both
+    sources describe the same port; missing ports are kept from the fallback.
+    """
+    if not capability_outputs:
+        return list(fallback_outputs or [])
+    if not fallback_outputs:
+        return list(capability_outputs)
+
+    cap_by_name = {
+        output["name"]: dict(output)
+        for output in capability_outputs
+        if output.get("name")
+    }
+    fallback_by_name = {
+        output["name"]: dict(output)
+        for output in fallback_outputs
+        if output.get("name")
+    }
+    ordered_names = sorted(
+        set(cap_by_name) | set(fallback_by_name),
+        key=lambda name: (
+            _output_port_index(name) is None,
+            _output_port_index(name) if _output_port_index(name) is not None else name,
+        ),
+    )
+    merged = []
+    for name in ordered_names:
+        cap_output = cap_by_name.get(name)
+        fallback_output = fallback_by_name.get(name)
+        if cap_output and fallback_output:
+            merged_output = dict(fallback_output)
+            if "universe" in cap_output:
+                merged_output["universe"] = cap_output["universe"]
+            if "virtual_pixels" in cap_output:
+                merged_output["virtual_pixels"] = cap_output["virtual_pixels"]
+                merged_output["type"] = cap_output["type"]
+            elif cap_output.get("type") and cap_output.get("type") == fallback_output.get("type"):
+                merged_output["type"] = cap_output["type"]
+            merged.append(merged_output)
+        elif cap_output:
+            merged.append(cap_output)
+        else:
+            merged.append(fallback_output)
+    return merged
+
+
+def parse_node_outputs(long_name, universes, output_types, node_report="", type_keys=None):
+    """Parse ArtPollReply output configuration.
+
+    Preferred source is a versioned capability tag in Node Report. When that
+    tag is truncated — common on firmware 3.12+ with two active outputs —
+    missing ports are filled from the human-readable Long Name.
+    """
+    type_keys = type_keys or list(output_types.keys())
+    capability_outputs = _parse_capability_outputs(node_report, type_keys)
+    long_name_outputs = _parse_long_name_outputs(long_name, universes, output_types)
+    return _merge_output_configs(capability_outputs, long_name_outputs)
 
 
 # ======================================================================

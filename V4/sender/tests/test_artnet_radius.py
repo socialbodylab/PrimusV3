@@ -29,7 +29,7 @@ class RadiusArtNetTests(unittest.TestCase):
         self.assertEqual(ARTNET_OPCODE_FTP_CMD, 0x8301)
 
     def test_pvrad1_capability_parsing(self):
-        report = "PVRAD1|B:v1|IP:D|F:RA"
+        report = "PVRAD1|B:v1|IP:D|F:RIHAS"
         caps = parse_node_capabilities(report, "Radius", "Radius Central V1")
         self.assertEqual(caps["profile"], "pvrad1")
         self.assertEqual(caps["device_class"], "radius")
@@ -37,6 +37,7 @@ class RadiusArtNetTests(unittest.TestCase):
         self.assertTrue(caps["audio"])
         self.assertTrue(caps["ftp"])
         self.assertTrue(caps["ip_config"])
+        self.assertTrue(caps["show_info"])
 
     def test_audio_cmd_packet_builder(self):
         sent = []

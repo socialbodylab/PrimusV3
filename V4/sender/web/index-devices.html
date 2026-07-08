@@ -56,16 +56,32 @@
 <div class="device-manager-main main-content" x-data x-init="$store.app.init()" x-show="$store.app.mode === 'monitor'">
     <div class="device-manager-toolbar">
         <div class="dm-character-filters"
-             x-show="$store.app.characterFilterOptions.length">
+             x-show="$store.app.primusCharacterFilterOptions.length">
+            <span class="dm-character-filter-label">Primus</span>
             <button type="button"
                     class="dm-character-chip"
-                    :class="{ 'dm-character-chip-active': !$store.app.filterCharacterName }"
-                    @click="$store.app.clearCharacterFilter()">All</button>
-            <template x-for="name in $store.app.characterFilterOptions" :key="name">
+                    :class="{ 'dm-character-chip-active': !$store.app.filterPrimusCharacter }"
+                    @click="$store.app.clearPrimusCharacterFilter()">All</button>
+            <template x-for="name in $store.app.primusCharacterFilterOptions" :key="'primus-' + name">
                 <button type="button"
                         class="dm-character-chip"
-                        :class="{ 'dm-character-chip-active': $store.app.filterCharacterName === name }"
-                        @click="$store.app.toggleCharacterFilter(name)"
+                        :class="{ 'dm-character-chip-active': $store.app.filterPrimusCharacter === name }"
+                        @click="$store.app.togglePrimusCharacterFilter(name)"
+                        x-text="name"></button>
+            </template>
+        </div>
+        <div class="dm-character-filters"
+             x-show="$store.app.radiusCharacterFilterOptions.length">
+            <span class="dm-character-filter-label">Radius</span>
+            <button type="button"
+                    class="dm-character-chip"
+                    :class="{ 'dm-character-chip-active': !$store.app.filterRadiusCharacter }"
+                    @click="$store.app.clearRadiusCharacterFilter()">All</button>
+            <template x-for="name in $store.app.radiusCharacterFilterOptions" :key="'radius-' + name">
+                <button type="button"
+                        class="dm-character-chip"
+                        :class="{ 'dm-character-chip-active': $store.app.filterRadiusCharacter === name }"
+                        @click="$store.app.toggleRadiusCharacterFilter(name)"
                         x-text="name"></button>
             </template>
         </div>
@@ -81,6 +97,14 @@
         <div class="dm-summary-item">
             <span class="dm-summary-value" x-text="$store.app.summaryOnline + '/' + $store.app.summaryTotal"></span>
             <span class="dm-summary-label">Online</span>
+        </div>
+        <div class="dm-summary-item">
+            <span class="dm-summary-value" x-text="$store.app.summaryPrimusCount"></span>
+            <span class="dm-summary-label">Primus</span>
+        </div>
+        <div class="dm-summary-item">
+            <span class="dm-summary-value" x-text="$store.app.summaryRadiusCount"></span>
+            <span class="dm-summary-label">Radius</span>
         </div>
         <div class="dm-summary-item dm-summary-warn" x-show="$store.app.summaryLowBattery">
             <span class="dm-summary-value" x-text="$store.app.summaryLowBattery"></span>
@@ -182,7 +206,7 @@
     </div>
 
     <div class="device-manager-empty text-muted"
-         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterCharacterName)"
+         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterPrimusCharacter || $store.app.filterRadiusCharacter)"
          x-cloak>
         No devices match the selected character.
     </div>
@@ -193,26 +217,32 @@
         No devices found yet. Device Manager scans the network automatically every 20 seconds — use "Sync now" for an immediate check.
     </div>
 
-    <template x-for="section in $store.app.sectionList" :key="section.key">
-        <div class="dm-section" x-show="section.entries.length" x-cloak>
-            <div class="dm-section-header">
-                <span class="dm-section-title" x-text="section.label"></span>
-                <span class="dm-section-count" x-text="section.entries.length"></span>
+    <template x-for="product in $store.app.productSectionList" :key="product.key">
+        <div class="dm-product-section" x-cloak>
+            <div class="dm-product-header">
+                <span class="dm-product-title" x-text="product.label"></span>
+                <span class="dm-product-count" x-text="product.count"></span>
             </div>
-            <div class="device-manager-grid">
-                <template x-for="entry in section.entries" :key="entry._index">
+            <template x-for="section in product.sections" :key="product.key + '-' + section.key">
+                <div class="dm-section" x-show="section.entries.length" x-cloak>
+                    <div class="dm-section-header">
+                        <span class="dm-section-title" x-text="section.label"></span>
+                        <span class="dm-section-count" x-text="section.entries.length"></span>
+                    </div>
+                    <div class="device-manager-grid">
+                        <template x-for="entry in section.entries" :key="entry._index">
                     <div class="device-card dm-card" :class="'dm-card-' + entry._section">
 
                         <!-- Primary heading: Character Name, always editable (placeholder when unset) -->
                         <div class="dm-heading">
-                            <template x-if="$store.conn.showInfoEnabled() && !$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                            <template x-if="$store.conn.showInfoEnabled(entry.dev) && !$store.conn.isEditingShowInfo(entry._index, 'character_name')">
                                 <h3 class="dm-title"
                                     :class="{ 'dm-title-fallback': !entry.dev.character_name }"
                                     @click="!$store.app.mobileView && $store.conn.startShowInfoEdit(entry._index, 'character_name')"
                                     :title="$store.conn.showInfoHint('character_name')"
                                     x-text="$store.conn.showInfoDisplay(entry.dev, 'character_name')"></h3>
                             </template>
-                            <template x-if="$store.conn.showInfoEnabled() && $store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                            <template x-if="$store.conn.showInfoEnabled(entry.dev) && $store.conn.isEditingShowInfo(entry._index, 'character_name')">
                                 <input class="dm-title-input" type="text" maxlength="64"
                                        x-model="$store.conn.showInfoEditValue"
                                        @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
@@ -220,14 +250,14 @@
                                        @blur="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
                                        x-init="$nextTick(() => { $el.focus(); $el.select() })">
                             </template>
-                            <template x-if="!$store.conn.showInfoEnabled() && $store.conn.renamingDevice !== entry._index">
+                            <template x-if="!$store.conn.showInfoEnabled(entry.dev) && $store.conn.renamingDevice !== entry._index">
                                 <h3 class="dm-title dm-title-fallback"
                                     @click="!$store.app.mobileView && $store.conn.startRename(entry._index)"
                                     :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) || $store.app.mobileView }"
                                     :title="$store.conn.renameHint(entry.dev)"
                                     x-text="entry.dev.name"></h3>
                             </template>
-                            <template x-if="!$store.conn.showInfoEnabled() && $store.conn.renamingDevice === entry._index">
+                            <template x-if="!$store.conn.showInfoEnabled(entry.dev) && $store.conn.renamingDevice === entry._index">
                                 <input class="dm-title-input" type="text" maxlength="17"
                                        x-model="$store.conn.renameValue"
                                        @keydown.enter="$store.conn.finishRename(entry._index)"
@@ -248,7 +278,7 @@
                         </div>
 
                         <!-- Performer Name subheading -->
-                        <div class="dm-subheading" x-show="$store.conn.showInfoEnabled()" x-cloak>
+                        <div class="dm-subheading" x-show="$store.conn.showInfoEnabled(entry.dev)" x-cloak>
                             <template x-if="!$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
                                 <button type="button" class="dm-subtitle-value"
                                         :class="{ 'device-identity-empty': !entry.dev.performer_name }"
@@ -272,7 +302,7 @@
                         </div>
 
                         <!-- Device (technical) name -->
-                        <div class="dm-device-name-row" x-show="$store.conn.showInfoEnabled()">
+                        <div class="dm-device-name-row" x-show="$store.conn.showInfoEnabled(entry.dev)">
                             <span class="device-config-label">Device</span>
                             <template x-if="$store.conn.renamingDevice !== entry._index">
                                 <span class="dm-footer-name-value"
@@ -304,7 +334,7 @@
                                   :title="$store.conn.batteryTitle(entry.dev)"
                                   x-text="$store.conn.batteryLabel(entry.dev)"></span>
                             <span class="audio-badge"
-                                  x-show="$store.app.product === 'radius' && entry.dev.is_radius"
+                                  x-show="$store.app.isRadiusDevice(entry.dev)"
                                   title="Radius audio node">&#9834;</span>
                         </div>
 
@@ -316,7 +346,7 @@
                                     :title="$store.app.isCardExpanded(entry._index) ? $store.conn.ipConfigHint(entry.dev) : 'Expand card to configure'"
                                     @click="$store.conn.ipConfigDevice === entry._index ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(entry._index)"
                                     x-text="entry.dev.ip"></button>
-                            <span class="dm-universe" x-show="$store.app.product === 'primus'"
+                            <span class="dm-universe" x-show="!$store.app.isRadiusDevice(entry.dev)"
                                   x-text="'U' + (entry.dev.base_universe ?? 0)"></span>
                             <span class="device-network-badge"
                                   :class="$store.conn.networkModeClass(entry.dev)"
@@ -351,7 +381,7 @@
 
                         <!-- Receive Mode -->
                         <div class="dm-row dm-row-receive"
-                             x-show="$store.app.product === 'primus' && $store.app.isCardExpanded(entry._index)"
+                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
                              :title="$store.conn.receiveModeHint(entry.dev)"
                              x-init="$store.conn.initReceiveConfigDrafts(entry._index)">
                             <span class="device-config-label">Receive</span>
@@ -379,7 +409,7 @@
 
                         <!-- Outputs + Resolution -->
                         <div class="device-outputs dm-outputs-table"
-                             x-show="$store.app.product === 'primus' && $store.app.isCardExpanded(entry._index)"
+                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
                              :title="$store.conn.outputConfigHint(entry.dev)">
                             <template x-for="(o, oi) in entry.dev.outputs" :key="oi">
                                 <div class="device-output-group" x-init="$store.conn.initVirtualConfigDrafts(entry._index)">
@@ -424,16 +454,16 @@
                         <!-- Footer: secondary metadata -->
                         <div class="device-footer-actions dm-footer">
                             <div class="dm-footer-meta">
-                                <span class="device-profile" x-text="$store.conn.monitorProductLabel()"></span>
+                                <span class="device-profile" x-text="$store.conn.monitorProductLabel(entry.dev)"></span>
                                 <span class="device-fw-version"
-                                      x-show="$store.app.product === 'primus' && $store.conn.firmwareLabel(entry.dev) !== '—'"
+                                      x-show="$store.conn.firmwareLabel(entry.dev) !== '—'"
                                       x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
                                 <button type="button" class="btn btn-sm dm-hello-btn"
-                                        x-show="$store.app.product === 'primus' ? $store.conn.canHelloDevice(entry.dev) : true"
-                                        :title="$store.app.product === 'primus' ? $store.conn.helloHint(entry.dev) : 'Send test tone'"
+                                        x-show="$store.conn.canHelloDevice(entry.dev)"
+                                        :title="$store.conn.helloHint(entry.dev)"
                                         @click="$store.conn.helloDevice(entry._index)">Hello</button>
                                 <span class="device-group-tag text-sm text-muted"
-                                      x-show="$store.app.product === 'primus' && $store.app.deviceGroupNames(entry.dev)"
+                                      x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.deviceGroupNames(entry.dev)"
                                       x-text="$store.app.deviceGroupNames(entry.dev)"></span>
                                 <span class="device-transport-error" x-show="entry.dev.transport_error" x-text="entry.dev.transport_error"></span>
                             </div>
@@ -443,13 +473,15 @@
                         </div>
                     </div>
                 </template>
-            </div>
+                    </div>
+                </div>
+            </template>
         </div>
     </template>
 </div>
 
 <!-- ==================== FIRMWARE ==================== -->
-<div class="dm-firmware-main main-content" x-data="firmwareUploader" x-show="$store.app.mode === 'firmware'">
+<div class="dm-firmware-main main-content" x-data="firmwareUploader" x-init="multiFamily = true; family = 'primus'" x-show="$store.app.mode === 'firmware'">
     <div class="flex justify-between items-center mb-4 firmware-title-row">
         <div>
             <h2 class="section-title" style="margin:0">Firmware</h2>
@@ -497,8 +529,12 @@
         </div>
         <div class="firmware-version-note text-sm text-muted" x-show="updateError" x-text="updateError"></div>
 
+        <div class="sub-mode-toggle firmware-family-toggle" style="margin-top:14px" x-show="multiFamily" x-cloak>
+            <button type="button" class="sub-mode-btn" :class="{ active: family === 'primus' }" :disabled="running" @click="setFamily('primus')">Primus</button>
+            <button type="button" class="sub-mode-btn" :class="{ active: family === 'radius' }" :disabled="running" @click="setFamily('radius')">Radius</button>
+        </div>
         <div class="sub-mode-toggle firmware-profile-toggle" style="margin-top:14px">
-            <template x-for="item in profiles" :key="item.id">
+            <template x-for="item in familyProfiles" :key="item.id">
                 <button class="sub-mode-btn" :class="{ active: profile === item.id }" :disabled="running" @click="setProfile(item.id)">
                     <span x-text="item.label"></span>
                 </button>
@@ -557,7 +593,7 @@
         </div>
         <div class="form-group">
             <label class="form-label">Device Name</label>
-            <input class="form-input" type="text" maxlength="17" x-model="deviceName" :disabled="running || !nameEnabled" placeholder="PrimusV3" autocomplete="off">
+            <input class="form-input" type="text" maxlength="17" x-model="deviceName" :disabled="running || !nameEnabled" :placeholder="deviceNamePlaceholder" autocomplete="off">
         </div>
         <div class="firmware-form-grid">
             <div class="form-group">
@@ -588,12 +624,12 @@
                 <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
             </div>
         </div>
-        <div class="firmware-ip-mode-row" role="group" aria-label="Default receive mode">
+        <div class="firmware-ip-mode-row" role="group" aria-label="Default receive mode" x-show="showReceiveModeOverrides" x-cloak>
             <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'keep' }" :disabled="running" @click="receiveModeMode = 'keep'">Keep Receive Default</button>
             <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'split' }" :disabled="running" @click="receiveModeMode = 'split'">Split</button>
             <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'combined' }" :disabled="running" @click="receiveModeMode = 'combined'">Combined</button>
         </div>
-        <div class="form-group" x-show="receiveModeMode !== 'keep'" x-cloak>
+        <div class="form-group" x-show="showReceiveModeOverrides && receiveModeMode !== 'keep'" x-cloak>
             <label class="form-label">Base Universe</label>
             <input class="form-input" type="number" min="0" max="32767" x-model.number="receiveBaseUniverse" :disabled="running" placeholder="0">
             <div class="text-sm text-muted" style="margin-top:4px" x-show="receiveModeMode === 'combined'">Combined mode supports at most 170 pixels across both outputs.</div>

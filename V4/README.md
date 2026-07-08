@@ -33,6 +33,8 @@ python3 V4/sender/run.py --product primus --frontend devices
 
 DeviceManager attaches to an already-running PrimusCentral/DeviceManager server instead of starting a second one; if none is running it starts its own `primus`-product server in `monitor_only` mode, so it never auto-connects to or drives Art-Net output on discovered devices — safe to run on the same network as a show already being driven by another sender or console.
 
+**Mixed Primus + Radius monitoring:** DeviceManager discovers both `PV3CAP1` Primus nodes and `PVRAD1` Radius nodes in the same grid. Radius devices are tagged `is_radius: true`, never receive ArtDmx, and use simplified monitor cards (no universe/receive-mode/output fields). Character and performer names for Radius devices persist in `.radius_state.json` via the shared `show_info_store.py` path. See [RADIUS_INTEGRATION.md](RADIUS_INTEGRATION.md).
+
 **Mobile / Tablet View:** when DeviceManager starts its own fresh backend (the default `python3 V4/sender/run_devices.py` case above), it also binds the HTTP server to the local network (`0.0.0.0`) instead of loopback-only, so a phone or tablet on the same network can view a live, read-only copy of the Monitor tab. Scan the QR code under Settings > "Mobile / Tablet View" to open it — no internet connection is needed on either device. Expect a one-time OS firewall prompt the first time this runs. This does not apply when DeviceManager attaches to an already-running PrimusCentral/RadiusCentral server, which stays loopback-only.
 
 ```bash
@@ -50,8 +52,8 @@ V4/
   Arduino/
     primusV3_receiver/   Primus LED firmware (profiles v1, v2, v3)
     upload.sh            Primus compile/upload script
-    radius_receiver/     Radius V1 audio firmware
-    radius_upload.sh     Radius compile/upload script
+    radius_receiver/     Radius audio firmware (unified V1 + V2 sketch)
+    radius_upload.sh     Radius compile/upload script (-rv1 / -rv2)
   build_sender_app.py  PyInstaller packaging (--product primus|radius)
   ARCHITECTURE.md      Unified backend roadmap
   assets/              App icon
@@ -82,13 +84,13 @@ Override with `RADIUSV4_DATA_DIR`, `PRIMUSV3_DATA_DIR`, or `* _USE_APP_DATA=1`.
 
 **PrimusCentral** (`--product primus`): Look Designer, Cue Controller, Firmware, Settings
 
-**RadiusCentral** (`--product radius`): Audio, Audio Cues, Cue Map, Net Log, Firmware, Settings
+**RadiusCentral** (`--product radius`): Audio, Audio Cues, Cue Map, Net Log, Firmware, Settings. Device sidebar supports character/performer identity editing; show-info persists in `.radius_state.json`.
 
-**DeviceManager** (`--frontend devices`, `primus` backend): Monitor (auto-syncing device grid, bulk rename/apply), Firmware, Settings — no Look Designer/Cue Controller, no manual connect/disconnect. Runs `monitor_only` whenever it starts its own backend, so periodic sync never auto-connects to or drives Art-Net output on discovered devices.
+**DeviceManager** (`--frontend devices`, `primus` backend): Monitor (auto-syncing mixed Primus/Radius device grid, bulk rename/apply), Firmware (mixed Primus/Radius upload via `scope=mixed`), Settings — no Look Designer/Cue Controller, no manual connect/disconnect. Runs `monitor_only` whenever it starts its own backend. See [RADIUS_INTEGRATION.md](RADIUS_INTEGRATION.md).
 
 Each app serves its own frontend at `/primus`, `/radius`, or `/devices` on the **same unified server** — shared `/css/` and `/js/` assets, separate Alpine SPAs. DeviceManager reuses the same `device-conn.js` device-action store as PrimusCentral/RadiusCentral.
 
-Shared: **Firmware** (product-specific profiles), **Settings** (network)
+Shared: **Firmware** (product-specific profiles in PrimusCentral/RadiusCentral; DeviceManager uses `scope=mixed` for all five board profiles), **Settings** (network)
 
 ## Push sync workflow
 
@@ -130,16 +132,18 @@ See [PACKAGING.md](PACKAGING.md) for signing and release details.
 |--------|------|---------|
 | 0x6000 | ArtAddress | Rename via NVS |
 | 0x8200 | ArtIPConfig | Static IP / DHCP |
+| 0x8210 | ArtShowInfo | Character/performer name (Radius 4.1+ and Primus 3.10+) |
 | 0x8300 | ArtAudioCmd | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
 | 0x8301 | ArtFtpCmd | Start/stop FTP server |
+| 0x8302 | ArtAudioStatus | Playback status from receiver (Radius V2 display path) |
 
 **ArtAudioCmd commands:** 0=stop, 1=play, 2=loop, 3=pause, 4=volume, 5=test tone, 6=play cue number, 7=loop cue number. Optional filename (null-terminated ASCII, max 32 bytes) followed by optional uint16 LE duration seconds (0 = full file).
 
 **Device cue map:** `/cues.json` on SD card (loaded at boot). Keys are cue numbers as strings; values are either a WAV filename string or `{"file": "name.wav", "duration": 30}`. Max 64 entries. Edited from the Cue Map panel or via `GET/POST /api/audio/cue_map`.
 
-Capability tag: `PVRAD1|B:v1|IP:D|F:RA`
+Capability tag: `PVRAD1|B:v1|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info. Optional Marius tokens `MC:` / `MP:` on V2 when configured.
 
-Track telemetry on UDP 6455: magic `PTR` + playback state + track name.
+Track telemetry on UDP 6455: magic `PTR` + playback state + track name. FPS telemetry uses the shared `PFP` packet format on the same port.
 
 ## Firmware
 
@@ -154,9 +158,12 @@ Firmware **3.11+** adds per-output **virtual send resolution** (ArtVirtualResolu
 ./V4/Arduino/upload.sh -v3 --auto
 ```
 
-**Radius audio** (VS1053 + SD):
+**Radius audio** (VS1053 + SD, unified V1/V2 sketch):
 
 ```bash
-./V4/Arduino/radius_upload.sh --board radius_v1 --compile
+./V4/Arduino/radius_upload.sh -rv1 --compile
+./V4/Arduino/radius_upload.sh -rv2 --compile
 ./V4/Arduino/radius_upload.sh --board radius_v1 -ssid "MyRouter" -pw "secret" --auto
 ```
+
+DeviceManager mixed firmware upload uses `GET /api/firmware/status?scope=mixed` and `POST /api/firmware/jobs` with `"scope": "mixed"` to access all Primus and Radius board profiles from one panel. PrimusCentral and RadiusCentral keep product-scoped firmware panels unchanged.
