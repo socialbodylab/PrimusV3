@@ -92,14 +92,24 @@ void printIpBytes(const uint8_t* bytes) {
 }
 
 void loadStoredDeviceName() {
+  bool applyOverrides = false;
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+  applyOverrides = prefs.getString("fwOvrBuild", "") != String(PRIMUSV3_OVERRIDE_BUILD_ID);
+#endif
+
 #ifdef PRIMUSV3_FORCE_DEVICE_NAME_OVERRIDE
-  strncpy(customShortName, DEVICE_SHORT_NAME, sizeof(customShortName) - 1);
-  customShortName[sizeof(customShortName) - 1] = '\0';
-  hasCustomName = customShortName[0] != '\0';
-  if (hasCustomName) {
-    prefs.putString("shortName", customShortName);
+  if (applyOverrides) {
+    strncpy(customShortName, DEVICE_SHORT_NAME, sizeof(customShortName) - 1);
+    customShortName[sizeof(customShortName) - 1] = '\0';
+    hasCustomName = customShortName[0] != '\0';
+    if (hasCustomName) {
+      prefs.putString("shortName", customShortName);
+    }
+    Serial.print("Firmware name override seeded: \"");
+    Serial.print(customShortName);
+    Serial.println("\"");
+    return;
   }
-  return;
 #endif
 
   if (prefs.isKey("shortName")) {
@@ -107,44 +117,76 @@ void loadStoredDeviceName() {
     if (stored.length() > 0) {
       stored.toCharArray(customShortName, sizeof(customShortName));
       hasCustomName = true;
+      Serial.print("Loaded custom name: \"");
+      Serial.print(customShortName);
+      Serial.println("\"");
     }
   }
 }
 
 void loadStoredShowInfo() {
+  bool applyOverrides = false;
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+  applyOverrides = prefs.getString("fwOvrBuild", "") != String(PRIMUSV3_OVERRIDE_BUILD_ID);
+#endif
+
 #ifdef PRIMUSV3_FORCE_CHARACTER_NAME_OVERRIDE
-  strncpy(showCharacterName, DEFAULT_SHOW_CHARACTER_NAME, SHOW_INFO_FIELD_LEN);
-  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
-  prefs.putString("characterName", showCharacterName);
-#else
-  if (prefs.isKey("characterName")) {
-    String stored = prefs.getString("characterName", "");
-    stored.toCharArray(showCharacterName, sizeof(showCharacterName));
-  }
-#endif
-
-#ifdef PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE
-  strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
-  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
-  prefs.putString("performerName", showPerformerName);
-#else
-  if (prefs.isKey("performerName")) {
-    String stored = prefs.getString("performerName", "");
-    stored.toCharArray(showPerformerName, sizeof(showPerformerName));
-  }
-#endif
-
-  if (!prefs.isKey("characterName")) {
-    const char* source = hasCustomName && customShortName[0] != '\0'
-      ? customShortName : DEVICE_SHORT_NAME;
-    strncpy(showCharacterName, source, SHOW_INFO_FIELD_LEN);
+  if (applyOverrides) {
+    strncpy(showCharacterName, DEFAULT_SHOW_CHARACTER_NAME, SHOW_INFO_FIELD_LEN);
     showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
     prefs.putString("characterName", showCharacterName);
+    Serial.print("Firmware character name override seeded: \"");
+    Serial.print(showCharacterName);
+    Serial.println("\"");
+  } else
+#endif
+  {
+    if (prefs.isKey("characterName")) {
+      String stored = prefs.getString("characterName", "");
+      stored.toCharArray(showCharacterName, sizeof(showCharacterName));
+    }
   }
-  if (!prefs.isKey("performerName")) {
+
+#ifdef PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE
+  if (applyOverrides) {
     strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
     showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
     prefs.putString("performerName", showPerformerName);
+    Serial.print("Firmware performer name override seeded: \"");
+    Serial.print(showPerformerName);
+    Serial.println("\"");
+  } else
+#endif
+  {
+    if (prefs.isKey("performerName")) {
+      String stored = prefs.getString("performerName", "");
+      stored.toCharArray(showPerformerName, sizeof(showPerformerName));
+    }
+  }
+
+  if (applyOverrides) {
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+    prefs.putString("fwOvrBuild", String(PRIMUSV3_OVERRIDE_BUILD_ID));
+    Serial.println("Firmware overrides applied for this build.");
+#endif
+  } else {
+    if (!prefs.isKey("characterName")) {
+      showCharacterName[0] = '\0';
+      prefs.putString("characterName", showCharacterName);
+    }
+    if (!prefs.isKey("performerName")) {
+      strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
+      showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+      prefs.putString("performerName", showPerformerName);
+    }
+  }
+
+  if (showCharacterName[0] != '\0' || showPerformerName[0] != '\0') {
+    Serial.print("Loaded show info: character=\"");
+    Serial.print(showCharacterName);
+    Serial.print("\" performer=\"");
+    Serial.print(showPerformerName);
+    Serial.println("\"");
   }
 }
 
@@ -182,16 +224,12 @@ void loadStoredNetworkConfig() {
 }
 
 void buildNodeReport(char* reportBuf, size_t reportLen) {
-  int pos = snprintf(reportBuf, reportLen, "#0001 [%04d] %s|B:%s",
+  int pos = snprintf(reportBuf, reportLen, "#0001 [%04d] OK|%s|B:%s",
                      (int)packetCount, NODE_CAPS_PREFIX, NODE_CAPS_BOARD);
   if (pos < 0 || (size_t)pos >= reportLen) return;
 
   if (useStaticIP) {
-    pos += snprintf(reportBuf + pos, reportLen - pos,
-                    "|IP:S:%u.%u.%u.%u:%u.%u.%u.%u:%u.%u.%u.%u",
-                    storedIP[0], storedIP[1], storedIP[2], storedIP[3],
-                    storedGateway[0], storedGateway[1], storedGateway[2], storedGateway[3],
-                    storedSubnet[0], storedSubnet[1], storedSubnet[2], storedSubnet[3]);
+    pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:S");
   } else {
     pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:D");
   }
@@ -396,6 +434,9 @@ void handleArtAddress(uint8_t* data, uint16_t len) {
     hasCustomName = true;
     prefs.putString("shortName", customShortName);
     setDisplayName(customShortName);
+    Serial.print("ArtAddress rename stored: \"");
+    Serial.print(customShortName);
+    Serial.println("\"");
   }
 
   broadcastArtPollReply();
@@ -481,6 +522,12 @@ void handleArtShowInfo(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
   prefs.putString("characterName", showCharacterName);
   prefs.putString("performerName", showPerformerName);
+
+  Serial.print("ArtShowInfo write stored: character=\"");
+  Serial.print(showCharacterName);
+  Serial.print("\" performer=\"");
+  Serial.print(showPerformerName);
+  Serial.println("\"");
 
   sendShowInfoReply(remoteAddr);
   broadcastArtPollReply();

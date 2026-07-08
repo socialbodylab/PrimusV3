@@ -502,6 +502,8 @@ create_build_override_header() {
 
   {
     printf '#pragma once\n'
+    OVERRIDE_BUILD_ID="$(date +%s)-${RANDOM:-0}-$$"
+    printf '#define PRIMUSV3_OVERRIDE_BUILD_ID %s\n' "$(c_string_literal "$OVERRIDE_BUILD_ID")"
     if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
       printf '#define PRIMUSV3_FORCE_DEVICE_NAME_OVERRIDE 1\n'
       printf '#define DEVICE_SHORT_NAME %s\n' "$(c_string_literal "$DEVICE_NAME_OVERRIDE")"

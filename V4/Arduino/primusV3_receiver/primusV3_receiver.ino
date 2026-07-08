@@ -115,17 +115,24 @@ uint8_t storedGateway[4] = {0};
 uint8_t storedSubnet[4]  = {0};
 
 void loadStoredDeviceName() {
+  bool applyOverrides = false;
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+  applyOverrides = prefs.getString("fwOvrBuild", "") != String(PRIMUSV3_OVERRIDE_BUILD_ID);
+#endif
+
 #ifdef PRIMUSV3_FORCE_DEVICE_NAME_OVERRIDE
-  strncpy(customShortName, DEVICE_SHORT_NAME, sizeof(customShortName) - 1);
-  customShortName[sizeof(customShortName) - 1] = '\0';
-  hasCustomName = customShortName[0] != '\0';
-  if (hasCustomName) {
-    prefs.putString("shortName", customShortName);
-    Serial.print("Firmware name override stored: \"");
+  if (applyOverrides) {
+    strncpy(customShortName, DEVICE_SHORT_NAME, sizeof(customShortName) - 1);
+    customShortName[sizeof(customShortName) - 1] = '\0';
+    hasCustomName = customShortName[0] != '\0';
+    if (hasCustomName) {
+      prefs.putString("shortName", customShortName);
+    }
+    Serial.print("Firmware name override seeded: \"");
     Serial.print(customShortName);
     Serial.println("\"");
+    return;
   }
-  return;
 #endif
 
   if (prefs.isKey("shortName")) {
@@ -141,55 +148,73 @@ void loadStoredDeviceName() {
 }
 
 void loadStoredShowInfo() {
+  bool applyOverrides = false;
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+  applyOverrides = prefs.getString("fwOvrBuild", "") != String(PRIMUSV3_OVERRIDE_BUILD_ID);
+#endif
+
 #ifdef PRIMUSV3_FORCE_CHARACTER_NAME_OVERRIDE
-  strncpy(showCharacterName, DEFAULT_SHOW_CHARACTER_NAME, SHOW_INFO_FIELD_LEN);
-  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
-  prefs.putString("characterName", showCharacterName);
-  Serial.print("Firmware character name override stored: \"");
-  Serial.print(showCharacterName);
-  Serial.println("\"");
-#else
-  if (prefs.isKey("characterName")) {
-    String stored = prefs.getString("characterName", "");
-    stored.toCharArray(showCharacterName, sizeof(showCharacterName));
-  }
-#endif
-
-#ifdef PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE
-  strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
-  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
-  prefs.putString("performerName", showPerformerName);
-  Serial.print("Firmware performer name override stored: \"");
-  Serial.print(showPerformerName);
-  Serial.println("\"");
-#else
-  if (prefs.isKey("performerName")) {
-    String stored = prefs.getString("performerName", "");
-    stored.toCharArray(showPerformerName, sizeof(showPerformerName));
-  }
-#endif
-
-  // First boot (or pre-show-info NVS): seed editable defaults so Device Manager
-  // cards are readable before anyone sets show metadata manually. V1 boards use
-  // "Character"/"Performer" unless the device has a custom short name or was
-  // flashed with a compile-time DEVICE_SHORT_NAME override.
-  if (!prefs.isKey("characterName")) {
-    const char* source = DEVICE_SHORT_NAME;
-    if (hasCustomName && customShortName[0] != '\0') {
-      source = customShortName;
-    } else if (strcmp(DEVICE_SHORT_NAME, "PrimusV3") != 0) {
-      source = DEVICE_SHORT_NAME;
-    } else if (DEFAULT_SHOW_CHARACTER_NAME[0] != '\0') {
-      source = DEFAULT_SHOW_CHARACTER_NAME;
-    }
-    strncpy(showCharacterName, source, SHOW_INFO_FIELD_LEN);
+  if (applyOverrides) {
+    strncpy(showCharacterName, DEFAULT_SHOW_CHARACTER_NAME, SHOW_INFO_FIELD_LEN);
     showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
     prefs.putString("characterName", showCharacterName);
+    Serial.print("Firmware character name override seeded: \"");
+    Serial.print(showCharacterName);
+    Serial.println("\"");
+  } else
+#endif
+  {
+    if (prefs.isKey("characterName")) {
+      String stored = prefs.getString("characterName", "");
+      stored.toCharArray(showCharacterName, sizeof(showCharacterName));
+    }
   }
-  if (!prefs.isKey("performerName")) {
+
+#ifdef PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE
+  if (applyOverrides) {
     strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
     showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
     prefs.putString("performerName", showPerformerName);
+    Serial.print("Firmware performer name override seeded: \"");
+    Serial.print(showPerformerName);
+    Serial.println("\"");
+  } else
+#endif
+  {
+    if (prefs.isKey("performerName")) {
+      String stored = prefs.getString("performerName", "");
+      stored.toCharArray(showPerformerName, sizeof(showPerformerName));
+    }
+  }
+
+  if (applyOverrides) {
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+    prefs.putString("fwOvrBuild", String(PRIMUSV3_OVERRIDE_BUILD_ID));
+    Serial.println("Firmware overrides applied for this build.");
+#endif
+  } else {
+    // First boot (or pre-show-info NVS): seed editable defaults so Device Manager
+    // cards are readable before anyone sets show metadata manually. V1 boards use
+    // "Character"/"Performer" unless the device has a custom short name or was
+    // flashed with a compile-time DEVICE_SHORT_NAME override.
+    if (!prefs.isKey("characterName")) {
+      const char* source = DEVICE_SHORT_NAME;
+      if (hasCustomName && customShortName[0] != '\0') {
+        source = customShortName;
+      } else if (strcmp(DEVICE_SHORT_NAME, "PrimusV3") != 0) {
+        source = DEVICE_SHORT_NAME;
+      } else if (DEFAULT_SHOW_CHARACTER_NAME[0] != '\0') {
+        source = DEFAULT_SHOW_CHARACTER_NAME;
+      }
+      strncpy(showCharacterName, source, SHOW_INFO_FIELD_LEN);
+      showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+      prefs.putString("characterName", showCharacterName);
+    }
+    if (!prefs.isKey("performerName")) {
+      strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
+      showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+      prefs.putString("performerName", showPerformerName);
+    }
   }
 
   if (showCharacterName[0] != '\0' || showPerformerName[0] != '\0') {

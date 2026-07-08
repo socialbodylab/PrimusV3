@@ -9,7 +9,7 @@
 
 #define FIRMWARE_VERSION_H     4
 #define FIRMWARE_VERSION_L     1
-#define FIRMWARE_VERSION_PATCH 0
+#define FIRMWARE_VERSION_PATCH 1
 
 #define _FW_STR_HELPER(x) #x
 #define _FW_STR(x)        _FW_STR_HELPER(x)
@@ -90,15 +90,21 @@
 #define SHOW_INFO_MODE_RESPONSE    2
 #define SHOW_INFO_PACKET_LEN       143
 
+#ifndef DEVICE_SHORT_NAME
 #define DEVICE_SHORT_NAME  "Radius"
+#endif
 #if TARGET_BOARD == BOARD_FEATHER_ESP32
 #define DEVICE_LONG_NAME   "Radius Central V1"
 #else
 #define DEVICE_LONG_NAME   "Radius Central V2"
 #endif
 
+#ifndef DEFAULT_SHOW_CHARACTER_NAME
 #define DEFAULT_SHOW_CHARACTER_NAME ""
+#endif
+#ifndef DEFAULT_SHOW_PERFORMER_NAME
 #define DEFAULT_SHOW_PERFORMER_NAME "Performer"
+#endif
 
 #define OEM_CODE           0xFFFF
 #define ESTA_CODE          0x0000
