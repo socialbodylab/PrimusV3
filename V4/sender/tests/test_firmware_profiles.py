@@ -157,6 +157,44 @@ class FirmwareProfileTests(unittest.TestCase):
         finally:
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
 
+    def test_build_command_includes_show_info_overrides(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        try:
+            manager = firmware.FirmwareJobManager()
+            cmd = manager.build_command({
+                "action": "compile",
+                "profile": "v3",
+                "character_name": "Ensemble Lead",
+                "performer_name": "Alex",
+            })
+            self.assertIn("--character-name", cmd.command)
+            self.assertIn("Ensemble Lead", cmd.command)
+            self.assertIn("--performer-name", cmd.command)
+            self.assertIn("Alex", cmd.command)
+            self.assertEqual(cmd.metadata["overrides"]["character_name"], "Ensemble Lead")
+            self.assertEqual(cmd.metadata["overrides"]["performer_name"], "Alex")
+            self.assertTrue(cmd.metadata["has_overrides"])
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
+    def test_radius_build_command_includes_show_info_overrides(self):
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "radius"
+        try:
+            manager = firmware.FirmwareJobManager()
+            cmd = manager.build_command({
+                "action": "compile",
+                "profile": "radius_v1",
+                "character_name": "Narrator",
+                "performer_name": "Jordan",
+            })
+            self.assertIn("radius_upload.sh", cmd.command[1])
+            self.assertIn("--character-name", cmd.command)
+            self.assertIn("Narrator", cmd.command)
+            self.assertIn("--performer-name", cmd.command)
+            self.assertIn("Jordan", cmd.command)
+        finally:
+            os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
+
     def test_parse_ports_json_output_tolerates_leading_log_lines(self):
         payload = {"ports": [{"address": "/dev/cu.usbserial-1", "candidate": True}]}
         raw = [

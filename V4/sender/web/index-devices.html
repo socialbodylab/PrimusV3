@@ -180,26 +180,6 @@
             </div>
             <button class="btn btn-sm btn-primary" @click="$store.app.applyBulkOutputType()">Apply Output Type</button>
         </div>
-        <div class="dm-bulk-form" style="margin-top:10px">
-            <div class="form-group compact">
-                <label class="form-label">Receive Mode</label>
-                <select class="form-input form-input-sm" x-model="$store.app.bulkReceiveMode">
-                    <option value="split">Split</option>
-                    <option value="combined">Combined</option>
-                </select>
-            </div>
-            <div class="form-group compact">
-                <label class="form-label">Start Base Universe</label>
-                <input class="form-input form-input-sm" type="number" min="0" max="32767"
-                       x-model.number="$store.app.bulkReceiveBase">
-            </div>
-            <div class="form-group compact">
-                <label class="form-label">Increment per device</label>
-                <input class="form-input form-input-sm" type="number" min="0"
-                       x-model.number="$store.app.bulkReceiveStep">
-            </div>
-            <button class="btn btn-sm btn-primary" @click="$store.app.applyBulkReceiveMode()">Apply Receive Mode</button>
-        </div>
         <div class="btn-group" style="margin-top:8px">
             <button class="btn btn-sm" @click="$store.app.closeBulkPanel()">Close</button>
         </div>
@@ -326,7 +306,7 @@
                             <span class="dm-status-pill" :class="$store.conn.monitorStatusClass(entry.dev)"
                                   x-text="$store.conn.monitorStatusLabel(entry.dev)"></span>
                             <span class="device-fps" :class="$store.conn.monitorLiveClass(entry.dev)"
-                                  x-show="$store.conn.monitorFpsLabel(entry.dev)"
+                                  x-show="$store.conn.monitorShowFps(entry.dev)"
                                   x-text="$store.conn.monitorFpsLabel(entry.dev)"></span>
                             <span class="device-battery"
                                   x-show="$store.conn.monitorShowBattery(entry.dev)"
@@ -336,6 +316,10 @@
                             <span class="audio-badge"
                                   x-show="$store.app.isRadiusDevice(entry.dev)"
                                   title="Radius audio node">&#9834;</span>
+                            <button type="button" class="btn btn-sm dm-hello-btn"
+                                    x-show="$store.app.isRadiusDevice(entry.dev) && $store.conn.monitorCanHello(entry.dev)"
+                                    :title="$store.conn.helloHint(entry.dev)"
+                                    @click="$store.conn.helloDevice(entry._index)">Hello</button>
                         </div>
 
                         <!-- IP / Universe -->
@@ -459,7 +443,7 @@
                                       x-show="$store.conn.firmwareLabel(entry.dev) !== '—'"
                                       x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
                                 <button type="button" class="btn btn-sm dm-hello-btn"
-                                        x-show="$store.conn.canHelloDevice(entry.dev)"
+                                        x-show="!$store.app.isRadiusDevice(entry.dev) && $store.conn.monitorCanHello(entry.dev)"
                                         :title="$store.conn.helloHint(entry.dev)"
                                         @click="$store.conn.helloDevice(entry._index)">Hello</button>
                                 <span class="device-group-tag text-sm text-muted"
@@ -481,7 +465,7 @@
 </div>
 
 <!-- ==================== FIRMWARE ==================== -->
-<div class="dm-firmware-main main-content" x-data="firmwareUploader" x-init="multiFamily = true; family = 'primus'" x-show="$store.app.mode === 'firmware'">
+<div class="dm-firmware-main main-content" x-data="firmwareUploader" x-init="multiFamily = true; family = 'radius'" x-show="$store.app.mode === 'firmware'">
     <div class="flex justify-between items-center mb-4 firmware-title-row">
         <div>
             <h2 class="section-title" style="margin:0">Firmware</h2>
@@ -507,13 +491,13 @@
     <!-- Step 1: Firmware version + device profile -->
     <div class="output-section firmware-section dm-firmware-step">
         <div class="output-header">
-            <span class="output-name">Step 1 — Firmware Version &amp; Profile</span>
-            <div class="firmware-version-actions">
+            <span class="output-name">Step 1 — <span x-text="activeFamilyLabel"></span> Firmware Profile</span>
+            <div class="firmware-version-actions" x-show="showPrimusFirmwareUpdates" x-cloak>
                 <button class="btn btn-sm" @click="checkForUpdates(true)" :disabled="running || checkingUpdates">Check for Updates</button>
                 <button class="btn btn-sm btn-primary" x-show="updateAvailable" @click="downloadFirmware()" :disabled="running || checkingUpdates">Download &amp; Install</button>
             </div>
         </div>
-        <div class="firmware-version-grid">
+        <div class="firmware-version-grid" x-show="showPrimusFirmwareUpdates" x-cloak>
             <div class="firmware-version-item">
                 <span class="firmware-version-label">Installed</span>
                 <span class="firmware-version-value" x-text="installedFirmwareLabel()"></span>
@@ -527,7 +511,10 @@
                 <span class="firmware-status-pill firmware-version-status" :class="updateStatusClass()" x-text="updateStatusLabel()"></span>
             </div>
         </div>
-        <div class="firmware-version-note text-sm text-muted" x-show="updateError" x-text="updateError"></div>
+        <div class="firmware-version-note text-sm text-muted" x-show="updateError && showPrimusFirmwareUpdates" x-text="updateError"></div>
+        <div class="firmware-version-note text-sm text-muted" x-show="!showPrimusFirmwareUpdates" x-cloak>
+            Radius firmware is built from <code>V4/Arduino/radius_receiver/</code>. Default WiFi baked into config: OPERADEV / torrentoflight.
+        </div>
 
         <div class="sub-mode-toggle firmware-family-toggle" style="margin-top:14px" x-show="multiFamily" x-cloak>
             <button type="button" class="sub-mode-btn" :class="{ active: family === 'primus' }" :disabled="running" @click="setFamily('primus')">Primus</button>
@@ -590,10 +577,28 @@
                 <input type="checkbox" x-model="wifiEnabled" :disabled="running">
                 <span>Use custom credentials</span>
             </label>
+            <label class="firmware-inline-check">
+                <input type="checkbox" x-model="characterNameEnabled" :disabled="running">
+                <span>Use custom character name</span>
+            </label>
+            <label class="firmware-inline-check">
+                <input type="checkbox" x-model="performerNameEnabled" :disabled="running">
+                <span>Use custom performer name</span>
+            </label>
         </div>
         <div class="form-group">
             <label class="form-label">Device Name</label>
             <input class="form-input" type="text" maxlength="17" x-model="deviceName" :disabled="running || !nameEnabled" :placeholder="deviceNamePlaceholder" autocomplete="off">
+        </div>
+        <div class="firmware-form-grid">
+            <div class="form-group">
+                <label class="form-label">Character Name</label>
+                <input class="form-input" type="text" maxlength="64" x-model="characterName" :disabled="running || !characterNameEnabled" placeholder="Character" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Performer Name</label>
+                <input class="form-input" type="text" maxlength="64" x-model="performerName" :disabled="running || !performerNameEnabled" placeholder="Performer" autocomplete="off">
+            </div>
         </div>
         <div class="firmware-form-grid">
             <div class="form-group">

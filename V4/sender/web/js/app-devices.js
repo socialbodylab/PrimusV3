@@ -132,7 +132,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         isRadiusDevice(dev) {
-            return !!(dev?.is_radius || dev?.capabilities?.device_class === "radius");
+            if (!dev) return false;
+            if (dev.is_radius) return true;
+            const caps = dev.capabilities || {};
+            if (caps.device_class === "radius" || caps.profile === "pvrad1") return true;
+            const name = `${dev.name || ""} ${caps.hardware_label || ""}`.toLowerCase();
+            return name.includes("radius") && !caps.output_config;
         },
 
         deviceProductType(dev) {

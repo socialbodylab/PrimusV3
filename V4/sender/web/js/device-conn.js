@@ -11,7 +11,12 @@ function connProductLabel() {
 }
 
 function isRadiusDevice(dev) {
-    return !!(dev?.is_radius || dev?.capabilities?.device_class === "radius");
+    if (!dev) return false;
+    if (dev.is_radius) return true;
+    const caps = dev.capabilities || {};
+    if (caps.device_class === "radius" || caps.profile === "pvrad1") return true;
+    const name = `${dev.name || ""} ${caps.hardware_label || ""}`.toLowerCase();
+    return name.includes("radius") && !caps.output_config;
 }
 
 document.addEventListener("alpine:init", () => {
@@ -425,6 +430,7 @@ document.addEventListener("alpine:init", () => {
         // for Device Manager's monitoring view — telemetry comes from the UDP 6455
         // listener regardless of connect state, so these don't gate on dev.connected.
         monitorFpsLabel(dev) {
+            if (isRadiusDevice(dev)) return "";
             if (dev?.receiver_online) {
                 if (dev?.receiver_fps != null) {
                     return `${dev.receiver_fps} fps · live`;
@@ -436,6 +442,15 @@ document.addEventListener("alpine:init", () => {
 
         monitorLiveClass(dev) {
             return dev?.receiver_online ? "device-live-ok" : "device-live-warn";
+        },
+
+        monitorShowFps(dev) {
+            return !isRadiusDevice(dev) && !!this.monitorFpsLabel(dev);
+        },
+
+        monitorCanHello(dev) {
+            if (isRadiusDevice(dev)) return true;
+            return this.canHelloDevice(dev);
         },
 
         monitorShowBattery(dev) {

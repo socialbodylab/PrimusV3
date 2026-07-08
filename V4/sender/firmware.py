@@ -456,6 +456,8 @@ class FirmwareJobManager:
         command = ["bash", script_path, "--board", profile]
         secrets = []
         device_name = ""
+        character_name = ""
+        performer_name = ""
         wifi_ssid = ""
         wifi_password_set = False
         ip_override = None
@@ -470,12 +472,14 @@ class FirmwareJobManager:
         elif action == "compile":
             command.append("--compile")
             device_name = self._append_device_name_arg(command, data)
+            character_name, performer_name = self._append_show_info_args(command, data)
             wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
             ip_override = self._append_ip_args(command, data)
             receive_override = self._append_receive_mode_args(command, data, profile)
         elif action == "upload":
             port_mode = self._validate_choice(data.get("port_mode", "auto"), PORT_MODES, "port_mode")
             device_name = self._append_device_name_arg(command, data)
+            character_name, performer_name = self._append_show_info_args(command, data)
             wifi_ssid, wifi_password_set = self._append_wifi_args(command, data, secrets)
             ip_override = self._append_ip_args(command, data)
             receive_override = self._append_receive_mode_args(command, data, profile)
@@ -492,6 +496,8 @@ class FirmwareJobManager:
             action,
             profile,
             device_name=device_name,
+            character_name=character_name,
+            performer_name=performer_name,
             wifi_ssid=wifi_ssid,
             wifi_password_set=wifi_password_set,
             ip_override=ip_override,
@@ -513,6 +519,25 @@ class FirmwareJobManager:
         if device_name:
             command.extend(["--name", device_name])
         return device_name
+
+    def _append_show_info_args(self, command, data):
+        character_name = self._validate_string(
+            data.get("character_name", ""),
+            "character_name",
+            required=False,
+            max_length=64,
+        )
+        performer_name = self._validate_string(
+            data.get("performer_name", ""),
+            "performer_name",
+            required=False,
+            max_length=64,
+        )
+        if character_name:
+            command.extend(["--character-name", character_name])
+        if performer_name:
+            command.extend(["--performer-name", performer_name])
+        return character_name, performer_name
 
     def _append_wifi_args(self, command, data, secrets):
         ssid = self._validate_string(data.get("wifi_ssid", ""), "wifi_ssid", required=False, max_length=64)
@@ -565,10 +590,13 @@ class FirmwareJobManager:
         command.extend(["--universe", str(base_universe)])
         return {"mode": mode, "base_universe": base_universe}
 
-    def _build_metadata(self, action, profile, device_name="", wifi_ssid="", wifi_password_set=False,
+    def _build_metadata(self, action, profile, device_name="", character_name="", performer_name="",
+                        wifi_ssid="", wifi_password_set=False,
                         ip_override=None, receive_override=None, port_mode=None, port=""):
         overrides = {
             "device_name": device_name or None,
+            "character_name": character_name or None,
+            "performer_name": performer_name or None,
             "wifi_ssid": wifi_ssid or None,
             "wifi_password_set": bool(wifi_password_set),
             "ip_mode": (ip_override or {}).get("mode", "keep"),
@@ -584,6 +612,8 @@ class FirmwareJobManager:
             "overrides": overrides,
             "has_overrides": bool(
                 overrides["device_name"]
+                or overrides["character_name"]
+                or overrides["performer_name"]
                 or overrides["wifi_ssid"]
                 or overrides["wifi_password_set"]
                 or overrides["ip_mode"] != "keep"
@@ -606,6 +636,10 @@ class FirmwareJobManager:
             parts = []
             if overrides.get("device_name"):
                 parts.append(f"device name '{overrides['device_name']}'")
+            if overrides.get("character_name"):
+                parts.append(f"character name '{overrides['character_name']}'")
+            if overrides.get("performer_name"):
+                parts.append(f"performer name '{overrides['performer_name']}'")
             if overrides.get("wifi_ssid"):
                 parts.append(f"WiFi SSID '{overrides['wifi_ssid']}'")
             if overrides.get("wifi_password_set"):

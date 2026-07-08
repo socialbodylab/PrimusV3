@@ -579,6 +579,21 @@ def _capabilities_from_node(node_info):
     return _normalize_device_capabilities(capabilities)
 
 
+def _is_radius_capabilities(capabilities):
+    caps = capabilities or {}
+    return caps.get("device_class") == "radius" or caps.get("profile") == "pvrad1"
+
+
+def _promote_device_to_radius(dev):
+    dev["is_radius"] = True
+    dev.pop("sender", None)
+    dev.pop("outputs", None)
+    dev.pop("base_universe", None)
+    dev.pop("receive_mode", None)
+    dev.setdefault("current_track", "")
+    dev.setdefault("playback_state", 0)
+
+
 def _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=None):
     dev["ip_mode"] = capabilities.get("ip_mode", "unknown")
     static_ip = capabilities.get("static_ip")
@@ -1579,7 +1594,9 @@ class ControllerState:
                 if ip_changed:
                     old_ip = dev["ip"]
                     dev["ip"] = node_info["ip"]
-                    dev["sender"].ip = dev["ip"]
+                    sender = dev.get("sender")
+                    if sender is not None:
+                        sender.ip = dev["ip"]
                     _migrate_device_show_info_key(old_ip, dev["ip"], dev.get("name"),
                                                   is_radius=dev.get("is_radius"))
                     groups_changed = self._replace_device_ip_references_unlocked(old_ip, dev["ip"])
@@ -1759,6 +1776,8 @@ class ControllerState:
             return False
 
         capabilities = _capabilities_from_node(node_info)
+        if _is_radius_capabilities(capabilities):
+            _promote_device_to_radius(dev)
         short_name = node_info.get("short_name")
         if short_name:
             dev["name"] = short_name

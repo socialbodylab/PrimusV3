@@ -51,12 +51,16 @@ BAUD_OVERRIDE=""
 WIFI_SSID_OVERRIDE=""
 WIFI_PASSWORD_OVERRIDE=""
 DEVICE_NAME_OVERRIDE=""
+CHARACTER_NAME_OVERRIDE=""
+PERFORMER_NAME_OVERRIDE=""
 STATIC_IP_OVERRIDE=""
 GATEWAY_OVERRIDE=""
 SUBNET_OVERRIDE=""
 WIFI_SSID_OVERRIDE_SET=false
 WIFI_PASSWORD_OVERRIDE_SET=false
 DEVICE_NAME_OVERRIDE_SET=false
+CHARACTER_NAME_OVERRIDE_SET=false
+PERFORMER_NAME_OVERRIDE_SET=false
 STATIC_IP_OVERRIDE_SET=false
 GATEWAY_OVERRIDE_SET=false
 SUBNET_OVERRIDE_SET=false
@@ -120,6 +124,8 @@ Flags:
   --password <password>    Alias for -pw.
   -name, --name <name>     Override the default device short name for this build.
   --device-name <name>     Alias for --name.
+  --character-name <name>  Seed character name in NVS for this build (max 64 chars).
+  --performer-name <name>  Seed performer name in NVS for this build (max 64 chars).
   --static-ip <ip>         Store a static IP on boot for this build.
   --gateway <ip>           Gateway to store with --static-ip.
   --subnet <ip>            Subnet mask to store with --static-ip.
@@ -203,6 +209,24 @@ while [[ $# -gt 0 ]]; do
       fi
       DEVICE_NAME_OVERRIDE="$2"
       DEVICE_NAME_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --character-name|--character)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a character name"
+        exit 1
+      fi
+      CHARACTER_NAME_OVERRIDE="$2"
+      CHARACTER_NAME_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --performer-name|--performer)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a performer name"
+        exit 1
+      fi
+      PERFORMER_NAME_OVERRIDE="$2"
+      PERFORMER_NAME_OVERRIDE_SET=true
       shift 2
       ;;
     --static-ip)
@@ -364,6 +388,32 @@ if [[ ${#DEVICE_NAME_OVERRIDE} -gt 17 ]]; then
   exit 1
 fi
 
+if [[ "$CHARACTER_NAME_OVERRIDE_SET" == true && -z "$CHARACTER_NAME_OVERRIDE" ]]; then
+  err "Character name override cannot be empty."
+  exit 1
+fi
+
+if [[ "$PERFORMER_NAME_OVERRIDE_SET" == true && -z "$PERFORMER_NAME_OVERRIDE" ]]; then
+  err "Performer name override cannot be empty."
+  exit 1
+fi
+
+for label in "Character name" "Performer name"; do
+  value=""
+  case "$label" in
+    "Character name") value="$CHARACTER_NAME_OVERRIDE" ;;
+    "Performer name") value="$PERFORMER_NAME_OVERRIDE" ;;
+  esac
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    err "$label override cannot contain newlines."
+    exit 1
+  fi
+  if [[ -n "$value" && ${#value} -gt 64 ]]; then
+    err "$label override must be 64 characters or fewer."
+    exit 1
+  fi
+done
+
 if [[ "$RECEIVE_MODE_OVERRIDE_SET" == true ]]; then
   case "$RECEIVE_MODE_OVERRIDE" in
     split)
@@ -443,7 +493,7 @@ c_string_literal() {
 }
 
 create_build_override_header() {
-  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true && "$RECEIVE_MODE_OVERRIDE_SET" != true && "$UNIVERSE_BASE_OVERRIDE_SET" != true ]]; then
+  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$CHARACTER_NAME_OVERRIDE_SET" != true && "$PERFORMER_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true && "$RECEIVE_MODE_OVERRIDE_SET" != true && "$UNIVERSE_BASE_OVERRIDE_SET" != true ]]; then
     return
   fi
 
@@ -455,6 +505,14 @@ create_build_override_header() {
     if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
       printf '#define PRIMUSV3_FORCE_DEVICE_NAME_OVERRIDE 1\n'
       printf '#define DEVICE_SHORT_NAME %s\n' "$(c_string_literal "$DEVICE_NAME_OVERRIDE")"
+    fi
+    if [[ "$CHARACTER_NAME_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_CHARACTER_NAME_OVERRIDE 1\n'
+      printf '#define DEFAULT_SHOW_CHARACTER_NAME %s\n' "$(c_string_literal "$CHARACTER_NAME_OVERRIDE")"
+    fi
+    if [[ "$PERFORMER_NAME_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE 1\n'
+      printf '#define DEFAULT_SHOW_PERFORMER_NAME %s\n' "$(c_string_literal "$PERFORMER_NAME_OVERRIDE")"
     fi
     if [[ "$WIFI_SSID_OVERRIDE_SET" == true || "$WIFI_PASSWORD_OVERRIDE_SET" == true ]]; then
       printf '#define PRIMUSV3_FORCE_WIFI_CREDENTIAL_OVERRIDE 1\n'
@@ -780,6 +838,14 @@ create_build_override_header
 
 if [[ "$DEVICE_NAME_OVERRIDE_SET" == true ]]; then
   info "Device name override: $DEVICE_NAME_OVERRIDE"
+fi
+
+if [[ "$CHARACTER_NAME_OVERRIDE_SET" == true ]]; then
+  info "Character name override: $CHARACTER_NAME_OVERRIDE"
+fi
+
+if [[ "$PERFORMER_NAME_OVERRIDE_SET" == true ]]; then
+  info "Performer name override: $PERFORMER_NAME_OVERRIDE"
 fi
 
 if [[ "$WIFI_SSID_OVERRIDE_SET" == true ]]; then

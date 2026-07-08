@@ -23,6 +23,11 @@
 #include "telemetry.h"
 #include "marius.h"
 
+#if BOARD_HAS_STATUS_NEOPIXEL
+#include <Adafruit_NeoPixel.h>
+Adafruit_NeoPixel statusPixel(1, BOARD_STATUS_NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+#endif
+
 bool sdBusy = false;
 
 #define MAX_UDP_PACKET 600
@@ -43,6 +48,12 @@ bool wifiConnecting = false;
 unsigned long lastReconnectAttempt = 0;
 unsigned long wifiConnectStart     = 0;
 unsigned long lastWifiCheckMs      = 0;
+
+bool statusIndicatorConnected = false;
+bool statusIndicatorStaticIP = false;
+bool statusIndicatorLit = false;
+unsigned long lastStatusIndicatorBlink = 0;
+static const unsigned long STATUS_INDICATOR_BLINK_INTERVAL = 500;
 
 IPAddress senderIP;
 bool senderKnown = false;
@@ -101,14 +112,27 @@ void loadStoredDeviceName() {
 }
 
 void loadStoredShowInfo() {
+#ifdef PRIMUSV3_FORCE_CHARACTER_NAME_OVERRIDE
+  strncpy(showCharacterName, DEFAULT_SHOW_CHARACTER_NAME, SHOW_INFO_FIELD_LEN);
+  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("characterName", showCharacterName);
+#else
   if (prefs.isKey("characterName")) {
     String stored = prefs.getString("characterName", "");
     stored.toCharArray(showCharacterName, sizeof(showCharacterName));
   }
+#endif
+
+#ifdef PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE
+  strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
+  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("performerName", showPerformerName);
+#else
   if (prefs.isKey("performerName")) {
     String stored = prefs.getString("performerName", "");
     stored.toCharArray(showPerformerName, sizeof(showPerformerName));
   }
+#endif
 
   if (!prefs.isKey("characterName")) {
     const char* source = hasCustomName && customShortName[0] != '\0'
@@ -182,6 +206,65 @@ void buildNodeReport(char* reportBuf, size_t reportLen) {
     } else {
       snprintf(reportBuf + pos, reportLen - pos, "|MC:0");
     }
+  }
+}
+
+void writeConnectionIndicator(bool lit) {
+  statusIndicatorLit = lit;
+
+#if BOARD_HAS_STATUS_LED
+  bool ledOn = lit ? BOARD_STATUS_LED_ACTIVE_HIGH : !BOARD_STATUS_LED_ACTIVE_HIGH;
+  digitalWrite(BOARD_STATUS_LED_PIN, ledOn ? HIGH : LOW);
+#endif
+
+#if BOARD_HAS_STATUS_NEOPIXEL
+  uint32_t color = lit
+    ? statusPixel.Color(BOARD_STATUS_NEOPIXEL_BRIGHTNESS, 0, 0)
+    : statusPixel.Color(0, 0, 0);
+  statusPixel.setPixelColor(0, color);
+  statusPixel.show();
+#endif
+}
+
+void setConnectionIndicator(bool connected) {
+  statusIndicatorConnected = connected;
+  statusIndicatorStaticIP = activeStaticIP;
+  lastStatusIndicatorBlink = millis();
+
+  if (!connected) {
+    writeConnectionIndicator(false);
+    return;
+  }
+
+  writeConnectionIndicator(true);
+}
+
+void initConnectionIndicator() {
+#if BOARD_HAS_STATUS_LED
+  pinMode(BOARD_STATUS_LED_PIN, OUTPUT);
+#endif
+
+#if BOARD_HAS_STATUS_NEOPIXEL
+  #if BOARD_STATUS_NEOPIXEL_POWER_PIN >= 0
+    pinMode(BOARD_STATUS_NEOPIXEL_POWER_PIN, OUTPUT);
+    digitalWrite(BOARD_STATUS_NEOPIXEL_POWER_PIN, HIGH);
+  #endif
+  statusPixel.begin();
+  statusPixel.setBrightness(BOARD_STATUS_NEOPIXEL_BRIGHTNESS);
+#endif
+
+  setConnectionIndicator(false);
+}
+
+void syncConnectionIndicator() {
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  if (connected != statusIndicatorConnected || activeStaticIP != statusIndicatorStaticIP) {
+    setConnectionIndicator(connected);
+    return;
+  }
+  if (connected && !activeStaticIP && millis() - lastStatusIndicatorBlink >= STATUS_INDICATOR_BLINK_INTERVAL) {
+    lastStatusIndicatorBlink = millis();
+    writeConnectionIndicator(!statusIndicatorLit);
   }
 }
 
@@ -657,6 +740,7 @@ void setup() {
   Serial.print("Firmware v"); Serial.println(FIRMWARE_VERSION);
 
   buttonsInit();
+  initConnectionIndicator();
   displayInit();
   displayStartup();
 
@@ -716,6 +800,7 @@ void loop() {
 
   handleOscPacket();
   checkWifiConnection();
+  syncConnectionIndicator();
 
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }

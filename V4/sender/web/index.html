@@ -835,12 +835,34 @@
                         <input type="checkbox" x-model="wifiEnabled" :disabled="running">
                         <span>Use custom credentials</span>
                     </label>
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="characterNameEnabled" :disabled="running">
+                        <span>Use custom character name</span>
+                    </label>
+                    <label class="firmware-inline-check">
+                        <input type="checkbox" x-model="performerNameEnabled" :disabled="running">
+                        <span>Use custom performer name</span>
+                    </label>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Device Name</label>
                     <input class="form-input" type="text" maxlength="17"
                            x-model="deviceName" :disabled="running || !nameEnabled"
                            placeholder="Radius" autocomplete="off">
+                </div>
+                <div class="firmware-form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Character Name</label>
+                        <input class="form-input" type="text" maxlength="64"
+                               x-model="characterName" :disabled="running || !characterNameEnabled"
+                               placeholder="Character" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Performer Name</label>
+                        <input class="form-input" type="text" maxlength="64"
+                               x-model="performerName" :disabled="running || !performerNameEnabled"
+                               placeholder="Performer" autocomplete="off">
+                    </div>
                 </div>
                 <div class="firmware-form-grid">
                     <div class="form-group">

@@ -26,9 +26,19 @@
 #define NO_DISPLAY
 #define FIRMWARE_NAME "Radius V1"
 #define NODE_CAPS_BOARD "v1"
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 13
+#endif
+#define BOARD_HAS_STATUS_LED    1
+#define BOARD_STATUS_LED_PIN    LED_BUILTIN
+#define BOARD_STATUS_LED_ACTIVE_HIGH 1
 #else
 #define FIRMWARE_NAME "Radius V2"
 #define NODE_CAPS_BOARD "v2"
+#define BOARD_HAS_STATUS_NEOPIXEL 1
+#define BOARD_STATUS_NEOPIXEL_PIN 45
+#define BOARD_STATUS_NEOPIXEL_POWER_PIN -1
+#define BOARD_STATUS_NEOPIXEL_BRIGHTNESS 40
 #endif
 
 #if TARGET_BOARD == BOARD_FEATHER_ESP32
@@ -53,10 +63,10 @@
 #define AUDIO_BOARD AUDIO_BOARD_MUSIC_MAKER
 
 #ifndef DEFAULT_WIFI_SSID
-#define DEFAULT_WIFI_SSID      "PrimusRouter"
+#define DEFAULT_WIFI_SSID      "OPERADEV"
 #endif
 #ifndef DEFAULT_WIFI_PASSWORD
-#define DEFAULT_WIFI_PASSWORD  "router-password"
+#define DEFAULT_WIFI_PASSWORD  "torrentoflight"
 #endif
 
 #define DEFAULT_STATIC_IP      192, 168, 1, 100
@@ -118,6 +128,13 @@
 
 #ifndef RADIUS_DIAG
 #define RADIUS_DIAG 0
+#endif
+
+#ifndef BOARD_HAS_STATUS_LED
+#define BOARD_HAS_STATUS_LED 0
+#endif
+#ifndef BOARD_HAS_STATUS_NEOPIXEL
+#define BOARD_HAS_STATUS_NEOPIXEL 0
 #endif
 
 #endif // CONFIG_H

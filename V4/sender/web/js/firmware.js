@@ -20,6 +20,10 @@ document.addEventListener("alpine:init", () => {
         selectedPort: "",
         nameEnabled: false,
         deviceName: "",
+        characterNameEnabled: false,
+        characterName: "",
+        performerNameEnabled: false,
+        performerName: "",
         wifiEnabled: false,
         wifiSsid: "",
         wifiPassword: "",
@@ -46,10 +50,14 @@ document.addEventListener("alpine:init", () => {
 
         init() {
             this.nameEnabled = false;
+            this.characterNameEnabled = false;
+            this.performerNameEnabled = false;
             this.wifiEnabled = false;
             this.wifiSsid = "";
             this.wifiPassword = "";
             this.deviceName = "";
+            this.characterName = "";
+            this.performerName = "";
             this.ipMode = "keep";
             this.staticIp = "";
             this.gateway = "";
@@ -73,6 +81,18 @@ document.addEventListener("alpine:init", () => {
                 this.firmwareTabActive = true;
                 this.startUpdatePolling();
             }
+        },
+
+        get showPrimusFirmwareUpdates() {
+            return !this.multiFamily || this.family === "primus";
+        },
+
+        get activeFamilyLabel() {
+            if (!this.multiFamily) {
+                const prof = this.profiles.find(item => item.id === this.profile);
+                return prof?.family === "radius" ? "Radius" : "Primus";
+            }
+            return this.family === "radius" ? "Radius" : "Primus";
         },
 
         get firmwareScope() {
@@ -177,6 +197,16 @@ document.addEventListener("alpine:init", () => {
             return (this.deviceName || "").trim();
         },
 
+        get characterNameOverride() {
+            if (!this.characterNameEnabled) return "";
+            return (this.characterName || "").trim();
+        },
+
+        get performerNameOverride() {
+            if (!this.performerNameEnabled) return "";
+            return (this.performerName || "").trim();
+        },
+
         get wifiSsidOverride() {
             if (!this.wifiEnabled) return "";
             return (this.wifiSsid || "").trim();
@@ -200,6 +230,10 @@ document.addEventListener("alpine:init", () => {
 
         get overrideValidationMessage() {
             if (this.nameEnabled && !this.deviceNameOverride) return "Custom name is enabled but empty.";
+            if (this.characterNameEnabled && !this.characterNameOverride) return "Character name is enabled but empty.";
+            if (this.performerNameEnabled && !this.performerNameOverride) return "Performer name is enabled but empty.";
+            if (this.characterNameOverride.length > 64) return "Character name must be 64 characters or fewer.";
+            if (this.performerNameOverride.length > 64) return "Performer name must be 64 characters or fewer.";
             if (this.wifiEnabled && !this.wifiSsidOverride && !this.wifiPassword) return "Custom credentials are enabled but empty.";
             if (this.wifiEnabled && !this.wifiSsidOverride) return "Custom credentials need an SSID.";
             if (this.wifiEnabled && !this.wifiPassword) return "Custom credentials need a password.";
@@ -225,7 +259,7 @@ document.addEventListener("alpine:init", () => {
         get overrideSummaryClass() {
             return {
                 "firmware-override-summary-error": !!this.overrideValidationMessage,
-                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.wifiEnabled || this.ipMode !== "keep" || this.receiveModeMode !== "keep"),
+                "firmware-override-summary-active": !this.overrideValidationMessage && (this.nameEnabled || this.characterNameEnabled || this.performerNameEnabled || this.wifiEnabled || this.ipMode !== "keep" || this.receiveModeMode !== "keep"),
             };
         },
 
@@ -242,6 +276,8 @@ document.addEventListener("alpine:init", () => {
             if (this.overrideValidationMessage) return this.overrideValidationMessage;
             const parts = [];
             if (this.deviceNameOverride) parts.push("Name: " + this.deviceNameOverride);
+            if (this.characterNameOverride) parts.push("Character: " + this.characterNameOverride);
+            if (this.performerNameOverride) parts.push("Performer: " + this.performerNameOverride);
             if (this.wifiSsidOverride) parts.push("SSID: " + this.wifiSsidOverride);
             if (this.wifiPasswordOverrideSet) parts.push("Password: set");
             if (this.ipMode === "static") {
@@ -262,6 +298,8 @@ document.addEventListener("alpine:init", () => {
             const overrides = metadata.overrides || {};
             const parts = [];
             if (overrides.device_name) parts.push("Name: " + overrides.device_name);
+            if (overrides.character_name) parts.push("Character: " + overrides.character_name);
+            if (overrides.performer_name) parts.push("Performer: " + overrides.performer_name);
             if (overrides.wifi_ssid) parts.push("SSID: " + overrides.wifi_ssid);
             if (overrides.wifi_password_set) parts.push("Password: set");
             if (overrides.ip_mode === "static") {
@@ -380,9 +418,12 @@ document.addEventListener("alpine:init", () => {
             if (this.running || !this.multiFamily || this.family === family) return;
             this.family = family;
             this.receiveModeMode = "keep";
-            const first = (this.families?.[family] || [])[0];
-            if (first) {
-                this.setProfile(first.id);
+            const profiles = this.families?.[family] || [];
+            const preferred = family === "radius"
+                ? (profiles.find(item => item.id === "radius_v1") || profiles[0])
+                : (profiles.find(item => item.id === "v3") || profiles[0]);
+            if (preferred) {
+                this.setProfile(preferred.id);
             }
         },
 
@@ -416,6 +457,11 @@ document.addEventListener("alpine:init", () => {
                     if (next.family && this.multiFamily) {
                         this.family = next.family;
                     }
+                }
+            } else if (this.multiFamily && this.family === "radius" && this.profile.startsWith("v")) {
+                const preferred = (this.families?.radius || []).find(item => item.id === "radius_v1");
+                if (preferred) {
+                    this.profile = preferred.id;
                 }
             }
         },
@@ -489,6 +535,7 @@ document.addEventListener("alpine:init", () => {
             const body = { action, profile: this.profile, scope: this.firmwareScope };
             if (action === "compile" || action === "upload") {
                 this.addDeviceNameField(body);
+                this.addShowInfoFields(body);
                 this.addWifiFields(body);
                 this.addIpFields(body);
                 if (this.showReceiveModeOverrides) {
@@ -522,6 +569,17 @@ document.addEventListener("alpine:init", () => {
             if (!this.nameEnabled) return;
             const name = this.deviceName.trim();
             if (name) body.device_name = name;
+        },
+
+        addShowInfoFields(body) {
+            if (this.characterNameEnabled) {
+                const character = this.characterName.trim();
+                if (character) body.character_name = character;
+            }
+            if (this.performerNameEnabled) {
+                const performer = this.performerName.trim();
+                if (performer) body.performer_name = performer;
+            }
         },
 
         addIpFields(body) {

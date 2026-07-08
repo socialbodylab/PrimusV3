@@ -141,14 +141,33 @@ void loadStoredDeviceName() {
 }
 
 void loadStoredShowInfo() {
+#ifdef PRIMUSV3_FORCE_CHARACTER_NAME_OVERRIDE
+  strncpy(showCharacterName, DEFAULT_SHOW_CHARACTER_NAME, SHOW_INFO_FIELD_LEN);
+  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("characterName", showCharacterName);
+  Serial.print("Firmware character name override stored: \"");
+  Serial.print(showCharacterName);
+  Serial.println("\"");
+#else
   if (prefs.isKey("characterName")) {
     String stored = prefs.getString("characterName", "");
     stored.toCharArray(showCharacterName, sizeof(showCharacterName));
   }
+#endif
+
+#ifdef PRIMUSV3_FORCE_PERFORMER_NAME_OVERRIDE
+  strncpy(showPerformerName, DEFAULT_SHOW_PERFORMER_NAME, SHOW_INFO_FIELD_LEN);
+  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("performerName", showPerformerName);
+  Serial.print("Firmware performer name override stored: \"");
+  Serial.print(showPerformerName);
+  Serial.println("\"");
+#else
   if (prefs.isKey("performerName")) {
     String stored = prefs.getString("performerName", "");
     stored.toCharArray(showPerformerName, sizeof(showPerformerName));
   }
+#endif
 
   // First boot (or pre-show-info NVS): seed editable defaults so Device Manager
   // cards are readable before anyone sets show metadata manually. V1 boards use
