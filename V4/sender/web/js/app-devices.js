@@ -36,9 +36,12 @@ document.addEventListener("alpine:init", () => {
         syncPolling: null,
         notice: null,
         _noticeTimer: null,
+        startupScanMessage: "Scanning network for devices…",
+        startupScanActive: false,
         filterCharacterName: "",
         filterPrimusCharacter: "",
         filterRadiusCharacter: "",
+        filterProductType: null,
         mode: "monitor",
         bulkPanel: null,
         bulkRenamePattern: "Device {n}",
@@ -220,6 +223,37 @@ document.addEventListener("alpine:init", () => {
             return (this.state?.devices || []).filter(d => this.isRadiusDevice(d)).length;
         },
 
+        get hasPrimusDevices() {
+            return this.summaryPrimusCount > 0;
+        },
+
+        get hasRadiusDevices() {
+            return this.summaryRadiusCount > 0;
+        },
+
+        isProductFilterVisible(product) {
+            return this.filterProductType === null || this.filterProductType === product;
+        },
+
+        setProductFilter(product) {
+            this.filterProductType = product || null;
+        },
+
+        toggleProductFilter(product) {
+            if (this.filterProductType === product) {
+                this.filterProductType = null;
+                return;
+            }
+            this.filterProductType = product;
+        },
+
+        isProductFilterActive(product) {
+            if (product === null) {
+                return this.filterProductType === null;
+            }
+            return this.filterProductType === product;
+        },
+
         get characterFilterOptions() {
             return this.primusCharacterFilterOptions;
         },
@@ -247,6 +281,9 @@ document.addEventListener("alpine:init", () => {
 
             return devices.reduce((entries, dev, index) => {
                 const product = this.deviceProductType(dev);
+                if (this.filterProductType && product !== this.filterProductType) {
+                    return entries;
+                }
                 const filter = product === "radius"
                     ? this.filterRadiusCharacter.trim().toLowerCase()
                     : this.filterPrimusCharacter.trim().toLowerCase();
@@ -339,11 +376,12 @@ document.addEventListener("alpine:init", () => {
             await this.fetchNetworkStatus();
             this.networkPolling = setInterval(() => this.fetchNetworkStatus(), 15000);
             try {
-                await Alpine.store("conn").syncNetwork();
+                await Alpine.store("conn").syncNetwork({ startup: true });
             } catch (e) {
-                // Already surfaced to the user via showApiError inside syncNetwork();
-                // a failed first sync must not prevent monitoring from starting —
-                // the recurring autoSyncNetwork timer below will retry every 20s.
+                // Startup sync may fail while the backend is still coming up; a neutral
+                // scanning notice is shown instead of an error. Retry soon, then on
+                // the regular 20s auto-sync interval.
+                setTimeout(() => Alpine.store("conn").autoSyncNetwork(), 2500);
             }
             this.polling = setInterval(() => this.fetchState(), 1000);
             this.syncPolling = setInterval(() => Alpine.store("conn").autoSyncNetwork(), 20000);
@@ -371,6 +409,9 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("conn").syncShowInfoDrafts();
                 Alpine.store("conn").syncReceiveConfigDrafts();
                 Alpine.store("conn").syncVirtualConfigDrafts();
+                if (this.startupScanActive && (this.state?.devices || []).length > 0) {
+                    this.clearStartupScanNotice();
+                }
             } catch (e) {
                 /* ignore */
             }
@@ -443,6 +484,21 @@ document.addEventListener("alpine:init", () => {
             if (this._noticeTimer) {
                 clearTimeout(this._noticeTimer);
                 this._noticeTimer = null;
+            }
+        },
+
+        beginStartupScanNotice() {
+            this.startupScanActive = true;
+            this.showNotice(this.startupScanMessage, "info", 0);
+        },
+
+        clearStartupScanNotice() {
+            if (!this.startupScanActive) {
+                return;
+            }
+            this.startupScanActive = false;
+            if (this.notice?.message === this.startupScanMessage) {
+                this.clearNotice();
             }
         },
 

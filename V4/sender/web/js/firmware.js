@@ -658,6 +658,15 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").showNotice(label + " complete.", "success");
                 if (job.action === "setup_tools" || job.action === "download_firmware") {
                     this.refreshStatus();
+                } else if (job.action === "upload") {
+                    const app = Alpine.store("app");
+                    if (app && typeof app.fetchState === "function") {
+                        app.fetchState();
+                    }
+                    const conn = Alpine.store("conn");
+                    if (conn && typeof conn.syncNetwork === "function") {
+                        conn.syncNetwork();
+                    }
                 }
             } else {
                 Alpine.store("app").showNotice(job.error || "Firmware job failed.", "error", 5000);

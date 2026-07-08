@@ -55,9 +55,18 @@
 <!-- ==================== MONITOR ==================== -->
 <div class="device-manager-main main-content" x-data x-init="$store.app.init()" x-show="$store.app.mode === 'monitor'">
     <div class="device-manager-toolbar">
+        <div class="device-manager-toolbar-sync">
+            <button class="btn btn-sm"
+                    @click="$store.conn.syncNetwork()"
+                    :disabled="$store.conn.syncing"
+                    x-text="$store.conn.syncing ? 'Syncing…' : 'Sync now'"></button>
+        </div>
         <div class="dm-character-filters"
-             x-show="$store.app.primusCharacterFilterOptions.length">
-            <span class="dm-character-filter-label">Primus</span>
+             x-show="$store.app.hasPrimusDevices && $store.app.isProductFilterVisible('primus')">
+            <button type="button"
+                    class="dm-character-filter-label dm-product-filter-label"
+                    :class="{ 'dm-product-filter-active': $store.app.isProductFilterActive('primus') }"
+                    @click="$store.app.toggleProductFilter('primus')">Primus</button>
             <button type="button"
                     class="dm-character-chip"
                     :class="{ 'dm-character-chip-active': !$store.app.filterPrimusCharacter }"
@@ -71,8 +80,11 @@
             </template>
         </div>
         <div class="dm-character-filters"
-             x-show="$store.app.radiusCharacterFilterOptions.length">
-            <span class="dm-character-filter-label">Radius</span>
+             x-show="$store.app.hasRadiusDevices && $store.app.isProductFilterVisible('radius')">
+            <button type="button"
+                    class="dm-character-filter-label dm-product-filter-label"
+                    :class="{ 'dm-product-filter-active': $store.app.isProductFilterActive('radius') }"
+                    @click="$store.app.toggleProductFilter('radius')">Radius</button>
             <button type="button"
                     class="dm-character-chip"
                     :class="{ 'dm-character-chip-active': !$store.app.filterRadiusCharacter }"
@@ -84,12 +96,6 @@
                         @click="$store.app.toggleRadiusCharacterFilter(name)"
                         x-text="name"></button>
             </template>
-        </div>
-        <div class="device-manager-toolbar-actions">
-            <button class="btn btn-sm"
-                    @click="$store.conn.syncNetwork()"
-                    :disabled="$store.conn.syncing"
-                    x-text="$store.conn.syncing ? 'Syncing…' : 'Sync now'"></button>
         </div>
     </div>
 
@@ -186,9 +192,9 @@
     </div>
 
     <div class="device-manager-empty text-muted"
-         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterPrimusCharacter || $store.app.filterRadiusCharacter)"
+         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterPrimusCharacter || $store.app.filterRadiusCharacter || $store.app.filterProductType)"
          x-cloak>
-        No devices match the selected character.
+        No devices match the selected filters.
     </div>
 
     <div class="device-manager-empty text-muted"
@@ -491,43 +497,63 @@
     <!-- Step 1: Firmware version + device profile -->
     <div class="output-section firmware-section dm-firmware-step">
         <div class="output-header">
-            <span class="output-name">Step 1 — <span x-text="activeFamilyLabel"></span> Firmware Profile</span>
-            <div class="firmware-version-actions" x-show="showPrimusFirmwareUpdates" x-cloak>
-                <button class="btn btn-sm" @click="checkForUpdates(true)" :disabled="running || checkingUpdates">Check for Updates</button>
-                <button class="btn btn-sm btn-primary" x-show="updateAvailable" @click="downloadFirmware()" :disabled="running || checkingUpdates">Download &amp; Install</button>
-            </div>
-        </div>
-        <div class="firmware-version-grid" x-show="showPrimusFirmwareUpdates" x-cloak>
-            <div class="firmware-version-item">
-                <span class="firmware-version-label">Installed</span>
-                <span class="firmware-version-value" x-text="installedFirmwareLabel()"></span>
-            </div>
-            <div class="firmware-version-item">
-                <span class="firmware-version-label">Latest on GitHub</span>
-                <span class="firmware-version-value" x-text="remoteFirmwareLabel()"></span>
-            </div>
-            <div class="firmware-version-item">
-                <span class="firmware-version-label">Status</span>
-                <span class="firmware-status-pill firmware-version-status" :class="updateStatusClass()" x-text="updateStatusLabel()"></span>
-            </div>
-        </div>
-        <div class="firmware-version-note text-sm text-muted" x-show="updateError && showPrimusFirmwareUpdates" x-text="updateError"></div>
-        <div class="firmware-version-note text-sm text-muted" x-show="!showPrimusFirmwareUpdates" x-cloak>
-            Radius firmware is built from <code>V4/Arduino/radius_receiver/</code>. Default WiFi baked into config: OPERADEV / torrentoflight.
+            <span class="output-name">Step 1 — Firmware Profile</span>
         </div>
 
-        <div class="sub-mode-toggle firmware-family-toggle" style="margin-top:14px" x-show="multiFamily" x-cloak>
-            <button type="button" class="sub-mode-btn" :class="{ active: family === 'primus' }" :disabled="running" @click="setFamily('primus')">Primus</button>
-            <button type="button" class="sub-mode-btn" :class="{ active: family === 'radius' }" :disabled="running" @click="setFamily('radius')">Radius</button>
+        <div class="dm-firmware-choice-stack" x-show="multiFamily" x-cloak>
+            <div class="dm-firmware-choice-block dm-firmware-choice-block-primary">
+                <div class="dm-firmware-choice-heading">
+                    <span class="dm-firmware-choice-label">Product</span>
+                    <span class="dm-firmware-choice-hint">Choose the receiver family you are flashing</span>
+                </div>
+                <div class="sub-mode-toggle dm-firmware-family-toggle">
+                    <button type="button" class="sub-mode-btn" :class="{ active: family === 'primus' }" :disabled="running" @click="setFamily('primus')">Primus</button>
+                    <button type="button" class="sub-mode-btn" :class="{ active: family === 'radius' }" :disabled="running" @click="setFamily('radius')">Radius</button>
+                </div>
+            </div>
+
+            <div class="dm-firmware-choice-block">
+                <div class="dm-firmware-choice-heading">
+                    <span class="dm-firmware-choice-label">Board profile</span>
+                </div>
+                <div class="sub-mode-toggle firmware-profile-toggle dm-firmware-profile-toggle">
+                    <template x-for="item in familyProfiles" :key="item.id">
+                        <button class="sub-mode-btn" :class="{ active: profile === item.id }" :disabled="running" @click="setProfile(item.id)">
+                            <span x-text="item.label"></span>
+                        </button>
+                    </template>
+                </div>
+                <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+            </div>
         </div>
-        <div class="sub-mode-toggle firmware-profile-toggle" style="margin-top:14px">
-            <template x-for="item in familyProfiles" :key="item.id">
-                <button class="sub-mode-btn" :class="{ active: profile === item.id }" :disabled="running" @click="setProfile(item.id)">
-                    <span x-text="item.label"></span>
-                </button>
-            </template>
+
+        <div class="dm-firmware-version-panel">
+            <div class="dm-firmware-version-header" x-show="showPrimusFirmwareUpdates" x-cloak>
+                <span class="dm-firmware-choice-label">Firmware version</span>
+                <div class="firmware-version-actions">
+                    <button class="btn btn-sm" @click="checkForUpdates(true)" :disabled="running || checkingUpdates">Check for Updates</button>
+                    <button class="btn btn-sm btn-primary" x-show="updateAvailable" @click="downloadFirmware()" :disabled="running || checkingUpdates">Download &amp; Install</button>
+                </div>
+            </div>
+            <div class="firmware-version-grid" x-show="showPrimusFirmwareUpdates" x-cloak>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Installed</span>
+                    <span class="firmware-version-value" x-text="installedFirmwareLabel()"></span>
+                </div>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Latest on GitHub</span>
+                    <span class="firmware-version-value" x-text="remoteFirmwareLabel()"></span>
+                </div>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Status</span>
+                    <span class="firmware-status-pill firmware-version-status" :class="updateStatusClass()" x-text="updateStatusLabel()"></span>
+                </div>
+            </div>
+            <div class="firmware-version-note text-sm text-muted" x-show="updateError && showPrimusFirmwareUpdates" x-text="updateError"></div>
+            <div class="firmware-version-note text-sm text-muted" x-show="!showPrimusFirmwareUpdates" x-cloak>
+                Radius firmware is built from <code>V4/Arduino/radius_receiver/</code>. Default WiFi baked into config: OPERADEV / torrentoflight.
+            </div>
         </div>
-        <div class="firmware-profile-copy" x-text="profileDetail()"></div>
     </div>
 
     <!-- Step 2: Device / port selection -->

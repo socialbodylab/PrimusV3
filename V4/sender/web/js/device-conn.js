@@ -800,22 +800,30 @@ document.addEventListener("alpine:init", () => {
             await Alpine.store("app").fetchState();
         },
 
-        async syncNetwork() {
+        async syncNetwork(options = {}) {
+            const startup = !!options?.startup;
             this.syncing = true;
             try {
                 const result = await api("POST", "/api/devices/sync");
                 await Alpine.store("app").fetchState();
                 const added = result?.added?.length || 0;
                 const connected = result?.connected?.length || 0;
-                Alpine.store("app").showNotice(
-                    added
-                        ? `Synced network: added ${added} device${added === 1 ? "" : "s"}, connected ${connected}.`
-                        : `Synced network: connected ${connected} device${connected === 1 ? "" : "s"}.`,
-                    "success",
-                );
+                Alpine.store("app").clearStartupScanNotice();
+                if (!startup) {
+                    Alpine.store("app").showNotice(
+                        added
+                            ? `Synced network: added ${added} device${added === 1 ? "" : "s"}, connected ${connected}.`
+                            : `Synced network: connected ${connected} device${connected === 1 ? "" : "s"}.`,
+                        "success",
+                    );
+                }
                 return result;
             } catch (e) {
-                Alpine.store("app").showApiError("Network sync failed", e);
+                if (startup) {
+                    Alpine.store("app").beginStartupScanNotice();
+                } else {
+                    Alpine.store("app").showApiError("Network sync failed", e);
+                }
                 throw e;
             } finally {
                 this.syncing = false;
@@ -829,6 +837,7 @@ document.addEventListener("alpine:init", () => {
             try {
                 const result = await api("POST", "/api/devices/sync");
                 await Alpine.store("app").fetchState();
+                Alpine.store("app").clearStartupScanNotice();
                 const added = result?.added?.length || 0;
                 if (added) {
                     Alpine.store("app").showNotice(
