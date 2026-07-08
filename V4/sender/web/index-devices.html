@@ -55,39 +55,25 @@
 <!-- ==================== MONITOR ==================== -->
 <div class="device-manager-main main-content" x-data x-init="$store.app.init()" x-show="$store.app.mode === 'monitor'">
     <div class="device-manager-toolbar">
-        <input type="search"
-               class="form-input device-manager-filter"
-               placeholder="Filter by name or IP…"
-               x-model="$store.app.filterText">
-        <select class="form-input device-manager-group-filter"
-                x-show="$store.app.product === 'primus'"
-                x-model="$store.app.filterGroupId">
-            <option value="">All groups</option>
-            <template x-for="group in $store.app.deviceGroups" :key="group.id">
-                <option :value="group.id" x-text="group.name"></option>
+        <div class="dm-character-filters"
+             x-show="$store.app.characterFilterOptions.length">
+            <button type="button"
+                    class="dm-character-chip"
+                    :class="{ 'dm-character-chip-active': !$store.app.filterCharacterName }"
+                    @click="$store.app.clearCharacterFilter()">All</button>
+            <template x-for="name in $store.app.characterFilterOptions" :key="name">
+                <button type="button"
+                        class="dm-character-chip"
+                        :class="{ 'dm-character-chip-active': $store.app.filterCharacterName === name }"
+                        @click="$store.app.toggleCharacterFilter(name)"
+                        x-text="name"></button>
             </template>
-        </select>
+        </div>
         <div class="device-manager-toolbar-actions">
             <button class="btn btn-sm"
                     @click="$store.conn.syncNetwork()"
                     :disabled="$store.conn.syncing"
                     x-text="$store.conn.syncing ? 'Syncing…' : 'Sync now'"></button>
-            <button class="btn btn-sm"
-                    x-show="!$store.app.mobileView && $store.app.product === 'primus' && $store.app.filterGroupId"
-                    @click="$store.app.openBulkRename()">Bulk Rename</button>
-            <button class="btn btn-sm"
-                    x-show="!$store.app.mobileView && $store.app.product === 'primus' && $store.app.filterGroupId"
-                    @click="$store.app.openBulkApply()">Bulk Apply</button>
-        </div>
-        <div class="device-manager-manual-add" x-show="!$store.app.mobileView">
-            <input type="text"
-                   class="form-input form-input-sm"
-                   placeholder="IP address"
-                   x-model="$store.conn.manualIp"
-                   @keydown.enter="$store.conn.addManualIp()">
-            <button class="btn btn-sm"
-                    @click="$store.conn.addManualIp()"
-                    :disabled="!$store.conn.manualIp">Add</button>
         </div>
     </div>
 
@@ -196,9 +182,9 @@
     </div>
 
     <div class="device-manager-empty text-muted"
-         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterText || $store.app.filterGroupId)"
+         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterCharacterName)"
          x-cloak>
-        No devices match the current filters.
+        No devices match the selected character.
     </div>
 
     <div class="device-manager-empty text-muted"
@@ -305,7 +291,7 @@
                             </template>
                         </div>
 
-                        <!-- Status cluster: connection status / battery / hello -->
+                        <!-- Status cluster: connection status / battery -->
                         <div class="dm-status-cluster">
                             <span class="dm-status-pill" :class="$store.conn.monitorStatusClass(entry.dev)"
                                   x-text="$store.conn.monitorStatusLabel(entry.dev)"></span>
@@ -317,10 +303,6 @@
                                   :class="$store.conn.batteryClass(entry.dev)"
                                   :title="$store.conn.batteryTitle(entry.dev)"
                                   x-text="$store.conn.batteryLabel(entry.dev)"></span>
-                            <button type="button" class="btn btn-sm dm-hello-btn"
-                                    x-show="$store.app.product === 'primus' ? $store.conn.canHelloDevice(entry.dev) : true"
-                                    :title="$store.app.product === 'primus' ? $store.conn.helloHint(entry.dev) : 'Send test tone'"
-                                    @click="$store.conn.helloDevice(entry._index)">Hello</button>
                             <span class="audio-badge"
                                   x-show="$store.app.product === 'radius' && entry.dev.is_radius"
                                   title="Radius audio node">&#9834;</span>
@@ -446,6 +428,10 @@
                                 <span class="device-fw-version"
                                       x-show="$store.app.product === 'primus' && $store.conn.firmwareLabel(entry.dev) !== '—'"
                                       x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
+                                <button type="button" class="btn btn-sm dm-hello-btn"
+                                        x-show="$store.app.product === 'primus' ? $store.conn.canHelloDevice(entry.dev) : true"
+                                        :title="$store.app.product === 'primus' ? $store.conn.helloHint(entry.dev) : 'Send test tone'"
+                                        @click="$store.conn.helloDevice(entry._index)">Hello</button>
                                 <span class="device-group-tag text-sm text-muted"
                                       x-show="$store.app.product === 'primus' && $store.app.deviceGroupNames(entry.dev)"
                                       x-text="$store.app.deviceGroupNames(entry.dev)"></span>

@@ -36,8 +36,7 @@ document.addEventListener("alpine:init", () => {
         syncPolling: null,
         notice: null,
         _noticeTimer: null,
-        filterText: "",
-        filterGroupId: "",
+        filterCharacterName: "",
         mode: "monitor",
         bulkPanel: null,
         bulkRenamePattern: "Device {n}",
@@ -171,29 +170,37 @@ document.addEventListener("alpine:init", () => {
             return (this.state?.devices || []).filter(d => this.deviceHasError(d)).length;
         },
 
+        get characterFilterOptions() {
+            const names = new Set();
+            for (const dev of (this.state?.devices || [])) {
+                const name = (dev.character_name || "").trim();
+                if (name) names.add(name);
+            }
+            return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+        },
+
         get filteredDevices() {
             const devices = this.state?.devices || [];
-            const query = this.filterText.trim().toLowerCase();
-            const group = this.deviceGroups.find(item => item.id === this.filterGroupId);
-            const groupIps = group ? new Set(group.device_ips || []) : null;
+            const filter = this.filterCharacterName.trim().toLowerCase();
 
             return devices.reduce((entries, dev, index) => {
-                if (groupIps && !groupIps.has(dev.ip)) {
-                    return entries;
-                }
-                if (query) {
-                    const haystack = [
-                        dev.name,
-                        dev.ip,
-                        dev.static_ip,
-                    ].filter(Boolean).join(" ").toLowerCase();
-                    if (!haystack.includes(query)) {
+                if (filter) {
+                    const character = (dev.character_name || "").trim().toLowerCase();
+                    if (character !== filter) {
                         return entries;
                     }
                 }
                 entries.push({ dev, _index: index });
                 return entries;
             }, []);
+        },
+
+        toggleCharacterFilter(name) {
+            this.filterCharacterName = this.filterCharacterName === name ? "" : name;
+        },
+
+        clearCharacterFilter() {
+            this.filterCharacterName = "";
         },
 
         isCardExpanded(index) {

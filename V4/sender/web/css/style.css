@@ -4187,37 +4187,48 @@ input[type="color"] {
     margin-bottom: 16px;
 }
 
-.device-manager-filter {
-    flex: 1 1 220px;
-    min-width: 180px;
-    max-width: 360px;
-}
-
-.device-manager-group-filter {
-    flex: 0 1 180px;
-    min-width: 140px;
-}
-
 .device-manager-toolbar-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    margin-left: auto;
 }
 
-.device-manager-manual-add {
+.dm-character-filters {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
-    flex: 0 1 240px;
-    min-width: 200px;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
-.device-manager-manual-add .form-input {
-    flex: 1;
+.dm-character-chip {
+    appearance: none;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.dm-character-chip:hover {
+    border-color: var(--accent-dim);
+    color: var(--text-primary);
+}
+
+.dm-character-chip-active {
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
+    border-color: var(--accent-dim);
+    color: var(--accent);
 }
 
 .device-manager-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 16px;
 }
 
@@ -4521,7 +4532,6 @@ input[type="color"] {
 }
 
 .dm-hello-btn {
-    margin-left: auto;
     padding: 3px 10px;
     font-size: 11px;
 }
