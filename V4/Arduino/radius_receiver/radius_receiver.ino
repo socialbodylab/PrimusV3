@@ -31,6 +31,7 @@ bool sdBusy = false;
 #define MAX_OSC_PACKET 512
 WiFiUDP udp;
 WiFiUDP udpFps;
+WiFiUDP udpReport;
 WiFiUDP udpOsc;
 uint8_t udpBuf[MAX_UDP_PACKET];
 uint8_t oscBuf[MAX_OSC_PACKET];
@@ -211,6 +212,8 @@ void checkWifiConnection() {
       Serial.print("WiFi connected! IP: ");
       Serial.println(WiFi.localIP());
       udp.begin(ARTNET_PORT);
+      udpFps.begin(0);
+      udpReport.begin(0);
       udpOsc.begin(OSC_PORT);
       broadcastArtPollReply();
       if (infoScreenIndex == 0)
@@ -494,6 +497,22 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
 
 // ── Telemetry (UDP 6455) ─────────────────────────────────────────────
 
+void sendAudioStatus(uint8_t status, const char* filename) {
+  if (!senderKnown || !wifiConnected) return;
+  uint8_t buf[78];
+  memset(buf, 0, sizeof(buf));
+  memcpy(buf, ARTNET_MAGIC, 8);
+  buf[8]  = ARTNET_OPCODE_AUDIO_STATUS & 0xFF;
+  buf[9]  = (ARTNET_OPCODE_AUDIO_STATUS >> 8) & 0xFF;
+  buf[10] = 0x00;
+  buf[11] = 0x0E;
+  buf[12] = status;
+  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 64);
+  udpReport.beginPacket(senderIP, FPS_REPORT_PORT);
+  udpReport.write(buf, 46);
+  udpReport.endPacket();
+}
+
 void sendTrackTelemetry(uint8_t state, const char* filename) {
   if (!TRACK_TELEMETRY_ENABLED) return;
   if (!senderKnown || !wifiConnected) return;
@@ -719,7 +738,6 @@ void setup() {
   displayConnection(DEFAULT_WIFI_SSID, IPAddress(0, 0, 0, 0), false, 0);
 
   udp.begin(ARTNET_PORT);
-  udpFps.begin(0);
 
   audioInit();
   cuesLoad();

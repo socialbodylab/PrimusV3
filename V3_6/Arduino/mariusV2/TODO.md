@@ -92,3 +92,20 @@ See `MARIUS_REFERENCE.md` for project overview, architecture, `marius.json` form
 - [ ] `audio_play` / `audio_stop` on press/release
 - [ ] `artnet_audio` — second Radius device plays audio
 - [ ] `artnet_dmx` — LED receiver responds
+
+---
+
+## Radius Audio — Pending
+
+### Sample rate bug fix
+
+- [ ] Flash E10 (192.168.8.159) with V4 firmware that includes WAV header read + `softReset()` on sample rate change (`V4/Arduino/radius_receiver/audio.h`)
+- [ ] Verify fix: play `hello.wav` (suspected different sample rate) then a second file — subsequent file must play correctly
+- [ ] Check serial log for `[Audio] Sample rate change X→Y Hz — soft reset` line on rate transition
+
+### Test suite — mixed sample rate playback
+
+- [ ] Add WAV files at 44100 Hz and 48000 Hz to SD card test fixture (or sender test assets)
+- [ ] Write a test (pytest or manual checklist) that plays a 44100 Hz file, then a 48000 Hz file, then a 44100 Hz file again
+- [ ] Confirm each file plays at correct pitch and does not leave the device in a stuck state
+- [ ] Confirm `sdBusy` is cleared after each track ends (FTP accessible between tracks)

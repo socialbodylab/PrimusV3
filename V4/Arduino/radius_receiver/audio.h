@@ -14,8 +14,9 @@
 
 extern bool sdBusy;
 
-char   _audioCurrentFile[65] = {0};
-uint8_t _audioVolume = 80;
+char     _audioCurrentFile[65] = {0};
+uint32_t _audioSampleRate      = 0;
+uint8_t  _audioVolume          = 80;
 bool   _audioLooping = false;
 bool   _audioHwReady = false;
 bool   _audioSdReady = false;
@@ -33,10 +34,8 @@ bool audioIsPlaying() {
 
 static void _notifyTrack(uint8_t state) {
   _audioPlaybackState = state;
-  if (TRACK_TELEMETRY_ENABLED) {
-    const char* name = (state == TRACK_STATE_STOPPED) ? "" : _audioCurrentFile;
-    sendTrackTelemetry(state, name);
-  }
+  const char* name = (state == TRACK_STATE_STOPPED) ? "" : _audioCurrentFile;
+  sendAudioStatus(state, name);
 }
 
 static void _applyVolume(uint8_t volume) {
@@ -78,6 +77,34 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   char trackPath[66];
   snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
 
+  // Read WAV header: verify RIFF/WAVE magic and extract sample rate (offset 24).
+  uint32_t incomingSampleRate = 0;
+  File f = SD.open(trackPath);
+  if (f) {
+    uint8_t header[28] = {0};
+    f.read(header, 28);
+    f.close();
+    if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
+      Serial.print("[Audio] ERROR: not a WAV file: ");
+      Serial.println(trackPath);
+      _notifyTrack(TRACK_STATE_STOPPED);
+      return false;
+    }
+    if (memcmp(header + 12, "fmt ", 4) == 0) {
+      memcpy(&incomingSampleRate, header + 24, 4);
+    }
+  }
+
+  // VS1053 holds internal sample-rate state across tracks. A soft reset clears
+  // the decoder's PLL so the next stream header is parsed cleanly. Without this
+  // the chip plays the new file at the wrong pitch or fails to start.
+  if (incomingSampleRate != 0 && incomingSampleRate != _audioSampleRate) {
+    Serial.printf("[Audio] Sample rate change %lu→%lu Hz — soft reset\n",
+                  _audioSampleRate, incomingSampleRate);
+    _musicMaker.softReset();
+  }
+  _audioSampleRate = incomingSampleRate;
+
   strncpy(_audioCurrentFile, trackPath, 64);
   _audioCurrentFile[64] = '\0';
   _audioLooping = false;
@@ -108,6 +135,7 @@ void audioStop() {
   _audioLooping = false;
   _audioDuration = 0;
   _audioStartMillis = 0;
+  _audioSampleRate = 0;
   sdBusy = false;
   _lastAppliedVolume = 255;
   _notifyTrack(TRACK_STATE_STOPPED);

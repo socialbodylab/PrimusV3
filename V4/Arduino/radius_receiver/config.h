@@ -96,11 +96,14 @@
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000
 #define ARTNET_OPCODE_IP_CONFIG  0x8200
-#define ARTNET_OPCODE_AUDIO_CMD  0x8300
-#define ARTNET_OPCODE_FTP_CMD    0x8301
+#define ARTNET_OPCODE_AUDIO_CMD    0x8300
+#define ARTNET_OPCODE_FTP_CMD      0x8301
+#define ARTNET_OPCODE_AUDIO_STATUS 0x8302  // unsolicited playback status from device
 #define ARTNET_PROTOCOL_VER      14
 
+#ifndef DEVICE_SHORT_NAME
 #define DEVICE_SHORT_NAME  "Radius"
+#endif
 #define OEM_CODE           0xFFFF
 #define ESTA_CODE          0x0000
 

@@ -370,6 +370,21 @@ class RadiusTelemetryListener:
                 raw, addr = self._sock.recvfrom(256)
             except socket.timeout:
                 continue
+            if len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
+                opcode = struct.unpack("<H", raw[8:10])[0]
+                if opcode == 0x8302:
+                    status = raw[12]
+                    name = raw[13:77].split(b'\x00')[0].decode("ascii", errors="replace") if len(raw) > 13 else ""
+                    with self.lock:
+                        self.data[addr[0]] = {
+                            "playback_state": status,
+                            "current_track": name,
+                            "ts": time.monotonic(),
+                        }
+                    state_str = "playing" if status == 1 else ("paused" if status == 2 else "stopped")
+                    file_str = f" \"{name}\"" if name else ""
+                    netlog.log("IN", "audio_status", f"AudioStatus {state_str}{file_str} ← {addr[0]}")
+                continue
             if len(raw) >= 5 and raw[:3] == TRACK_MAGIC:
                 state = raw[3]
                 name_len = raw[4]
@@ -380,6 +395,9 @@ class RadiusTelemetryListener:
                         "current_track": name,
                         "ts": time.monotonic(),
                     }
+                state_str = "playing" if state == 1 else ("paused" if state == 2 else "stopped")
+                file_str = f" \"{name}\"" if name else ""
+                netlog.log("IN", "audio_status", f"AudioStatus {state_str}{file_str} ← {addr[0]}")
                 continue
             if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
                 fps = (raw[3] << 8) | raw[4]
@@ -392,7 +410,7 @@ class RadiusTelemetryListener:
     def get(self, ip):
         with self.lock:
             entry = self.data.get(ip)
-            if entry and (time.monotonic() - entry.get("ts", 0)) < 5.0:
+            if entry:
                 return dict(entry)
         return None
 

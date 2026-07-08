@@ -197,7 +197,7 @@ class RadiusState:
                 continue
             node = node_map.get(ip) or nodes_by_name.get(saved_dev.get("name"))
             if node:
-                node["short_name"] = node.get("short_name") or saved_dev.get("name") or "Node"
+                node["short_name"] = saved_dev.get("name") or node.get("short_name") or "Node"
                 self.add_device_from_node(node, auto_save=False)
                 if node.get("ip") != ip:
                     refreshed = True
@@ -369,12 +369,12 @@ class RadiusState:
     def rename_device(self, di, new_name):
         with self.lock:
             if not (0 <= di < len(self.devices)):
-                return False
+                return {"ok": False, "error": "invalid device index"}
             dev = self.devices[di]
             send_art_address(dev["ip"], new_name, source_ip=self.artnet_source_ip)
             dev["name"] = new_name
             _save_devices(self.devices)
-            return True
+            return {"ok": True}
 
     def set_device_ip(self, di, static_ip, gateway, subnet):
         with self.lock:
@@ -541,6 +541,7 @@ class RadiusState:
         telemetry = listener.get(dev.get("ip"))
         if not telemetry:
             return
+        dev["_has_telemetry"] = True
         if "current_track" in telemetry:
             dev["current_track"] = telemetry.get("current_track") or ""
         if "playback_state" in telemetry:
@@ -572,6 +573,10 @@ class RadiusState:
                     "playback_state": dev.get("playback_state", 0),
                 }
                 self._merge_telemetry_unlocked(item)
+                if item.pop("_has_telemetry", False):
+                    ps = item.get("playback_state", 0)
+                    item["audio_status"] = "playing" if ps == 1 else ("paused" if ps == 2 else "stopped")
+                    item["now_playing"] = item.get("current_track", "") if ps in (1, 2) else ""
                 devices.append(item)
             return {
                 "product": "radius",

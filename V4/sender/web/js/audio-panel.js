@@ -34,7 +34,7 @@ document.addEventListener("alpine:init", () => {
         // ── Playback ────────────────────────────────────────────────────
         playing:        {},   // { di: { file, cmd } }
         lastPlayed:     {},   // { di: filename }
-        _playingExpiry: {},   // { di: timestamp } — only set for connected devices
+        _playingExpiry: {},   // { di: timestamp } — fallback until device confirms
         _lastVolSent:   {},
 
         // ── File manager ────────────────────────────────────────────────
@@ -79,9 +79,8 @@ document.addEventListener("alpine:init", () => {
             );
         },
 
-        // Authoritative playback state: device report takes priority.
-        // "stopped" from device clears immediately. Unknown status allows a
-        // 3-second optimistic window after a play command so the UI doesn't flash.
+        // Device audio_status drives the indicator. "stopped" clears immediately.
+        // _playingExpiry is a short fallback for the window before the first 0x8302 arrives.
         nowPlaying(di) {
             const devices = Alpine.store("app").state?.devices || [];
             const dev = devices[di];
@@ -150,20 +149,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         async play(di, filename, cmd = "play") {
-            const devices = Alpine.store("app").state?.devices || [];
-            const isConnected = !!devices[di]?.connected;
             await api("POST", "/api/audio/cmd", {
                 device: di, cmd, filename, volume: this.getVolume(di),
             });
             this.playing    = { ...this.playing,    [di]: { file: filename, cmd } };
             this.lastPlayed = { ...this.lastPlayed, [di]: filename };
-            if (isConnected) {
-                this._playingExpiry = { ...this._playingExpiry, [di]: Date.now() + 3000 };
-            } else {
-                const expiry = { ...this._playingExpiry };
-                delete expiry[di];
-                this._playingExpiry = expiry;
-            }
+            this._playingExpiry = { ...this._playingExpiry, [di]: Date.now() + 3000 };
         },
 
         async stop(di) {
