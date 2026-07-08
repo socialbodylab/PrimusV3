@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 
 from paths import sender_dir, uses_app_data_dir
+from ui_focus import request_ui_focus
 
 
 DEFAULT_HTTP_PORT = 8080
@@ -264,6 +265,18 @@ def find_running_central_server(requested_port=DEFAULT_HTTP_PORT, host="127.0.0.
     return None
 
 
+def _raise_existing_ui(host, port, url, open_browser):
+    """Focus an existing UI without opening a new browser window."""
+    if request_ui_focus(port, host=host):
+        return "raised existing browser window"
+    result = open_browser(url, attach=True)
+    if result == "raised existing browser window":
+        return result
+    return (
+        f"{result} (Central is already running at {url})"
+    )
+
+
 def reserve_ui_session(host, port, session_id=None):
     """Keep Central alive while an attach-mode browser window is opening."""
     try:
@@ -309,9 +322,7 @@ def try_attach_before_start(
     if no_browser:
         print("  Browser: not opened (--no-browser)")
     else:
-        if runtime.get("ui_lifecycle"):
-            reserve_ui_session(host, actual_port)
-        browser_result = open_browser(url, attach=True)
+        browser_result = _raise_existing_ui(host, actual_port, url, open_browser)
         print(f"  Browser: {browser_result}")
     print()
     return True

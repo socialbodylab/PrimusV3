@@ -174,6 +174,19 @@ def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
     return cmd
 
 
+def _patch_macos_info_plist(app_path, values):
+    plist_path = app_path / "Contents" / "Info.plist"
+    if not plist_path.exists():
+        return
+    import plistlib
+
+    with plist_path.open("rb") as handle:
+        plist = plistlib.load(handle)
+    plist.update(values)
+    with plist_path.open("wb") as handle:
+        plistlib.dump(plist, handle)
+
+
 def _run(cmd, cwd=None):
     print(" ".join(str(part) for part in cmd))
     subprocess.run(cmd, cwd=cwd, check=True)
@@ -714,6 +727,8 @@ def main(argv=None):
         _run(cmd, cwd=repo_root)
     except subprocess.CalledProcessError as exc:
         return exc.returncode
+    if args.target == "macos" and args.windowed:
+        _patch_macos_info_plist(output_path, {"LSMultipleInstancesProhibited": True})
     if args.target == "windows":
         _refresh_windows_icon_cache(output_path)
 

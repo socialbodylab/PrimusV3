@@ -15,10 +15,8 @@ import signal
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
-import webbrowser
 
 from artnet import RadiusTelemetryListener
 from paths import ensure_runtime_data, is_bundled, log_path, sender_product
@@ -31,13 +29,18 @@ from central_launcher import (
     try_attach_before_start,
     unregister_central_server,
 )
+from browser_launcher import DedicatedBrowser
+from ui_focus import UiFocusServer
 from server import create_server
 from ui_lifecycle import monitor as ui_lifecycle_monitor
 
 
 DEFAULT_HTTP_PORT = 8080
 DEDICATED_BROWSER_PROFILE_ROOT = "radiusv4-browser-profiles"
-DEDICATED_BROWSER_PID_FILE = "browser.pid"
+_dedicated_browser = DedicatedBrowser(
+    DEDICATED_BROWSER_PROFILE_ROOT,
+    ("RADIUS_BROWSER", "PRIMUS_BROWSER"),
+)
 UI_CLOSE_GRACE_SECONDS = 2.0
 UI_HEARTBEAT_TIMEOUT_SECONDS = 45.0
 UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
@@ -130,218 +133,15 @@ def _kill_existing():
 
 
 def _browser_profile_root():
-    return os.path.join(tempfile.gettempdir(), DEDICATED_BROWSER_PROFILE_ROOT)
-
-
-def _new_browser_profile_dir():
-    profile_name = f"profile-{os.getpid()}-{int(time.time() * 1000)}"
-    return os.path.join(_browser_profile_root(), profile_name)
-
-
-def _browser_pid_path(profile_root):
-    return os.path.join(profile_root, DEDICATED_BROWSER_PID_FILE)
-
-
-def _add_browser_candidate(candidates, seen, label, executable):
-    if not executable:
-        return
-    path = executable if os.path.isabs(executable) else shutil.which(executable)
-    if not path:
-        return
-    path = os.path.abspath(os.path.expanduser(path))
-    if path in seen:
-        return
-    seen.add(path)
-    candidates.append((label, path))
-
-
-def _chromium_browser_candidates():
-    candidates = []
-    seen = set()
-
-    _add_browser_candidate(candidates, seen, "configured browser", os.environ.get("RADIUS_BROWSER"))
-    _add_browser_candidate(candidates, seen, "configured browser", os.environ.get("PRIMUS_BROWSER"))
-
-    if sys.platform == "darwin":
-        mac_apps = [
-            ("Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-            ("Microsoft Edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-            ("Brave Browser", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
-            ("Chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
-        ]
-        for label, path in mac_apps:
-            _add_browser_candidate(candidates, seen, label, path)
-    elif os.name == "nt":
-        roots = [
-            os.environ.get("PROGRAMFILES"),
-            os.environ.get("PROGRAMFILES(X86)"),
-            os.environ.get("LOCALAPPDATA"),
-        ]
-        windows_apps = [
-            ("Google Chrome", ("Google", "Chrome", "Application", "chrome.exe")),
-            ("Microsoft Edge", ("Microsoft", "Edge", "Application", "msedge.exe")),
-            ("Brave Browser", ("BraveSoftware", "Brave-Browser", "Application", "brave.exe")),
-        ]
-        for root in roots:
-            if not root:
-                continue
-            for label, parts in windows_apps:
-                _add_browser_candidate(candidates, seen, label, os.path.join(root, *parts))
-    else:
-        linux_apps = [
-            ("Google Chrome", "google-chrome"),
-            ("Google Chrome", "google-chrome-stable"),
-            ("Microsoft Edge", "microsoft-edge"),
-            ("Brave Browser", "brave-browser"),
-            ("Chromium", "chromium"),
-            ("Chromium", "chromium-browser"),
-        ]
-        for label, command in linux_apps:
-            _add_browser_candidate(candidates, seen, label, command)
-
-    path_apps = [
-        ("Google Chrome", "chrome"),
-        ("Google Chrome", "google-chrome"),
-        ("Microsoft Edge", "msedge"),
-        ("Brave Browser", "brave"),
-        ("Brave Browser", "brave-browser"),
-        ("Chromium", "chromium"),
-        ("Chromium", "chromium-browser"),
-    ]
-    for label, command in path_apps:
-        _add_browser_candidate(candidates, seen, label, command)
-
-    return candidates
-
-
-def _terminate_process(pid, timeout=1.0):
-    if pid == os.getpid():
-        return
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    except OSError:
-        return
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return
-        except OSError:
-            return
-        time.sleep(0.05)
-    if hasattr(signal, "SIGKILL"):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-
-def _terminate_tracked_browser_process(profile_root):
-    try:
-        with open(_browser_pid_path(profile_root), "r", encoding="utf-8") as pid_file:
-            pid_text = pid_file.read().strip()
-        if pid_text:
-            _terminate_process(int(pid_text))
-    except (FileNotFoundError, OSError, ValueError):
-        return
-
-
-def _terminate_dedicated_browser_processes(profile_root):
-    profile_root = os.path.abspath(profile_root)
-    marker = "--user-data-dir="
-    _terminate_tracked_browser_process(profile_root)
-    if os.name == "nt":
-        return
-    try:
-        out = subprocess.check_output(
-            ["ps", "-axo", "pid=,command="], text=True, stderr=subprocess.DEVNULL
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return
-    killed = []
-    for line in out.splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) != 2:
-            continue
-        pid = int(parts[0])
-        command = parts[1]
-        if marker not in command or profile_root not in command:
-            continue
-        killed.append(pid)
-    for pid in killed:
-        _terminate_process(pid)
-
-
-def _cleanup_dedicated_browser_profiles(profile_root):
-    _remove_dedicated_browser_profiles(profile_root)
-    os.makedirs(profile_root, exist_ok=True)
+    return _dedicated_browser.profile_root()
 
 
 def _remove_dedicated_browser_profiles(profile_root):
-    _terminate_dedicated_browser_processes(profile_root)
-    try:
-        shutil.rmtree(profile_root)
-    except FileNotFoundError:
-        pass
-    except OSError:
-        pass
-
-
-def _launch_dedicated_browser(url, cleanup_stale=True):
-    candidates = _chromium_browser_candidates()
-    if not candidates:
-        return None
-
-    profile_root = _browser_profile_root()
-    if cleanup_stale:
-        _cleanup_dedicated_browser_profiles(profile_root)
-    else:
-        os.makedirs(profile_root, exist_ok=True)
-    profile_dir = _new_browser_profile_dir()
-    os.makedirs(profile_dir, exist_ok=True)
-    for label, executable in candidates:
-        args = [
-            executable,
-            f"--user-data-dir={profile_dir}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-session-crashed-bubble",
-            f"--app={url}",
-        ]
-        popen_kwargs = {
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-        }
-        if os.name == "nt":
-            popen_kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(subprocess, "DETACHED_PROCESS", 0)
-            )
-        else:
-            popen_kwargs["start_new_session"] = True
-        try:
-            browser_process = subprocess.Popen(args, **popen_kwargs)
-        except OSError:
-            continue
-        try:
-            with open(_browser_pid_path(profile_root), "w", encoding="utf-8") as pid_file:
-                pid_file.write(str(browser_process.pid))
-        except OSError:
-            pass
-        return f"opened {label} app window"
-    return None
+    _dedicated_browser.remove_profiles()
 
 
 def _open_browser(url, attach=False):
-    dedicated_result = _launch_dedicated_browser(url, cleanup_stale=not attach)
-    if dedicated_result:
-        return dedicated_result
-    webbrowser.open_new(url)
-    return "opened default browser"
+    return _dedicated_browser.open(url, attach=attach)
 
 
 def _create_server_with_fallback(host, port, state, ui_lifecycle_enabled):
@@ -411,6 +211,7 @@ def main():
 
     ui_lifecycle_enabled = is_bundled() and not args.no_browser
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
+    ui_focus_server = None
     try:
         server = _create_server_with_fallback(
             "127.0.0.1", args.port, state, ui_lifecycle_enabled=ui_lifecycle_enabled)
@@ -426,6 +227,10 @@ def main():
             return
         raise
     port = server.server_address[1]
+    if not args.no_browser:
+        server.ui_focus_callback = _dedicated_browser.focus
+        ui_focus_server = UiFocusServer(port, _dedicated_browser.focus)
+        ui_focus_server.start()
     url = f"http://127.0.0.1:{port}{frontend_path}"
     register_central_server(port, sender_product())
 
@@ -449,6 +254,8 @@ def main():
         print("\nShutting down...")
     finally:
         server.ui_lifecycle_enabled = False
+        if ui_focus_server is not None:
+            ui_focus_server.stop()
         unregister_central_server()
         state.shutdown()
         telemetry_listener.stop()
