@@ -42,6 +42,21 @@ extern bool sdBusy;
 static FtpServer _ftpServer;
 static bool _ftpRunning = false;
 
+// Set when an FTP upload of /cues.json completes; the main loop reloads
+// the cue map when the SD bus is free, so pushed cue maps take effect
+// without a reboot.
+bool cuesReloadPending = false;
+
+static void _ftpTransferCallback(FtpTransferOperation op, const char* name, uint32_t transferredSize) {
+  if (op != FTP_UPLOAD_STOP || name == NULL) return;
+  const char* base = strrchr(name, '/');
+  base = base ? base + 1 : name;
+  if (strcasecmp(base, "cues.json") == 0) {
+    cuesReloadPending = true;
+    Serial.println("[FTP] cues.json uploaded — reload scheduled");
+  }
+}
+
 // =====================================================================
 //  API
 // =====================================================================
@@ -49,6 +64,7 @@ static bool _ftpRunning = false;
 void ftpInit() {
   // Begin the TCP server once here — it stays bound for the life of the sketch.
   // ftpStart/ftpStop only toggle _ftpRunning; they never re-call begin().
+  _ftpServer.setTransferCallback(_ftpTransferCallback);
   _ftpServer.begin(FTP_USER, FTP_PASSWORD);
   Serial.println("[FTP] FTP subsystem ready (SimpleFTPServer/SD)");
 }

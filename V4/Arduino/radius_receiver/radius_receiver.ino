@@ -822,6 +822,13 @@ void loop() {
   // Priority 2: FTP when active
   ftpUpdate();
 
+  // A pushed /cues.json takes effect without a reboot. Reload only while
+  // the SD bus is free — cuesLoad() reads the card.
+  if (cuesReloadPending && !sdBusy) {
+    cuesReloadPending = false;
+    cuesLoad();
+  }
+
   // Priority 3: Art-Net (bounded drain)
   int pktSize;
   while ((pktSize = udp.parsePacket()) > 0) {

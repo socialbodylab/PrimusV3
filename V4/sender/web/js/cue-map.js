@@ -9,7 +9,10 @@ function cueMap() {
     return {
         deviceIdx: null,
         loading: false,
+        loadingFiles: false,
         saving: false,
+        oscTarget: "selected",  // "selected" | "all"
+        oscFired: {},           // { rowIdx: "sent"|"error" } transient feedback
         rows: [],          // [{ number, cmd, file, volume, duration, delay }]
         deviceFiles: [],   // WAV filenames available on selected device
         error: null,
@@ -42,16 +45,17 @@ function cueMap() {
             await this.load();
         },
 
+        // Only the cue map is fetched on load. The device file listing is a
+        // second FTP session — running it in parallel breaks the single-client
+        // FTP server on the device (each session also stops the other's
+        // server). It is opt-in via loadDeviceFiles(); without it the file
+        // column is a free-text input.
         async load() {
             if (this.deviceIdx === null) return;
             this.loading = true;
             this.error = null;
             try {
-                const [mapData, filesData] = await Promise.all([
-                    api("GET", `/api/audio/cue_map?device=${this.deviceIdx}`),
-                    api("POST", "/api/audio/files", { device: this.deviceIdx, path: "/" })
-                        .catch(() => ({ entries: [] })),
-                ]);
+                const mapData = await api("GET", `/api/audio/cue_map?device=${this.deviceIdx}`);
                 this.rows = Object.entries(mapData)
                     .map(([num, val]) => {
                         if (typeof val === "string") {
@@ -68,6 +72,20 @@ function cueMap() {
                         };
                     })
                     .sort((a, b) => a.number - b.number);
+            } catch (e) {
+                this.error = e.message;
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async loadDeviceFiles() {
+            if (this.deviceIdx === null) return;
+            this.loadingFiles = true;
+            this.error = null;
+            try {
+                const filesData = await api("POST", "/api/audio/files",
+                                            { device: this.deviceIdx, path: "/" });
                 this.deviceFiles = (filesData.entries || [])
                     .filter(e => !e.is_dir && e.name.toLowerCase().endsWith(".wav")
                                           && !e.name.startsWith("._"))
@@ -76,8 +94,32 @@ function cueMap() {
             } catch (e) {
                 this.error = e.message;
             } finally {
-                this.loading = false;
+                this.loadingFiles = false;
             }
+        },
+
+        // Fire the cue over OSC (/cue/N to UDP 53001) — exercises the
+        // device's boot-loaded cue map exactly like an external OSC
+        // controller would. Note: the device fires what it loaded at boot;
+        // a cue map saved since then needs a device reboot first.
+        async fireOsc(idx) {
+            const row = this.rows[idx];
+            if (!row || !row.number) return;
+            const device = this.oscTarget === "all" ? "all" : this.deviceIdx;
+            this.error = null;
+            try {
+                await api("POST", "/api/audio/osc_cue",
+                          { device, number: parseInt(row.number) });
+                this.oscFired = { ...this.oscFired, [idx]: "sent" };
+            } catch (e) {
+                this.error = e.message;
+                this.oscFired = { ...this.oscFired, [idx]: "error" };
+            }
+            setTimeout(() => {
+                const f = { ...this.oscFired };
+                delete f[idx];
+                this.oscFired = f;
+            }, 1500);
         },
 
         addRow() {
@@ -116,7 +158,7 @@ function cueMap() {
                     cues[n] = entry;
                 }
                 await api("POST", "/api/audio/cue_map", { device: this.deviceIdx, cues });
-                this.success = "Saved to SD card — will take effect after device reboot";
+                this.success = "Saved to SD card — device reloads its cue map automatically";
                 setTimeout(() => this.success = null, 5000);
             } catch (e) {
                 this.error = e.message;

@@ -30,6 +30,7 @@ from artnet import (
     ftp_upload,
     is_compatible_node,
     send_audio_cmd,
+    send_osc_cue,
     AUDIO_CMD_STOP,
 )
 from network_settings import (
@@ -329,7 +330,13 @@ class Handler(BaseHTTPRequestHandler):
                 raw = self._device_state().ftp_download(di, "/cues.json")
                 self._json_response(json.loads(raw.decode()))
             except Exception as exc:
-                self._json_error(500, str(exc))
+                import ftplib
+                if isinstance(exc, ftplib.error_perm):
+                    # No /cues.json on the SD card yet — start with an
+                    # empty map instead of failing the page.
+                    self._json_response({})
+                else:
+                    self._json_error(500, str(exc))
             return
         if path == "/api/audio_sync/status":
             with _sync_lock:
@@ -1021,6 +1028,36 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
+        if path == "/api/audio/osc_cue":
+            number = data.get("number")
+            try:
+                number = int(number)
+            except (TypeError, ValueError):
+                number = 0
+            if not (1 <= number <= 255):
+                self._json_error(400, "cue number must be 1-255")
+                return
+            devices = self._device_state().devices
+            if data.get("device") == "all":
+                targets = [(i, d) for i, d in enumerate(devices) if d.get("is_radius")]
+            else:
+                di = data.get("device", -1)
+                if not (isinstance(di, int) and 0 <= di < len(devices)
+                        and devices[di].get("is_radius")):
+                    self._json_error(400, "invalid device index")
+                    return
+                targets = [(di, devices[di])]
+            source_ip = self._device_state().artnet_source_ip
+            results = {}
+            for _, dev in targets:
+                ip = dev.get("ip")
+                try:
+                    send_osc_cue(ip, number, source_ip=source_ip)
+                    results[ip] = {"status": "sent"}
+                except Exception as exc:
+                    results[ip] = {"status": "error", "reason": str(exc)}
+            self._json_response({"results": results})
+            return
         if path == "/api/audio/cue_map":
             di = data.get("device", -1)
             cues = data.get("cues")
@@ -1043,6 +1080,48 @@ class Handler(BaseHTTPRequestHandler):
                 Handler.audio_cues_data = data
                 _audio_cues_mod.save_audio_cues(data)
             self._json_response(data)
+            return
+        if path == "/api/audio_cues/preview_cue_maps":
+            with self.audio_cues_lock:
+                cues = list(self.audio_cues_data.get("cues", []))
+            devices = []
+            for dev in self._device_state().devices:
+                if not dev.get("is_radius"):
+                    continue
+                ip = dev.get("ip")
+                cue_map = _audio_cues_mod.derive_device_cue_map(cues, ip)
+                devices.append({
+                    "ip":        ip,
+                    "name":      dev.get("name", ip),
+                    "connected": bool(dev.get("connected")),
+                    "cue_count": len(cue_map),
+                    "cues":      cue_map,
+                })
+            self._json_response({"devices": devices})
+            return
+        if path == "/api/audio_cues/push_cue_maps":
+            with self.audio_cues_lock:
+                cues = list(self.audio_cues_data.get("cues", []))
+            state = self._device_state()
+            targets = [
+                (di, dev) for di, dev in enumerate(state.devices)
+                if dev.get("is_radius") and dev.get("connected")
+            ]
+            if not targets:
+                self._json_response({"results": {}, "message": "no connected audio devices"})
+                return
+            results = {}
+            for di, dev in targets:
+                ip = dev.get("ip")
+                name = dev.get("name", ip)
+                cue_map = _audio_cues_mod.derive_device_cue_map(cues, ip)
+                try:
+                    raw = json.dumps(cue_map, indent=2).encode()
+                    state.ftp_upload(di, "/cues.json", raw)
+                    results[ip] = {"status": "ok", "cue_count": len(cue_map), "name": name}
+                except Exception as exc:
+                    results[ip] = {"status": "error", "error": str(exc), "name": name}
+            self._json_response({"results": results})
             return
         if path == "/api/audio_cues/fire":
             number = data.get("number")

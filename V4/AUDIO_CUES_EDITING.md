@@ -6,7 +6,7 @@ places, have different schemas, and reload at different times:
 | File | Lives | Used by | Reloads |
 |------|-------|---------|---------|
 | `audio_cues.json` | Sender data directory | Audio Cues page, OSC `/cue/N`, `/api/audio_cues/fire` | **At sender startup only** |
-| `/cues.json` | Each device's SD card | Firmware cue commands (ArtAudioCmd 6/7) | **At device boot only** |
+| `/cues.json` | Each device's SD card | Firmware cue commands (ArtAudioCmd 6/7), device OSC `/cue/N` | At device boot **and after any FTP upload of the file** |
 
 The sender cue sheet resolves cues itself and sends plain play/loop/stop
 commands with filenames. The device cue map lets a cue number be fired at
@@ -128,16 +128,27 @@ sheet work for examples.
 
 ### How to get it onto a device
 
-- Cue Map panel in Radius Central (`GET/POST /api/audio/cue_map`), or
+- **Push from the Audio Cues page** (preferred): the ⇪ Cue Maps button
+  derives each device's `/cues.json` from the sender cue sheet
+  (`derive_device_cue_map` — each device gets the cues where it has an
+  action; the sheet's `delay_ms` becomes the device's `delay`) and
+  uploads to every connected node. Preview before pushing.
+  `POST /api/audio_cues/preview_cue_maps` / `push_cue_maps`.
+- Cue Map panel in Radius Central (`GET/POST /api/audio/cue_map`) for
+  per-device manual edits — **a later push overwrites these**, or
 - any FTP client to the device (user/pass in `config.h`), or
 - pull the SD card and edit directly.
 
-### The one rule that bites: reboot the device
+### Reload rules
 
-Firmware parses `/cues.json` **once, in `setup()`** (`cuesLoad()`).
-Pushing a new file does **not** take effect until the device power-cycles.
-A parse error disables all cue commands on that device until fixed —
-check the serial log for `[Cues] Parse error:` if cues 6/7 stop working.
+Firmware parses `/cues.json` in `setup()` **and re-parses it
+automatically after any FTP upload of the file** (SimpleFTPServer
+transfer callback sets `cuesReloadPending`; the main loop reloads when
+the SD bus is free). So a push or Cue Map save takes effect within a
+second — no reboot. Files placed by pulling the SD card still need a
+power-cycle. A parse error disables all cue commands on that device
+until fixed — check the serial log for `[Cues] Parse error:` if cues
+6/7 stop working.
 
 ---
 

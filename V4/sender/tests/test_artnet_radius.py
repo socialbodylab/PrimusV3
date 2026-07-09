@@ -160,6 +160,29 @@ class RadiusArtNetTests(unittest.TestCase):
         self.assertEqual(AUDIO_CMD_PLAY_CUE, 6)
         self.assertEqual(AUDIO_CMD_LOOP_CUE, 7)
 
+    def test_osc_cue_packet(self):
+        # Firmware parses the OSC address as a C string: it must be
+        # null-terminated and padded to a 4-byte boundary, followed by an
+        # empty type-tag string, and go to the OSC port (not Art-Net).
+        import artnet as artnet_mod
+        sent = []
+
+        def fake_send(ip, packet, source_ip=None, port=None):
+            sent.append((bytes(packet), port))
+
+        original = artnet_mod._send_udp_packet
+        artnet_mod._send_udp_packet = fake_send
+        try:
+            artnet_mod.send_osc_cue("192.168.1.50", 12)
+        finally:
+            artnet_mod._send_udp_packet = original
+
+        pkt, port = sent[0]
+        self.assertEqual(port, artnet_mod.RADIUS_OSC_PORT)
+        self.assertTrue(pkt.startswith(b"/cue/12\x00"))
+        self.assertEqual(len(pkt) % 4, 0)
+        self.assertIn(b",\x00\x00\x00", pkt)
+
     def test_ftp_download_returns_bytes(self):
         class FakeFTP:
             def retrbinary(self, cmd, callback):

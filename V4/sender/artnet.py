@@ -1060,6 +1060,23 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, delay_ms=0, sou
 #  FTP CONTROL — ArtFtpCmd (opcode 0x8301)
 # ======================================================================
 
+RADIUS_OSC_PORT = 53001  # firmware OSC_PORT in config.h
+
+
+def _osc_pad(data):
+    """Null-pad to a 4-byte boundary (OSC spec: 1-4 trailing nulls)."""
+    return data + b"\x00" * (4 - len(data) % 4)
+
+
+def send_osc_cue(ip, number, source_ip=None):
+    """Fire a device cue over OSC (/cue/N), same path an external OSC
+    controller uses — tests the device's boot-loaded cue map directly."""
+    address = f"/cue/{int(number)}".encode("ascii")
+    packet = _osc_pad(address) + _osc_pad(b",")
+    _send_udp_packet(ip, packet, source_ip=source_ip, port=RADIUS_OSC_PORT)
+    netlog.log("OUT", "osc_cmd", f"OSC /cue/{int(number)} → {ip}")
+
+
 def send_ftp_cmd(ip, start, source_ip=None):
     pkt = bytearray(13)
     pkt[0:8] = ARTNET_HEADER
@@ -1083,28 +1100,47 @@ import contextlib as _contextlib
 import io as _io
 
 
+# SimpleFTPServer on the device handles a single client, and every session
+# sends "FTP stop" on exit — a concurrent session to the same device gets its
+# transfer killed mid-flight (seen as timeouts on the Cue Map page, which
+# used to fetch the cue map and the file listing in parallel). Serialize
+# sessions per device IP.
+_ftp_ip_locks = {}
+_ftp_ip_locks_guard = threading.Lock()
+
+
+def _ftp_ip_lock(ip):
+    with _ftp_ip_locks_guard:
+        lock = _ftp_ip_locks.get(ip)
+        if lock is None:
+            lock = threading.Lock()
+            _ftp_ip_locks[ip] = lock
+        return lock
+
+
 @_contextlib.contextmanager
 def _ftp_session(ip, source_ip=None, timeout=8.0):
     import ftplib
-    send_ftp_cmd(ip, start=True, source_ip=source_ip)
-    time.sleep(0.5)
-    ftp = ftplib.FTP()
-    try:
-        ftp.connect(ip, FTP_PORT, timeout=timeout)
-        ftp.login(FTP_USER, FTP_PASSWORD)
-        yield ftp
+    with _ftp_ip_lock(ip):
+        send_ftp_cmd(ip, start=True, source_ip=source_ip)
+        time.sleep(0.5)
+        ftp = ftplib.FTP()
         try:
-            ftp.quit()
+            ftp.connect(ip, FTP_PORT, timeout=timeout)
+            ftp.login(FTP_USER, FTP_PASSWORD)
+            yield ftp
+            try:
+                ftp.quit()
+            except Exception:
+                pass
         except Exception:
-            pass
-    except Exception:
-        try:
-            ftp.close()
-        except Exception:
-            pass
-        raise
-    finally:
-        send_ftp_cmd(ip, start=False, source_ip=source_ip)
+            try:
+                ftp.close()
+            except Exception:
+                pass
+            raise
+        finally:
+            send_ftp_cmd(ip, start=False, source_ip=source_ip)
 
 
 def _parse_list_line(line):

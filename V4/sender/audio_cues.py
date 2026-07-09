@@ -120,6 +120,50 @@ def load_audio_cues():
     return {"cues": []}
 
 
+_DEVICE_CUE_CMDS = {"play", "loop", "stop", "volume"}
+
+
+def derive_device_cue_map(cues, ip):
+    """Derive /cues.json content for one device from the sender cue sheet.
+
+    Returns {str(number): entry_dict} ready for JSON upload to the device SD.
+    Entries with cmd="none", unknown cmd, or play/loop with empty filename are
+    excluded, as are cue numbers outside 1-255 (device numbers are uint8).
+    stop and volume entries require no filename. Optional fields (volume,
+    duration, delay) are included only when present and non-zero — except
+    volume, where 0 is a valid value and is kept. The sheet's delay_ms field
+    maps to the device schema's delay field (both milliseconds).
+    """
+    result = {}
+    for cue in cues:
+        number = cue.get("number")
+        if not isinstance(number, int) or not (1 <= number <= 255):
+            continue
+        action = cue.get("actions", {}).get(ip)
+        if action is None:
+            continue
+        cmd = str(action.get("cmd", "none"))
+        if cmd not in _DEVICE_CUE_CMDS:
+            continue
+        entry = {"cmd": cmd}
+        if cmd in ("play", "loop"):
+            filename = str(action.get("filename", ""))
+            if not filename:
+                continue
+            entry["file"] = filename
+        volume = action.get("volume")
+        if volume is not None:
+            entry["volume"] = int(volume)
+        duration = action.get("duration")
+        if duration:
+            entry["duration"] = int(duration)
+        delay = action.get("delay_ms")
+        if delay:
+            entry["delay"] = int(delay)
+        result[str(number)] = entry
+    return result
+
+
 def save_audio_cues(data):
     """Write cue sheet to disk."""
     try:

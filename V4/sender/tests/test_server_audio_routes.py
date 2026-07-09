@@ -131,6 +131,47 @@ class ServerAudioRouteTests(unittest.TestCase):
         self.assertEqual(status, 200)
         mock_hello.assert_called_once_with(0, volume=70)
 
+    def test_preview_cue_maps(self):
+        server_radius.Handler.audio_cues_data = {
+            "cues": [
+                {"number": 1, "actions": {"192.168.1.50": {"cmd": "play", "filename": "a.wav", "volume": 97}}},
+                {"number": 2, "actions": {"192.168.9.99": {"cmd": "play", "filename": "b.wav"}}},
+            ],
+        }
+        status, data = _http("POST", f"{self.base}/api/audio_cues/preview_cue_maps", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["devices"]), 1)
+        dev = data["devices"][0]
+        self.assertEqual(dev["ip"], "192.168.1.50")
+        self.assertEqual(dev["cue_count"], 1)
+        self.assertEqual(dev["cues"]["1"], {"cmd": "play", "file": "a.wav", "volume": 97})
+
+    @patch.object(RadiusState, "ftp_upload")
+    def test_push_cue_maps(self, mock_upload):
+        server_radius.Handler.audio_cues_data = {
+            "cues": [
+                {"number": 1, "actions": {"192.168.1.50": {"cmd": "play", "filename": "a.wav", "volume": 97, "delay_ms": 500}}},
+            ],
+        }
+        status, data = _http("POST", f"{self.base}/api/audio_cues/push_cue_maps", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["results"]["192.168.1.50"]["status"], "ok")
+        self.assertEqual(data["results"]["192.168.1.50"]["cue_count"], 1)
+        mock_upload.assert_called_once()
+        args = mock_upload.call_args[0]
+        self.assertEqual(args[1], "/cues.json")
+        uploaded = json.loads(args[2].decode())
+        self.assertEqual(uploaded["1"],
+                         {"cmd": "play", "file": "a.wav", "volume": 97, "delay": 500})
+
+    def test_push_cue_maps_no_connected_devices(self):
+        self.state.devices[0]["connected"] = False
+        server_radius.Handler.audio_cues_data = {"cues": []}
+        status, data = _http("POST", f"{self.base}/api/audio_cues/push_cue_maps", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["results"], {})
+        self.assertIn("message", data)
+
     @patch.object(RadiusState, "fire_audio_cue", return_value={"192.168.1.50": {"status": "sent"}})
     def test_fire_cue(self, mock_fire):
         server_radius.Handler.audio_cues_data = {

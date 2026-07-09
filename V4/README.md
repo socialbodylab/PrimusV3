@@ -139,7 +139,7 @@ See [PACKAGING.md](PACKAGING.md) for signing and release details.
 
 **ArtAudioStatus:** sent to the first controller the device heard after boot: status byte (0=stopped, 1=playing, 2=paused) + null-terminated filename (64 bytes). The 78-byte packet must be transmitted at full length — a truncated 46-byte write once cut filenames at 33 chars.
 
-**Device cue map:** `/cues.json` on SD card (loaded at boot). Keys are cue numbers as strings; values are either a WAV filename string or `{"file": "name.wav", "duration": 30}`. Max 64 entries. Edited from the Cue Map panel or via `GET/POST /api/audio/cue_map`.
+**Device cue map:** `/cues.json` on SD card (loaded at boot and reloaded automatically after any FTP upload of the file). Keys are cue numbers as strings; values are either a WAV filename string or `{"file": "name.wav", "duration": 30}`. Max 64 entries. Derived from the sender cue sheet and pushed to all connected devices via ⇪ Cue Maps on the Audio Cues page (`POST /api/audio_cues/push_cue_maps`), or hand-edited per device from the Cue Map panel (`GET/POST /api/audio/cue_map`).
 
 Editing the sender cue sheet (`audio_cues.json`) or a device cue map by hand: see [`AUDIO_CUES_EDITING.md`](AUDIO_CUES_EDITING.md) — schemas, reload rules, and the restart-before-UI-edit gotcha.
 

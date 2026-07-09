@@ -11,9 +11,13 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("audioCues", () => ({
 
         // ── State ─────────────────────────────────────────────────────
-        cues:         [],   // [{number, note, actions: {ip: {cmd,filename,volume,duration}}}]
+        // Each cue gets a client-side _id so list rendering is keyed on
+        // something stable — duplicate numbers (e.g. from an imported file)
+        // must never break the page. _id is stripped before saving.
+        cues:         [],   // [{number, note, actions: {ip: {cmd,filename,volume,duration}}, _id}]
         projectFiles: [],   // [{name, size}]
         _saveTimer:   null,
+        _nextCueId:   1,
 
         // Sync
         syncModal:     false,
@@ -23,6 +27,14 @@ document.addEventListener("alpine:init", () => {
         // Fire results: cue_number -> {ip -> {status, reason}}
         fireResults:   {},
         _fireFadeTimers: {},
+
+        // Cue maps modal (derive /cues.json per device from this sheet)
+        cueMapsModal:      false,
+        cueMapsPreview:    null,   // [{ip, name, connected, cue_count, cues}]
+        cueMapsLoading:    false,
+        cueMapsUploading:  false,
+        cueMapsResults:    null,   // {ip: {status, cue_count, name, error}}
+        cueMapsError:      null,
 
         // Import
         _importInput:  null,
@@ -61,7 +73,7 @@ document.addEventListener("alpine:init", () => {
         async load() {
             try {
                 const data = await api("GET", "/api/audio_cues");
-                this.cues = data.cues || [];
+                this.cues = (data.cues || []).map(c => ({ ...c, _id: this._nextCueId++ }));
             } catch (e) {
                 console.error("[audio-cues] load failed:", e);
             }
@@ -74,7 +86,8 @@ document.addEventListener("alpine:init", () => {
 
         async save() {
             try {
-                await api("POST", "/api/audio_cues", { cues: this.cues });
+                const cues = this.cues.map(({ _id, ...rest }) => rest);
+                await api("POST", "/api/audio_cues", { cues });
             } catch (e) {
                 console.error("[audio-cues] save failed:", e);
             }
@@ -82,15 +95,52 @@ document.addEventListener("alpine:init", () => {
 
         // ── Cue operations ────────────────────────────────────────────
 
+        _usedNumbers(exceptId = null) {
+            return new Set(this.cues.filter(c => c._id !== exceptId).map(c => c.number));
+        },
+
+        // New cues take the FIRST free number (fills gaps), not max+1.
         addCue() {
-            const nums = this.cues.map(c => c.number || 0);
-            const next = nums.length ? Math.max(...nums) + 1 : 1;
+            const used = this._usedNumbers();
+            let n = 1;
+            while (n <= 255 && used.has(n)) n++;
+            if (n > 255) return;  // sheet is full
             this.cues = [...this.cues, {
-                number:  next,
+                number:  n,
                 note:    "",
                 actions: {},
+                _id:     this._nextCueId++,
             }];
             this.scheduleSave();
+        },
+
+        // Renumbering can never create a duplicate: if the requested number
+        // is taken, walk in the direction of the change to the next free
+        // number (so the input's spinner arrows hop over used numbers).
+        // Falls back to the other direction at the 1/255 bounds, and to the
+        // old number if the sheet is completely full.
+        setCueNumber(idx, rawValue) {
+            const c = this.sortedCues[idx];
+            const i = this.cues.indexOf(c);
+            if (i === -1) return;
+            const old = c.number || 1;
+            const requested = parseInt(rawValue);
+            let n = old;
+            if (!isNaN(requested) && requested !== old) {
+                const used = this._usedNumbers(c._id);
+                const dir = requested >= old ? 1 : -1;
+                n = Math.max(1, Math.min(255, requested));
+                while (n >= 1 && n <= 255 && used.has(n)) n += dir;
+                if (n < 1 || n > 255) {
+                    n = Math.max(1, Math.min(255, requested));
+                    while (n >= 1 && n <= 255 && used.has(n)) n -= dir;
+                    if (n < 1 || n > 255) n = old;
+                }
+            }
+            // Always reassign so the input re-syncs to the resolved number
+            // even when it differs from what was typed.
+            this.cues = this.cues.map((x, j) => j === i ? { ...x, number: n } : x);
+            if (n !== old) this.scheduleSave();
         },
 
         removeCue(idx) {
@@ -133,6 +183,48 @@ document.addEventListener("alpine:init", () => {
         },
 
         // ── Fire ──────────────────────────────────────────────────────
+
+        // ── Cue maps (push this sheet to device SD cards) ─────────────
+
+        async openCueMaps() {
+            this.cueMapsModal     = true;
+            this.cueMapsPreview   = null;
+            this.cueMapsResults   = null;
+            this.cueMapsError     = null;
+            this.cueMapsLoading   = true;
+            this.cueMapsUploading = false;
+            try {
+                const data = await api("POST", "/api/audio_cues/preview_cue_maps");
+                this.cueMapsPreview = data.devices || [];
+            } catch (e) {
+                this.cueMapsError = e.message;
+            } finally {
+                this.cueMapsLoading = false;
+            }
+        },
+
+        closeCueMaps() {
+            this.cueMapsModal = false;
+        },
+
+        async uploadCueMaps() {
+            this.cueMapsUploading = true;
+            this.cueMapsResults   = null;
+            this.cueMapsError     = null;
+            try {
+                const data = await api("POST", "/api/audio_cues/push_cue_maps");
+                this.cueMapsResults = data.results || {};
+                if (data.message) this.cueMapsError = data.message;
+            } catch (e) {
+                this.cueMapsError = e.message;
+            } finally {
+                this.cueMapsUploading = false;
+            }
+        },
+
+        cueMapsConnectedCount() {
+            return (this.cueMapsPreview || []).filter(d => d.connected).length;
+        },
 
         async fireCue(cueIdx) {
             const c = this.sortedCues[cueIdx];

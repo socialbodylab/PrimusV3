@@ -70,6 +70,18 @@ class ReceiverSketchContracts(unittest.TestCase):
         self.assertIn("WiFi.setSleep(false)", body)
 
 
+class FtpHeaderContracts(unittest.TestCase):
+    def test_cue_map_reloads_after_ftp_upload(self):
+        # A pushed /cues.json must take effect without a reboot: ftp.h
+        # schedules a reload via the SimpleFTPServer transfer callback and
+        # the main loop runs cuesLoad() only while the SD bus is free.
+        ftp = read_source("ftp.h")
+        self.assertIn("setTransferCallback", ftp)
+        self.assertIn("cuesReloadPending = true", ftp)
+        ino = read_source("radius_receiver.ino")
+        self.assertIn("cuesReloadPending && !sdBusy", ino)
+
+
 class AudioHeaderContracts(unittest.TestCase):
     def setUp(self):
         self.audio = read_source("audio.h")
