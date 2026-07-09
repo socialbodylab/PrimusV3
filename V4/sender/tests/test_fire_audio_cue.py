@@ -135,6 +135,70 @@ class FireAudioCueTests(unittest.TestCase):
             volume=80,
         )
 
+    # Duration/delay passthrough — guards db64bed, where duration was read
+    # from the cue action but silently dropped before send_audio_cmd().
+
+    @patch("radius_state.send_audio_cmd")
+    def test_duration_is_cast_to_int(self, mock_send):
+        cue = {
+            "number": 6,
+            "actions": {
+                "192.168.1.10": {"cmd": "play", "filename": "a.wav", "duration": 12.7},
+            },
+        }
+        self.state.fire_audio_cue(cue)
+        self.assertEqual(mock_send.call_args.kwargs["duration"], 12)
+
+    @patch("radius_state.send_audio_cmd")
+    def test_absent_duration_sends_zero(self, mock_send):
+        cue = {
+            "number": 7,
+            "actions": {"192.168.1.10": {"cmd": "play", "filename": "a.wav"}},
+        }
+        self.state.fire_audio_cue(cue)
+        self.assertEqual(mock_send.call_args.kwargs["duration"], 0)
+
+    @patch("radius_state.send_audio_cmd")
+    def test_delay_ms_is_passed_through(self, mock_send):
+        cue = {
+            "number": 8,
+            "actions": {
+                "192.168.1.10": {
+                    "cmd": "play", "filename": "a.wav", "delay_ms": 1500,
+                },
+            },
+        }
+        self.state.fire_audio_cue(cue)
+        self.assertEqual(mock_send.call_args.kwargs["delay_ms"], 1500)
+
+    @patch("radius_state.send_audio_cmd")
+    def test_zero_delay_ms_is_omitted(self, mock_send):
+        cue = {
+            "number": 9,
+            "actions": {
+                "192.168.1.10": {"cmd": "play", "filename": "a.wav", "delay_ms": 0},
+            },
+        }
+        self.state.fire_audio_cue(cue)
+        self.assertNotIn("delay_ms", mock_send.call_args.kwargs)
+
+    @patch("radius_state.send_audio_cmd")
+    def test_volume_duration_and_delay_together(self, mock_send):
+        cue = {
+            "number": 10,
+            "actions": {
+                "192.168.1.10": {
+                    "cmd": "loop", "filename": "a.wav",
+                    "volume": 42, "duration": 30, "delay_ms": 500,
+                },
+            },
+        }
+        self.state.fire_audio_cue(cue)
+        kwargs = mock_send.call_args.kwargs
+        self.assertEqual(kwargs["volume"], 42)
+        self.assertEqual(kwargs["duration"], 30)
+        self.assertEqual(kwargs["delay_ms"], 500)
+
 
 if __name__ == "__main__":
     unittest.main()

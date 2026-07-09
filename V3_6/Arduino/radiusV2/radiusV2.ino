@@ -585,7 +585,7 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   buf[12] = status;
   if (filename && filename[0]) strncpy((char*)&buf[13], filename, 64);
   udpReport.beginPacket(senderIP, AUDIO_REPORT_PORT);
-  udpReport.write(buf, 46);
+  udpReport.write(buf, sizeof(buf));
   udpReport.endPacket();
 }
 

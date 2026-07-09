@@ -32,10 +32,20 @@
   #define FIRMWARE_NAME    "Radius V1"
   #define DEVICE_LONG_NAME "Radius Central V1"
   #define NODE_CAPS_BOARD  "v1"
+  // Headless board: WiFi status LED on the onboard red LED (GPIO13).
+  // Off = disconnected, blink = connected via DHCP, solid = static IP.
+  #ifndef LED_BUILTIN
+    #define LED_BUILTIN 13
+  #endif
+  #define BOARD_HAS_STATUS_LED         1
+  #define BOARD_STATUS_LED_PIN         LED_BUILTIN
+  #define BOARD_STATUS_LED_ACTIVE_HIGH 1
 #else
   #define FIRMWARE_NAME    "Radius V2"
   #define DEVICE_LONG_NAME "Radius Central V2"
   #define NODE_CAPS_BOARD  "v2"
+  // TFT board: connection state is shown on the display, no status LED.
+  #define BOARD_HAS_STATUS_LED         0
 #endif
 
 // =====================================================================

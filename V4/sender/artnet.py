@@ -25,6 +25,7 @@ ARTNET_OPCODE_RECEIVE_CONFIG = 0x8110
 ARTNET_OPCODE_IP_CONFIG = 0x8200
 ARTNET_OPCODE_AUDIO_CMD = 0x8300
 ARTNET_OPCODE_FTP_CMD = 0x8301
+ARTNET_OPCODE_AUDIO_STATUS = 0x8302
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
 NODE_CAPS_PREFIX = "PV3CAP1"
@@ -342,6 +343,32 @@ class FpsListener(PrimusTelemetryListener):
     """Backward-compatible alias for Primus telemetry listener."""
 
 
+def parse_audio_status_packet(raw):
+    """Parse an ArtAudioStatus (0x8302) packet. Returns dict or None.
+
+    Layout: Art-Net header (8) + opcode LE (2) + protocol version (2) +
+    status byte (1) + null-terminated ASCII filename (up to 64 bytes).
+    The filename field must carry a full 64-char name — the firmware
+    once truncated packets to 46 bytes, cutting names at 33 chars.
+    """
+    if len(raw) < 13 or raw[:8] != ARTNET_HEADER:
+        return None
+    opcode = struct.unpack("<H", raw[8:10])[0]
+    if opcode != ARTNET_OPCODE_AUDIO_STATUS:
+        return None
+    name = raw[13:77].split(b'\x00')[0].decode("ascii", errors="replace")
+    return {"playback_state": raw[12], "current_track": name}
+
+
+def parse_track_packet(raw):
+    """Parse a legacy PTR track telemetry packet. Returns dict or None."""
+    if len(raw) < 5 or raw[:3] != TRACK_MAGIC:
+        return None
+    name_len = raw[4]
+    name = raw[5:5 + name_len].decode("utf-8", errors="replace") if name_len else ""
+    return {"playback_state": raw[3], "current_track": name}
+
+
 class RadiusTelemetryListener:
     """Listens on UDP 6455 for PTR track-name telemetry from Radius nodes."""
 
@@ -370,35 +397,18 @@ class RadiusTelemetryListener:
                 raw, addr = self._sock.recvfrom(256)
             except socket.timeout:
                 continue
-            if len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
-                opcode = struct.unpack("<H", raw[8:10])[0]
-                if opcode == 0x8302:
-                    status = raw[12]
-                    name = raw[13:77].split(b'\x00')[0].decode("ascii", errors="replace") if len(raw) > 13 else ""
-                    with self.lock:
-                        self.data[addr[0]] = {
-                            "playback_state": status,
-                            "current_track": name,
-                            "ts": time.monotonic(),
-                        }
-                    state_str = "playing" if status == 1 else ("paused" if status == 2 else "stopped")
-                    file_str = f" \"{name}\"" if name else ""
-                    netlog.log("IN", "audio_status", f"AudioStatus {state_str}{file_str} ← {addr[0]}")
-                continue
-            if len(raw) >= 5 and raw[:3] == TRACK_MAGIC:
-                state = raw[3]
-                name_len = raw[4]
-                name = raw[5:5 + name_len].decode("utf-8", errors="replace") if name_len else ""
+            status = parse_audio_status_packet(raw) or parse_track_packet(raw)
+            if status is not None:
                 with self.lock:
-                    self.data[addr[0]] = {
-                        "playback_state": state,
-                        "current_track": name,
-                        "ts": time.monotonic(),
-                    }
+                    self.data[addr[0]] = {**status, "ts": time.monotonic()}
+                state = status["playback_state"]
+                name = status["current_track"]
                 state_str = "playing" if state == 1 else ("paused" if state == 2 else "stopped")
                 file_str = f" \"{name}\"" if name else ""
                 netlog.log("IN", "audio_status", f"AudioStatus {state_str}{file_str} ← {addr[0]}")
                 continue
+            if len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
+                continue  # other Art-Net traffic on the telemetry port — ignore
             if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
                 fps = (raw[3] << 8) | raw[4]
                 pkt = (raw[5] << 8) | raw[6]

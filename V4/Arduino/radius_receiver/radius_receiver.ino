@@ -200,6 +200,54 @@ void startWifiConnect() {
   Serial.println("WiFi connecting (non-blocking)...");
 }
 
+// ── WiFi status LED (headless boards) ────────────────────────────────
+// Off = disconnected, blink = connected via DHCP, solid = static IP.
+// Same behaviour as the Primus receiver's connection indicator.
+
+bool statusIndicatorConnected = false;
+bool statusIndicatorStaticIP = false;
+bool statusIndicatorLit = false;
+unsigned long lastStatusIndicatorBlink = 0;
+static const unsigned long STATUS_INDICATOR_BLINK_INTERVAL = 500;
+
+void writeConnectionIndicator(bool lit) {
+  statusIndicatorLit = lit;
+
+#if BOARD_HAS_STATUS_LED
+  bool ledOn = lit ? BOARD_STATUS_LED_ACTIVE_HIGH : !BOARD_STATUS_LED_ACTIVE_HIGH;
+  digitalWrite(BOARD_STATUS_LED_PIN, ledOn ? HIGH : LOW);
+#endif
+}
+
+void setConnectionIndicator(bool connected) {
+  statusIndicatorConnected = connected;
+  statusIndicatorStaticIP = activeStaticIP;
+  lastStatusIndicatorBlink = millis();
+  writeConnectionIndicator(connected);
+}
+
+void initConnectionIndicator() {
+#if BOARD_HAS_STATUS_LED
+  pinMode(BOARD_STATUS_LED_PIN, OUTPUT);
+#endif
+  setConnectionIndicator(false);
+}
+
+// Called every loop() pass: checkWifiConnection() is throttled by
+// WIFI_CHECK_INTERVAL_MS, too coarse for a clean 500 ms DHCP blink.
+void syncConnectionIndicator() {
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  if (connected != statusIndicatorConnected || activeStaticIP != statusIndicatorStaticIP) {
+    setConnectionIndicator(connected);
+    return;
+  }
+  if (connected && !activeStaticIP &&
+      millis() - lastStatusIndicatorBlink >= STATUS_INDICATOR_BLINK_INTERVAL) {
+    lastStatusIndicatorBlink = millis();
+    writeConnectionIndicator(!statusIndicatorLit);
+  }
+}
+
 void checkWifiConnection() {
   unsigned long now = millis();
   if (now - lastWifiCheckMs < WIFI_CHECK_INTERVAL_MS) return;
@@ -209,6 +257,8 @@ void checkWifiConnection() {
     if (!wifiConnected) {
       wifiConnected = true;
       wifiConnecting = false;
+      WiFi.setSleep(false);  // must be set after connect — connection process resets it
+      setConnectionIndicator(true);
       Serial.print("WiFi connected! IP: ");
       Serial.println(WiFi.localIP());
       udp.begin(ARTNET_PORT);
@@ -224,6 +274,7 @@ void checkWifiConnection() {
 
   if (wifiConnected) {
     wifiConnected = false;
+    setConnectionIndicator(false);
     Serial.println("WiFi lost.");
   }
 
@@ -509,7 +560,7 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   buf[12] = status;
   if (filename && filename[0]) strncpy((char*)&buf[13], filename, 64);
   udpReport.beginPacket(senderIP, FPS_REPORT_PORT);
-  udpReport.write(buf, 46);
+  udpReport.write(buf, sizeof(buf));
   udpReport.endPacket();
 }
 
@@ -728,6 +779,7 @@ void setup() {
   buttonsInit();
   displayInit();
   displayStartup();
+  initConnectionIndicator();
 
   prefs.begin("artnet", false);
   loadStoredDeviceName();
@@ -793,6 +845,9 @@ void loop() {
 
   // Throttled WiFi health
   checkWifiConnection();
+
+  // WiFi status LED (unthrottled — drives the 500 ms DHCP blink)
+  syncConnectionIndicator();
 
   // Buttons
   buttonsPoll();

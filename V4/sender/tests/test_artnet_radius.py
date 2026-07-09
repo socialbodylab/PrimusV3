@@ -83,6 +83,76 @@ class RadiusArtNetTests(unittest.TestCase):
         duration = struct.unpack("<H", pkt[null_idx + 1:null_idx + 3])[0]
         self.assertEqual(duration, 30)
 
+    def test_audio_cmd_full_64_char_filename(self):
+        # Regression guard for the 32→64 filename migration (a51b8f9):
+        # the whole 64-char name must survive packet encoding.
+        name = ("x" * 60) + ".wav"
+        self.assertEqual(len(name), 64)
+        sent = []
+
+        def fake_send(ip, packet, source_ip=None):
+            sent.append(bytes(packet))
+
+        import artnet as artnet_mod
+        original = artnet_mod._send_udp_packet
+        artnet_mod._send_udp_packet = fake_send
+        try:
+            send_audio_cmd("192.168.1.50", 1, filename=name, volume=80)
+        finally:
+            artnet_mod._send_udp_packet = original
+
+        pkt = sent[0]
+        self.assertEqual(pkt[14:14 + 64].decode("ascii"), name)
+        self.assertEqual(pkt[14 + 64], 0)  # null terminator after full name
+
+    def test_audio_cmd_delay_after_duration(self):
+        # delay_ms is encoded as uint16 LE after the uint16 LE duration.
+        sent = []
+
+        def fake_send(ip, packet, source_ip=None):
+            sent.append(bytes(packet))
+
+        import artnet as artnet_mod
+        original = artnet_mod._send_udp_packet
+        artnet_mod._send_udp_packet = fake_send
+        try:
+            send_audio_cmd(
+                "192.168.1.50", 1, filename="clip.wav", volume=50,
+                duration=30, delay_ms=1500,
+            )
+        finally:
+            artnet_mod._send_udp_packet = original
+
+        pkt = sent[0]
+        null_idx = pkt.index(0, 14)
+        duration, delay = struct.unpack("<HH", pkt[null_idx + 1:null_idx + 5])
+        self.assertEqual(duration, 30)
+        self.assertEqual(delay, 1500)
+
+    def test_audio_cmd_delay_without_duration(self):
+        # With delay but no duration the firmware still expects both
+        # uint16 fields; duration is written as 0.
+        sent = []
+
+        def fake_send(ip, packet, source_ip=None):
+            sent.append(bytes(packet))
+
+        import artnet as artnet_mod
+        original = artnet_mod._send_udp_packet
+        artnet_mod._send_udp_packet = fake_send
+        try:
+            send_audio_cmd(
+                "192.168.1.50", 1, filename="clip.wav", volume=50, delay_ms=250,
+            )
+        finally:
+            artnet_mod._send_udp_packet = original
+
+        pkt = sent[0]
+        null_idx = pkt.index(0, 14)
+        duration, delay = struct.unpack("<HH", pkt[null_idx + 1:null_idx + 5])
+        self.assertEqual(duration, 0)
+        self.assertEqual(delay, 250)
+
     def test_audio_cmd_constants(self):
         self.assertEqual(AUDIO_CMD_TEST_TONE, 5)
         self.assertEqual(AUDIO_CMD_PLAY_CUE, 6)

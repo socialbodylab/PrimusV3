@@ -99,13 +99,38 @@ See `MARIUS_REFERENCE.md` for project overview, architecture, `marius.json` form
 
 ### Sample rate bug fix
 
-- [ ] Flash E10 (192.168.8.159) with V4 firmware that includes WAV header read + `softReset()` on sample rate change (`V4/Arduino/radius_receiver/audio.h`)
+- [x] Flash E10 (192.168.8.159) with V4 firmware that includes WAV header read + `softReset()` on sample rate change (`V4/Arduino/radius_receiver/audio.h`) — flashed 2026-07-08 with all fixes (sample-rate soft reset, volume-cache mute, audioLoop order, post-connect WiFi.setSleep)
 - [ ] Verify fix: play `hello.wav` (suspected different sample rate) then a second file — subsequent file must play correctly
 - [ ] Check serial log for `[Audio] Sample rate change X→Y Hz — soft reset` line on rate transition
 
 ### Test suite — mixed sample rate playback
 
-- [ ] Add WAV files at 44100 Hz and 48000 Hz to SD card test fixture (or sender test assets)
-- [ ] Write a test (pytest or manual checklist) that plays a 44100 Hz file, then a 48000 Hz file, then a 44100 Hz file again
-- [ ] Confirm each file plays at correct pitch and does not leave the device in a stuck state
-- [ ] Confirm `sdBusy` is cleared after each track ends (FTP accessible between tracks)
+Automated in `V4/sender/tests/test_hw_sample_rate.py` (hardware-in-the-loop,
+skipped unless `PRIMUS_HW_TEST_IP` is set). It generates and uploads 44100 Hz
+and 48000 Hz fixtures, plays 44100 → 48000 → 44100, and detects a wedged SD
+bus via a missing 0x8302 "stopped" status corroborated by a blocked FTP
+connect (both must fail — telemetry missing alone is UDP loss, reported
+separately). Sends a stop command to recover the card before failing.
+
+- [x] Add WAV files at 44100 Hz and 48000 Hz to SD card test fixture (or sender test assets) — generated + FTP-uploaded by the test
+- [x] Write a test that plays a 44100 Hz file, then a 48000 Hz file, then a 44100 Hz file again
+- [x] Confirm `sdBusy` is cleared after each track ends (FTP accessible between tracks) — asserted by the test
+- [ ] Confirm each file plays at correct pitch — needs a human ear; run the test and listen
+- [ ] Run against E10 (192.168.8.159) after flashing V4 firmware:
+      `cd V4/sender && PRIMUS_HW_TEST_IP=192.168.8.159 python3 -m unittest tests.test_hw_sample_rate -v`
+
+### Sender — discovery port race (deferred)
+
+Seen 2026-07-08 during a session with heavy unrelated network traffic:
+`OSError: [Errno 48] Address already in use` from `discover_artnet_nodes`
+(`V4/sender/artnet.py` — `sock.bind(("", ARTNET_PORT))`). ArtPollReply always
+arrives on UDP 6454, the HTTP server is threaded, and discovery runs from
+five routes plus startup restore — overlapping calls race for the 6454 bind
+and the loser crashes that request (device then looks offline).
+
+- [ ] Serialize `discover_artnet_nodes` with a module-level lock so
+      concurrent callers queue instead of raising EADDRINUSE
+- [ ] Do NOT use SO_REUSEPORT instead — the kernel load-balances UDP between
+      sockets sharing a port, so each discovery would see only a subset of replies
+- [ ] Add a two-threads-discover-concurrently regression test (mock
+      `_discovery_destinations` to avoid real broadcasts; skip if 6454 unavailable)

@@ -46,6 +46,15 @@ static void _applyVolume(uint8_t volume) {
   _musicMaker.setVolume(vs1053vol, vs1053vol);
 }
 
+// The only allowed way to mute the chip directly. Invalidates the
+// _lastAppliedVolume cache so the next _applyVolume() always writes —
+// a bare setVolume(254, 254) leaves the cache claiming the old volume
+// and _applyVolume() then skips the unmute (silent playback bug).
+static void _muteChip() {
+  _musicMaker.setVolume(254, 254);
+  _lastAppliedVolume = 255;
+}
+
 void audioInit() {
   Serial.println("[Audio] Music Maker FeatherWing (VS1053)");
 
@@ -53,7 +62,7 @@ void audioInit() {
     Serial.println("[Audio] ERROR: VS1053 begin() failed");
     return;
   }
-  _musicMaker.setVolume(254, 254);  // start muted — unmuted when playback begins
+  _muteChip();  // start muted — unmuted when playback begins
   // No interrupt on ESP32 — SPI uses semaphores, can't be called from ISR.
   // feedBuffer() is called from audioUpdate() in the main loop instead.
   _audioHwReady = true;
@@ -160,8 +169,8 @@ void audioTestTone() {
 }
 
 void audioLoop(const char* filename, uint8_t volume, uint16_t duration = 0) {
-  _audioLooping = true;
   audioPlay(filename, volume, duration);
+  _audioLooping = true;  // must be set after audioPlay() — audioPlay() resets it to false
 }
 
 void audioUpdate() {
@@ -180,7 +189,7 @@ void audioUpdate() {
         _notifyTrack(TRACK_STATE_PLAYING);
       }
     } else if (_audioCurrentFile[0] != '\0') {
-      _musicMaker.setVolume(254, 254);
+      _muteChip();
       _audioCurrentFile[0] = '\0';
       _audioDuration = 0;
       sdBusy = false;
@@ -205,6 +214,7 @@ void audioBootTest() {
   if (!_audioHwReady) return;
   Serial.println("[Boot] Sine test (1kHz, 500ms)...");
   _musicMaker.setVolume(40, 40);
+  _lastAppliedVolume = 255;  // chip volume touched directly — invalidate cache
   _musicMaker.sineTest(0x44, 500);
   Serial.println("[Boot] Sine test complete");
 
