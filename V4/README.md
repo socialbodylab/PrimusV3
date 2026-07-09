@@ -125,6 +125,8 @@ See [PACKAGING.md](PACKAGING.md) for signing and release details.
 
 ## Protocol
 
+**Radius Art-Net port: UDP 6456** (not the standard 6454). Radius nodes listen, reply to ArtPoll, and receive all commands on 6456 so LED-show traffic and third-party Art-Net gear never reach them. Primus LED nodes stay on 6454. The port is defined once on each side — `ARTNET_PORT` in `Arduino/radius_receiver/config.h` and `RADIUS_ARTNET_PORT` in `sender/artnet.py` — and a contract test asserts they match. Devices on pre-6456 firmware are invisible to the sender (and vice versa): flash the fleet and update the sender together.
+
 | Opcode | Name | Purpose |
 |--------|------|---------|
 | 0x6000 | ArtAddress | Rename via NVS |

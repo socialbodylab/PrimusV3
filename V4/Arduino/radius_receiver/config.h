@@ -101,7 +101,10 @@
 // =====================================================================
 //  Art-Net
 // =====================================================================
-#define ARTNET_PORT              6454
+// Radius nodes listen off the standard Art-Net port (6454) so LED-show
+// traffic and third-party Art-Net gear never reach them. Must match
+// RADIUS_ARTNET_PORT in V4/sender/artnet.py (contract-tested).
+#define ARTNET_PORT              6456
 #define ARTNET_OPCODE_POLL       0x2000
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000

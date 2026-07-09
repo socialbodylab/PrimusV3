@@ -23,6 +23,8 @@ from serial_monitor import SerialMonitorError, serial_monitor
 import mixer
 import sharing
 from artnet import (
+    ARTNET_PORT,
+    RADIUS_ARTNET_PORT,
     discover_artnet_nodes,
     ftp_list_dir,
     ftp_upload,
@@ -68,11 +70,17 @@ def _safe_ftp_path(path):
     return True
 
 
+def _discovery_port():
+    """Art-Net port for the active product: Radius nodes listen on 6456."""
+    return RADIUS_ARTNET_PORT if sender_product() == "radius" else ARTNET_PORT
+
+
 def _sync_network_devices(device_state, interface=None):
     """Discover nodes, add compatible new devices, and connect all online targets."""
     product = sender_product()
     known_ips = device_state.discovery_targets()
-    nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+    nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface,
+                                  port=_discovery_port())
     if nodes:
         device_state.refresh_devices_from_nodes(nodes)
 
@@ -385,7 +393,8 @@ class Handler(BaseHTTPRequestHandler):
             if 0 <= di < len(self._device_state().devices):
                 ip = self._device_state().devices[di]["ip"]
                 interface = self._sync_artnet_source()
-                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface)
+                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface,
+                                              port=_discovery_port())
                 node = next((n for n in nodes if n["ip"] == ip), None)
                 if node:
                     self._device_state().add_device_from_node(node)
@@ -408,7 +417,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/connect_all":
             known_ips = self._device_state().discovery_targets()
             interface = self._sync_artnet_source()
-            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface,
+                                          port=_discovery_port())
             if nodes:
                 self._device_state().refresh_devices_from_nodes(nodes)
             online_ips = {node.get("ip") for node in nodes if node.get("ip")}
@@ -426,7 +436,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/discover":
             known_ips = self._device_state().discovery_targets()
             interface = self._sync_artnet_source()
-            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface)
+            nodes = discover_artnet_nodes(known_ips=known_ips, timeout=2.0, interface=interface,
+                                          port=_discovery_port())
             self._device_state().refresh_devices_from_nodes(nodes)
             self._json_response(nodes)
 
@@ -451,7 +462,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # Try unicast discovery first to get node info
             interface = self._sync_artnet_source()
-            nodes = discover_artnet_nodes(known_ips=[ip], timeout=2.0, interface=interface)
+            nodes = discover_artnet_nodes(known_ips=[ip], timeout=2.0, interface=interface,
+                                          port=_discovery_port())
             node = next((n for n in nodes if n["ip"] == ip), None)
             if node:
                 result = self._device_state().add_device_from_node(node)

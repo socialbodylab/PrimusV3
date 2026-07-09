@@ -15,6 +15,7 @@ did regress when the code was ported from V3.6 to V4):
 
 import os
 import re
+import sys
 import unittest
 
 FIRMWARE_DIR = os.path.normpath(
@@ -34,6 +35,19 @@ def function_body(source, signature):
     match = re.search(r"\n(?:void|bool|int|const|uint)", source[start + len(signature):])
     end = start + len(signature) + (match.start() if match else len(source))
     return source[start:end]
+
+
+class ConfigContracts(unittest.TestCase):
+    def test_artnet_port_matches_sender(self):
+        # Radius nodes listen on their own Art-Net port (off 6454 so LED
+        # traffic and third-party gear never reach them). Firmware and
+        # sender must agree or the fleet goes silent.
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from artnet import RADIUS_ARTNET_PORT
+        config = read_source("config.h")
+        match = re.search(r"#define\s+ARTNET_PORT\s+(\d+)", config)
+        self.assertIsNotNone(match, "ARTNET_PORT define missing from config.h")
+        self.assertEqual(int(match.group(1)), RADIUS_ARTNET_PORT)
 
 
 class ReceiverSketchContracts(unittest.TestCase):

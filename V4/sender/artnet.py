@@ -28,6 +28,10 @@ ARTNET_OPCODE_FTP_CMD = 0x8301
 ARTNET_OPCODE_AUDIO_STATUS = 0x8302
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
+# Radius nodes listen on their own port so LED-show traffic and third-party
+# Art-Net gear never reach them. Must match ARTNET_PORT in
+# V4/Arduino/radius_receiver/config.h (contract-tested).
+RADIUS_ARTNET_PORT = 6456
 NODE_CAPS_PREFIX = "PV3CAP1"
 NODE_CAPS_PREFIX_RADIUS = "PVRAD1"
 NODE_CAPS_FEATURE_PREFIX = "F:"
@@ -476,9 +480,9 @@ def _get_all_broadcast_addresses():
     return addrs
 
 
-def _discovery_bind_addr(interface=None):
+def _discovery_bind_addr(interface=None, port=ARTNET_PORT):
     source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
-    return (source_ip or "", ARTNET_PORT)
+    return (source_ip or "", port)
 
 
 def _discovery_destinations(known_ips=None, interface=None):
@@ -502,10 +506,12 @@ def _discovery_destinations(known_ips=None, interface=None):
     return destinations
 
 
-def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
+def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None, port=ARTNET_PORT):
     """Send ArtPoll and collect ArtPollReply responses.
 
     known_ips: list of IP strings to unicast to in addition to broadcast.
+    port: Art-Net port to poll and listen on — ARTNET_PORT for LED nodes,
+    RADIUS_ARTNET_PORT for Radius nodes (replies arrive on the same port).
     Returns list of dicts: {ip, short_name, long_name, node_report, num_ports, universes}
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -514,9 +520,9 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(0.25)
         try:
-            sock.bind(_discovery_bind_addr(interface))
+            sock.bind(_discovery_bind_addr(interface, port))
         except OSError:
-            sock.bind(("", ARTNET_PORT))
+            sock.bind(("", port))
 
         poll = bytearray()
         poll += ARTNET_HEADER
@@ -527,7 +533,7 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None):
         destinations = _discovery_destinations(known_ips, interface)
         for dest in destinations:
             try:
-                sock.sendto(bytes(poll), (dest, ARTNET_PORT))
+                sock.sendto(bytes(poll), (dest, port))
             except OSError:
                 pass
 
@@ -906,7 +912,7 @@ def _udp_route_retryable(error):
     )
 
 
-def _send_udp_packet(ip, packet, source_ip=None):
+def _send_udp_packet(ip, packet, source_ip=None, port=ARTNET_PORT):
     bind_attempts = [True, False] if source_ip else [False]
     last_error = None
     for bind_source in bind_attempts:
@@ -920,7 +926,7 @@ def _send_udp_packet(ip, packet, source_ip=None):
                 except OSError:
                     continue
             try:
-                sock.sendto(bytes(packet), (ip, ARTNET_PORT))
+                sock.sendto(bytes(packet), (ip, port))
                 return
             except OSError as exc:
                 last_error = exc
@@ -981,7 +987,7 @@ def send_receive_config(ip, receive_mode, base_universe, source_ip=None):
 # ======================================================================
 
 
-def send_art_address(ip, short_name, source_ip=None):
+def send_art_address(ip, short_name, source_ip=None, port=ARTNET_PORT):
     pkt = bytearray(107)
     pkt[0:8] = ARTNET_HEADER
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_ADDRESS)
@@ -994,14 +1000,14 @@ def send_art_address(ip, short_name, source_ip=None):
         pkt[i] = 0x7F
     pkt[104] = 0x7F
     pkt[106] = 0x00
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
 
 
 # ======================================================================
 #  ART-NET IP CONFIG — ArtIPConfig (opcode 0x8200)
 # ======================================================================
 
-def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None):
+def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None, port=ARTNET_PORT):
     """Send ArtIPConfig packet.
     mode: 0 = DHCP, 1 = static.
     static_ip/gateway/subnet: dotted-quad strings (required when mode=1).
@@ -1020,7 +1026,7 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_i
             pkt[21 + i] = octet
     elif mode == 1:
         raise ValueError("static IP mode requires ip, gateway, and subnet")
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
 
 
 # ======================================================================
@@ -1041,7 +1047,7 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, delay_ms=0, sou
     pkt[12] = cmd & 0xFF
     pkt[13] = max(0, min(100, volume)) & 0xFF
     pkt[14:14 + len(name_bytes)] = name_bytes
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=RADIUS_ARTNET_PORT)
     cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
     dur_str  = f" [{duration}s]"      if duration else ""
     dly_str  = f" delay={delay_ms}ms" if delay_ms else ""
@@ -1060,7 +1066,7 @@ def send_ftp_cmd(ip, start, source_ip=None):
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_FTP_CMD)
     struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
     pkt[12] = 1 if start else 0
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=RADIUS_ARTNET_PORT)
     netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")
 
 

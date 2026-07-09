@@ -25,6 +25,7 @@ from artnet import (
     ftp_delete,
     ftp_mkdir,
     discover_artnet_nodes,
+    RADIUS_ARTNET_PORT,
 )
 from paths import state_file
 
@@ -176,6 +177,7 @@ class RadiusState:
             known_ips=known_ips,
             timeout=2.0,
             interface=self._discovery_interface(),
+            port=RADIUS_ARTNET_PORT,
         )
         discovered_ips = {n["ip"] for n in nodes}
         node_map = {n["ip"]: n for n in nodes}
@@ -371,7 +373,8 @@ class RadiusState:
             if not (0 <= di < len(self.devices)):
                 return {"ok": False, "error": "invalid device index"}
             dev = self.devices[di]
-            send_art_address(dev["ip"], new_name, source_ip=self.artnet_source_ip)
+            send_art_address(dev["ip"], new_name, source_ip=self.artnet_source_ip,
+                             port=RADIUS_ARTNET_PORT)
             dev["name"] = new_name
             _save_devices(self.devices)
             return {"ok": True}
@@ -383,7 +386,7 @@ class RadiusState:
             dev = self.devices[di]
             send_ip_config(
                 dev["ip"], 1, static_ip=static_ip, gateway=gateway, subnet=subnet,
-                source_ip=self.artnet_source_ip,
+                source_ip=self.artnet_source_ip, port=RADIUS_ARTNET_PORT,
             )
             dev["ip_mode"] = "static"
             dev["static_ip"] = static_ip
@@ -397,7 +400,8 @@ class RadiusState:
             if not (0 <= di < len(self.devices)):
                 return False
             dev = self.devices[di]
-            send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip)
+            send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip,
+                           port=RADIUS_ARTNET_PORT)
             dev["ip_mode"] = "dhcp"
             dev["static_ip"] = None
             dev["gateway"] = None
