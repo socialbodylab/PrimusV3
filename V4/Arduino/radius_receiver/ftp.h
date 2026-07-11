@@ -42,19 +42,37 @@ extern bool sdBusy;
 static FtpServer _ftpServer;
 static bool _ftpRunning = false;
 
-// Set when an FTP upload of /cues.json completes; the main loop reloads
-// the cue map when the SD bus is free, so pushed cue maps take effect
-// without a reboot.
+// Set when any FTP upload activity touches /cues.json; the main loop
+// reloads the cue map once the transfer has gone quiet, so pushed cue
+// maps take effect without a reboot.
+//
+// Trigger on upload START/progress, not completion: the library only
+// fires the completion callback when the transfer took >0 ms, and a
+// few-hundred-byte cues.json routinely lands in 0 ms over local WiFi —
+// the completion event silently never comes. The quiet period keeps us
+// from reloading a half-written file.
 bool cuesReloadPending = false;
+static unsigned long _cuesUploadActivityMs = 0;
+#define CUES_RELOAD_QUIET_MS 1000
 
 static void _ftpTransferCallback(FtpTransferOperation op, const char* name, uint32_t transferredSize) {
-  if (op != FTP_UPLOAD_STOP || name == NULL) return;
+  if (name == NULL) return;
+  if (op != FTP_UPLOAD_START && op != FTP_UPLOAD && op != FTP_UPLOAD_STOP) return;
   const char* base = strrchr(name, '/');
   base = base ? base + 1 : name;
   if (strcasecmp(base, "cues.json") == 0) {
+    if (!cuesReloadPending)
+      Serial.println("[FTP] cues.json upload detected — reload scheduled");
     cuesReloadPending = true;
-    Serial.println("[FTP] cues.json uploaded — reload scheduled");
+    _cuesUploadActivityMs = millis();
   }
+}
+
+// True once a pending cues.json upload has gone quiet long enough that
+// the file is safely complete on the SD card.
+bool ftpCuesReloadDue() {
+  return cuesReloadPending &&
+         (millis() - _cuesUploadActivityMs) >= CUES_RELOAD_QUIET_MS;
 }
 
 // =====================================================================

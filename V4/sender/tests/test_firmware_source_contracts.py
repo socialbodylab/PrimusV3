@@ -75,11 +75,18 @@ class FtpHeaderContracts(unittest.TestCase):
         # A pushed /cues.json must take effect without a reboot: ftp.h
         # schedules a reload via the SimpleFTPServer transfer callback and
         # the main loop runs cuesLoad() only while the SD bus is free.
+        # The trigger must fire on FTP_UPLOAD_START, NOT only on the
+        # completion event — the library skips the completion callback for
+        # transfers that finish in 0 ms, which a small cues.json always
+        # does on local WiFi. A quiet period defers the reload until the
+        # file is fully written.
         ftp = read_source("ftp.h")
         self.assertIn("setTransferCallback", ftp)
+        self.assertIn("FTP_UPLOAD_START", ftp)
         self.assertIn("cuesReloadPending = true", ftp)
+        self.assertIn("CUES_RELOAD_QUIET_MS", ftp)
         ino = read_source("radius_receiver.ino")
-        self.assertIn("cuesReloadPending && !sdBusy", ino)
+        self.assertIn("ftpCuesReloadDue() && !sdBusy", ino)
 
 
 class AudioHeaderContracts(unittest.TestCase):
@@ -101,20 +108,50 @@ class AudioHeaderContracts(unittest.TestCase):
         # VS1053 needs time to flush before the next file header.
         self.assertRegex(self.audio, r"stopPlaying\(\);\s*\n\s*delay\(")
 
+    def test_no_bare_soft_reset(self):
+        # Adafruit softReset() is only SM_RESET + delay: the chip's
+        # SCI_CLOCKF resets to 1.0x, at which the VS1053 cannot decode —
+        # playback streams silently while playingMusic stays true, and a
+        # manual sciWrite(CLOCKF) straight after can be dropped while DREQ
+        # is low. Always use the library's full reset() (softReset +
+        # settle + CLOCKF restore), paired with a volume cache
+        # invalidation because reset() sets chip volume to 40/40.
+        self.assertNotIn(
+            "_musicMaker.softReset()", self.audio,
+            "bare softReset() — use _musicMaker.reset(), which restores "
+            "SCI_CLOCKF; without it playback is silent",
+        )
+        for pos in re.finditer(r"_musicMaker\.reset\(\)", self.audio):
+            window = self.audio[pos.end():pos.end() + 300]
+            self.assertIn(
+                "_lastAppliedVolume = 255", window,
+                "reset() without volume cache invalidation — next "
+                "_applyVolume at the cached value skips the SCI_VOL rewrite",
+            )
+
     def test_chip_mute_always_invalidates_volume_cache(self):
-        # A bare setVolume(254, 254) leaves _lastAppliedVolume claiming the
-        # old volume, so the next _applyVolume() at the same value skips the
+        # A bare hard mute leaves _lastAppliedVolume claiming the old
+        # volume, so the next _applyVolume() at the same value skips the
         # unmute — playback proceeds (statuses sent) but is silent. All hard
         # mutes must go through _muteChip(), which invalidates the cache.
         self.assertIn("_muteChip", self.audio)
         mute_body = function_body(self.audio, "static void _muteChip()")
-        self.assertIn("_musicMaker.setVolume(254, 254)", mute_body)
+        self.assertIn("VS1053_MAX_SAFE_ATTENUATION", mute_body)
         self.assertIn("_lastAppliedVolume = 255", mute_body)
-        self.assertEqual(
-            self.audio.count("_musicMaker.setVolume(254, 254)"), 1,
-            "direct setVolume(254, 254) outside _muteChip() — this desyncs "
-            "the volume cache and causes silent playback",
-        )
+
+    def test_no_analog_powerdown_volume_writes(self):
+        # setVolume(254, 254) (SCI_VOL ~0xFEFE) is the VS1053's ANALOG
+        # POWERDOWN command — the analog stage can stay dead until a full
+        # reset. The old boot beep's internal reset() was accidentally
+        # rescuing the chip from this; with the beep removed, a 254 write
+        # means permanent silence. Attenuation must be clamped to
+        # VS1053_MAX_SAFE_ATTENUATION (250).
+        self.assertNotIn("_musicMaker.setVolume(254", self.audio)
+        self.assertIn("VS1053_MAX_SAFE_ATTENUATION 250", self.audio)
+        body = function_body(self.audio, "static void _applyVolume(")
+        self.assertIn("VS1053_MAX_SAFE_ATTENUATION", body,
+                      "_applyVolume must clamp — volume 0 maps to 254 "
+                      "otherwise, entering analog powerdown from the UI")
 
 
 if __name__ == "__main__":

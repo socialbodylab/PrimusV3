@@ -119,6 +119,27 @@ separately). Sends a stop command to recover the card before failing.
 - [ ] Run against E10 (192.168.8.159) after flashing V4 firmware:
       `cd V4/sender && PRIMUS_HW_TEST_IP=192.168.8.159 python3 -m unittest tests.test_hw_sample_rate -v`
 
+### Audio cues — fade out / fade stop (planned 2026-07-09)
+
+Decision: schema-first (Option C) → firmware ramp (Option A).
+
+- [ ] Add `fade_ms` to the audio cue action schema + Audio Cues / Cue Map UIs
+      (field next to Dur/Dly); device cue map schema gets `"fade"`
+- [ ] Firmware: extend ArtAudioCmd stop (cmd 0) with optional uint16 fade_ms;
+      non-blocking volume ramp in audioUpdate() (linear in the 0-100 domain =
+      linear-dB on the VS1053, perceptually correct), audioStop() at zero
+- [ ] MUST restore pre-fade volume after the fade completes and keep
+      `_lastAppliedVolume` coherent (same failure class as the mute-cache
+      silent-playback bug) — add a firmware source contract test
+- [ ] Optional interim: sender-side volume-step ramp ("fadestop" in
+      fire_audio_cue) works on unflashed fleet; ~90 packets/device for 2 s,
+      audible steps on packet loss — rehearsal stopgap only
+- [ ] Sibling once the ramp exists: `fade_in` on play (ramp up after
+      startPlayingFile)
+- [ ] Decide: new play command during an active fade wins instantly
+      (recommended) or waits for fade completion
+- [ ] Convert cue 99 ALL STOP to a 2 s fade-all once implemented
+
 ### Sender — discovery port race (deferred)
 
 Seen 2026-07-08 during a session with heavy unrelated network traffic:

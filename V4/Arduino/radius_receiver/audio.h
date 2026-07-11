@@ -38,20 +38,29 @@ static void _notifyTrack(uint8_t state) {
   sendAudioStatus(state, name);
 }
 
+// SCI_VOL attenuation of 0xFE per channel (setVolume(254, 254) and above)
+// is the VS1053's ANALOG POWERDOWN command, not just "very quiet" — once
+// the analog stage is down, output can stay dead until a full reset. The
+// old boot beep's internal reset() was accidentally rescuing the chip from
+// the powerdown that audioInit's mute put it in. Never write 254: clamp
+// all attenuation to 250 (-125 dB, inaudible, analog stage stays alive).
+#define VS1053_MAX_SAFE_ATTENUATION 250
+
 static void _applyVolume(uint8_t volume) {
   if (volume == _lastAppliedVolume) return;
   _lastAppliedVolume = volume;
   _audioVolume = volume;
   uint8_t vs1053vol = (uint8_t)((100 - volume) * 254 / 100);
+  if (vs1053vol > VS1053_MAX_SAFE_ATTENUATION) vs1053vol = VS1053_MAX_SAFE_ATTENUATION;
   _musicMaker.setVolume(vs1053vol, vs1053vol);
 }
 
 // The only allowed way to mute the chip directly. Invalidates the
 // _lastAppliedVolume cache so the next _applyVolume() always writes —
-// a bare setVolume(254, 254) leaves the cache claiming the old volume
-// and _applyVolume() then skips the unmute (silent playback bug).
+// a bare mute leaves the cache claiming the old volume and
+// _applyVolume() then skips the unmute (silent playback bug).
 static void _muteChip() {
-  _musicMaker.setVolume(254, 254);
+  _musicMaker.setVolume(VS1053_MAX_SAFE_ATTENUATION, VS1053_MAX_SAFE_ATTENUATION);
   _lastAppliedVolume = 255;
 }
 
@@ -108,9 +117,20 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   // the decoder's PLL so the next stream header is parsed cleanly. Without this
   // the chip plays the new file at the wrong pitch or fails to start.
   if (incomingSampleRate != 0 && incomingSampleRate != _audioSampleRate) {
-    Serial.printf("[Audio] Sample rate change %lu→%lu Hz — soft reset\n",
+    Serial.printf("[Audio] Sample rate change %lu→%lu Hz — reset\n",
                   _audioSampleRate, incomingSampleRate);
-    _musicMaker.softReset();
+    // Use the library's full reset(), never a bare softReset(): a soft
+    // reset clears SCI_CLOCKF (clock multiplier), and at 1.0x the chip
+    // cannot decode — playback streams silently while playingMusic stays
+    // true. reset() restores CLOCKF with the settle delays this hardware
+    // is known to need (it is the same routine sineTest() runs). It also
+    // sets chip volume to 40/40, so invalidate the cache to force the
+    // _applyVolume() below to rewrite SCI_VOL.
+    _musicMaker.reset();
+    _lastAppliedVolume = 255;
+    uint16_t clockf = _musicMaker.sciRead(VS1053_REG_CLOCKF);
+    Serial.printf("[Audio] post-reset CLOCKF=0x%04X %s\n", clockf,
+                  clockf == 0x6000 ? "(ok)" : "(BAD — decode will be silent)");
   }
   _audioSampleRate = incomingSampleRate;
 

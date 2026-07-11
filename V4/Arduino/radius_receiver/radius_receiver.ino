@@ -793,7 +793,7 @@ void setup() {
 
   audioInit();
   cuesLoad();
-  audioBootTest();
+  // audioBootTest();  // boot beep + first-WAV check disabled — silent startup for shows
   ftpInit();
   if (audioSdIsReady()) ftpStart();
 
@@ -822,9 +822,10 @@ void loop() {
   // Priority 2: FTP when active
   ftpUpdate();
 
-  // A pushed /cues.json takes effect without a reboot. Reload only while
-  // the SD bus is free — cuesLoad() reads the card.
-  if (cuesReloadPending && !sdBusy) {
+  // A pushed /cues.json takes effect without a reboot. Reload only after
+  // the upload has gone quiet (file fully written) and while the SD bus
+  // is free — cuesLoad() reads the card.
+  if (ftpCuesReloadDue() && !sdBusy) {
     cuesReloadPending = false;
     cuesLoad();
   }
