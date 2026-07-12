@@ -36,17 +36,20 @@ class FirmwareProfileTests(unittest.TestCase):
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
 
     def test_script_routing(self):
+        # upload.sh is the single deploy tool for both firmware families;
+        # it accepts radius_v1/radius_v2 as profile aliases for rv1/rv2.
         primus = firmware.upload_script_path("v3")
         radius = firmware.upload_script_path("radius_v1")
         self.assertTrue(primus.endswith(os.path.join("Arduino", "upload.sh")))
-        self.assertTrue(radius.endswith(os.path.join("Arduino", "radius_upload.sh")))
+        self.assertTrue(radius.endswith(os.path.join("Arduino", "upload.sh")))
         self.assertTrue(os.path.isfile(primus))
         self.assertTrue(os.path.isfile(radius))
 
     def test_build_command_uses_profile_script(self):
         manager = firmware.FirmwareJobManager()
         cmd_radius = manager.build_command({"action": "compile", "profile": "radius_v1"})
-        self.assertIn("radius_upload.sh", cmd_radius.command[1])
+        self.assertIn("upload.sh", cmd_radius.command[1])
+        self.assertNotIn("radius_upload.sh", cmd_radius.command[1])
 
     def test_primus_profile_rejected_on_radius_product(self):
         manager = firmware.FirmwareJobManager()

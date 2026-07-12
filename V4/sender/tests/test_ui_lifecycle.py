@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import sys
 import time
@@ -34,7 +36,8 @@ class UiLifecycleTests(unittest.TestCase):
         ui_lifecycle.touch_session(server, "only")
         ui_lifecycle.close_session(server, "only")
         server.ui_last_session_closed_at = time.monotonic() - 5
-        ui_lifecycle.monitor(server, app_name="Central", live_output_fn=lambda _s: False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            ui_lifecycle.monitor(server, app_name="Central", live_output_fn=lambda _s: False)
         server.shutdown.assert_called_once()
 
 

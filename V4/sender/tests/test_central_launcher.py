@@ -1,5 +1,7 @@
 """Tests for shared Central server discovery and attach helpers."""
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -71,13 +73,14 @@ class CentralLauncherTests(unittest.TestCase):
             opened.append((url, attach))
             return "opened"
 
-        attached = central_launcher.try_attach_before_start(
-            port=8080,
-            frontend_path="/devices",
-            no_browser=False,
-            open_browser=_open,
-            launcher_name="Device Manager",
-        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            attached = central_launcher.try_attach_before_start(
+                port=8080,
+                frontend_path="/devices",
+                no_browser=False,
+                open_browser=_open,
+                launcher_name="Device Manager",
+            )
         self.assertTrue(attached)
         self.assertEqual(opened, [("http://127.0.0.1:8080/devices", True)])
 

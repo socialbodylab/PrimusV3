@@ -50,9 +50,8 @@ V4/
     osc_cue_sender/  OSC cue test sender (PrimusCentral external control)
   Arduino/
     primusV3_receiver/   Primus LED firmware (profiles v1, v2, v3)
-    upload.sh            Primus compile/upload script
-    radius_receiver/     Radius V1 audio firmware
-    radius_upload.sh     Radius compile/upload script
+    radius_receiver/     Radius audio firmware (profiles rv1, rv2)
+    upload.sh            Compile/upload script for both firmware families
   build_sender_app.py  PyInstaller packaging (--product primus|radius)
   ARCHITECTURE.md      Unified backend roadmap
   assets/              App icon
@@ -163,6 +162,6 @@ See [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) for protocol notes on bot
 **Radius audio** (VS1053 + SD):
 
 ```bash
-./V4/Arduino/radius_upload.sh --board radius_v1 --compile
-./V4/Arduino/radius_upload.sh --board radius_v1 -ssid "MyRouter" -pw "secret" --auto
+./V4/Arduino/upload.sh -rv1 --compile
+./V4/Arduino/upload.sh -rv1 -ssid "MyRouter" -pw "secret" --auto
 ```

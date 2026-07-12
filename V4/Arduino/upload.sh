@@ -315,7 +315,7 @@ if [[ "$ALL_PORTS" == true && ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
 fi
 
 case "$BOARD_PROFILE" in
-  rv1|rv1_huzzah)
+  rv1|rv1_huzzah|radius_v1)
     BOARD_PROFILE="rv1"
     SKETCH_DIR="$SCRIPT_DIR/radius_receiver"
     FQBN="esp32:esp32:featheresp32"
@@ -327,7 +327,7 @@ case "$BOARD_PROFILE" in
       "SimpleFTPServer"
     )
     ;;
-  rv2|rv2_s3|radius)
+  rv2|rv2_s3|radius|radius_v2)
     BOARD_PROFILE="rv2"
     SKETCH_DIR="$SCRIPT_DIR/radius_receiver"
     FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"

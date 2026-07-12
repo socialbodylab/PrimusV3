@@ -21,9 +21,8 @@ V4/
   sender/                 Unified sender (Primus + Radius product split)
   Arduino/
     primusV3_receiver/    Primus LED firmware (v1, v2, v3 profiles)
-    upload.sh             Primus compile/upload script
-    radius_receiver/      Radius audio firmware (radius_v1)
-    radius_upload.sh      Radius compile/upload script
+    radius_receiver/      Radius audio firmware (rv1, rv2 profiles)
+    upload.sh             Compile/upload script for both firmware families
   build_sender_app.py     PyInstaller packaging (--product primus|radius)
   ARCHITECTURE.md         This file
   FIRMWARE_DEVELOPMENT.md Firmware protocol notes (both families)
@@ -37,7 +36,7 @@ Historical copies under `V3_6/Arduino/` remain for the current PrimusCentral rel
 | Family | Profiles | Sketch | Upload script | Capability tag |
 |--------|----------|--------|---------------|----------------|
 | **Primus** | `v1`, `v2`, `v3` | `primusV3_receiver/` | `upload.sh` | `PV3CAP1\|…` |
-| **Radius** | `radius_v1` | `radius_receiver/` | `radius_upload.sh` | `PVRAD1\|…` |
+| **Radius** | `rv1` (`radius_v1`), `rv2` (`radius_v2`) | `radius_receiver/` | `upload.sh` | `PVRAD1\|…` |
 
 The sender resolves the correct script from `firmware.FIRMWARE_PROFILES` (`V4/sender/firmware.py`). Each packaged app exposes **only its product's profiles** — RadiusCentral serves `radius_v1` only; PrimusCentral serves `v1`/`v2`/`v3` only. Override for dev with `PRIMUSV3_SENDER_PRODUCT=primus|radius` or `python3 run.py --product …`.
 

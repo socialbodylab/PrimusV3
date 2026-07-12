@@ -94,6 +94,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
             known_ips=["192.168.1.10"],
             timeout=2.0,
             interface="en0",
+            port=6454,
         )
         state.refresh_devices_from_nodes.assert_called_once()
         state.add_device_from_node.assert_called_once()

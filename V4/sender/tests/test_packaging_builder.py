@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 V4_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if V4_DIR not in sys.path:
@@ -36,8 +37,8 @@ class PackagingBuilderTests(unittest.TestCase):
             windows_installer_name=windows_installer_name,
         )
 
-    def test_default_release_version_is_09(self):
-        self.assertEqual(build_sender_app.DEFAULT_APP_VERSION, "0.9")
+    def test_default_release_version_is_091(self):
+        self.assertEqual(build_sender_app.DEFAULT_APP_VERSION, "0.91")
 
     def test_primus_windows_command_uses_v4_product_assets(self):
         args = self.make_args()
@@ -135,13 +136,16 @@ class PackagingBuilderTests(unittest.TestCase):
                 dlib_path.write_bytes(b"dlib")
                 signtool_path.write_bytes(b"signtool")
 
-                build_sender_app._sign_windows_artifact(
-                    output_path,
-                    metadata_path,
-                    dlib_path,
-                    signtool_path=signtool_path,
-                    timestamp_url="http://timestamp.example.test",
-                )
+                # The guard requires os.name == "nt"; patch only around the
+                # call — a broader patch makes pathlib pick WindowsPath.
+                with patch("build_sender_app.os.name", "nt"):
+                    build_sender_app._sign_windows_artifact(
+                        output_path,
+                        metadata_path,
+                        dlib_path,
+                        signtool_path=signtool_path,
+                        timestamp_url="http://timestamp.example.test",
+                    )
         finally:
             build_sender_app._run = original_run
 
