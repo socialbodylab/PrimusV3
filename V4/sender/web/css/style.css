@@ -491,6 +491,54 @@ body {
     outline: none;
 }
 
+.device-show-info {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+    min-width: 0;
+}
+
+.device-show-info-field {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.device-show-info-field:hover {
+    color: var(--accent);
+}
+
+.device-show-info-empty {
+    opacity: 0.55;
+    font-style: italic;
+}
+
+.device-show-info-sep {
+    color: var(--text-secondary);
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+.device-show-info-input {
+    background: var(--bg-primary);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 2px 5px;
+    min-width: 0;
+    width: 110px;
+    outline: none;
+}
+
 .device-meta {
     display: flex;
     flex-wrap: wrap;

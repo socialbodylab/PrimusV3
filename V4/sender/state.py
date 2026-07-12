@@ -22,9 +22,12 @@ from artnet import (
     send_receive_config,
     send_art_address,
     send_ip_config,
+    sync_show_info_to_device,
     ipv4_octets,
 )
 from paths import state_file
+
+import show_info_store
 
 
 # ======================================================================
@@ -66,6 +69,7 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "receive_mode": "split",
     "base_universe": 0,
     "battery": False,
+    "show_info": False,
 }
 CONTROL_CAPABILITY_LABELS = {
     "rename": "remote rename",
@@ -73,6 +77,7 @@ CONTROL_CAPABILITY_LABELS = {
     "ip_config": "remote IP configuration",
     "output_config": "remote output configuration",
     "receive_config": "remote receive mode configuration",
+    "show_info": "remote show info",
 }
 RECEIVE_MODES = ("split", "combined")
 COMBINED_RECEIVE_MAX_PIXELS = 170
@@ -291,6 +296,7 @@ def _normalize_device_capabilities(capabilities=None):
     base = out.get("base_universe")
     out["base_universe"] = int(base) if base is not None else 0
     out["battery"] = bool(out.get("battery"))
+    out["show_info"] = bool(out.get("show_info"))
     return out
 
 
@@ -315,6 +321,10 @@ def _save_devices(devices):
         saved_devices.append({
             "ip": d["ip"],
             "name": d["name"],
+            "character_name": show_info_store.normalize_show_info_value(
+                d.get("character_name")),
+            "performer_name": show_info_store.normalize_show_info_value(
+                d.get("performer_name")),
             "hardware_profile": d.get("hardware_profile", "unknown"),
             "hardware_label": d.get("hardware_label", "Unknown hardware"),
             "firmware_version": d.get("firmware_version"),
@@ -735,6 +745,8 @@ class ControllerState:
                 self.add_device_from_node({
                     "ip": ip,
                     "short_name": sd.get("name", ip),
+                    "character_name": sd.get("character_name", ""),
+                    "performer_name": sd.get("performer_name", ""),
                     "long_name": "",
                     "num_ports": 0,
                     "universes": [0, 1],
@@ -973,6 +985,10 @@ class ControllerState:
                 rx = self.fps_listener.get(dev["ip"]) if self.fps_listener else None
                 d = {
                     "name": dev["name"],
+                    "character_name": show_info_store.normalize_show_info_value(
+                        dev.get("character_name")),
+                    "performer_name": show_info_store.normalize_show_info_value(
+                        dev.get("performer_name")),
                     "ip": dev["ip"],
                     "base_universe": dev["base_universe"],
                     "receive_mode": dev.get("receive_mode", "split"),
@@ -1310,6 +1326,8 @@ class ControllerState:
                     old_ip = dev["ip"]
                     dev["ip"] = node_info["ip"]
                     dev["sender"].ip = dev["ip"]
+                    show_info_store.migrate_device_show_info_key(
+                        _state_file(), old_ip, dev["ip"], dev.get("name"))
                     groups_changed = self._replace_device_ip_references_unlocked(old_ip, dev["ip"])
                 updated = self._refresh_device_from_node_unlocked(dev, node_info)
                 if (updated or ip_changed) and auto_save:
@@ -1331,8 +1349,19 @@ class ControllerState:
             receive_mode, base_u = _receive_fields_from_node(
                 node_info, capabilities, fallback_base=base_u)
 
+            character_name, performer_name = show_info_store.show_info_from_node(node_info)
+            character_name, performer_name = show_info_store.merge_show_info_fields(
+                _state_file(),
+                character_name,
+                performer_name,
+                node_info.get("ip"),
+                node_info.get("short_name"),
+            )
+
             dev = {
                 "name": node_info.get("short_name", "Node"),
+                "character_name": character_name,
+                "performer_name": performer_name,
                 "ip": node_info["ip"],
                 "base_universe": base_u,
                 "receive_mode": receive_mode,
@@ -1353,6 +1382,7 @@ class ControllerState:
             _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
             dev["outputs"] = self._build_device_outputs_unlocked(
                 node_info, output_cfgs, base_u, receive_mode=receive_mode)
+            show_info_store.apply_persisted_show_info(_state_file(), dev, node_info)
             self.devices.append(dev)
             if auto_save:
                 _save_devices(self.devices)
@@ -1452,6 +1482,10 @@ class ControllerState:
                 existing_outputs=dev.get("outputs", []),
                 receive_mode=receive_mode)
         dev["sender"].ip = dev["ip"]
+        # Discovery-provided show info fills in only after the local-edit
+        # grace period so a fresh UI edit is not stomped by stale replies.
+        if show_info_store.discovery_show_info_may_apply(dev):
+            show_info_store.apply_persisted_show_info(_state_file(), dev, node_info)
         return True
 
     def _replace_device_ip_references_unlocked(self, old_ip, new_ip):
@@ -1520,6 +1554,46 @@ class ControllerState:
             self._clear_transport_error_unlocked(dev)
             _save_devices(self.devices)
             return {"ok": True}
+
+    def update_device_show_info(self, di, character_name=None, performer_name=None):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index"}
+            dev = self.devices[di]
+            if character_name is not None:
+                dev["character_name"] = show_info_store.normalize_show_info_value(
+                    character_name)
+            if performer_name is not None:
+                dev["performer_name"] = show_info_store.normalize_show_info_value(
+                    performer_name)
+            caps = _normalize_device_capabilities(dev.get("capabilities"))
+            applied_to_device = False
+            if caps.get("show_info"):
+                try:
+                    ok, error = sync_show_info_to_device(
+                        dev["ip"],
+                        dev.get("character_name", ""),
+                        dev.get("performer_name", ""),
+                        source_ip=self.artnet_source_ip,
+                    )
+                except OSError as error:
+                    self._mark_transport_error_unlocked(dev, error)
+                    return {"ok": False, "error": dev.get("transport_error")}
+                if not ok:
+                    dev["transport_error"] = error
+                    return {"ok": False, "error": error}
+                self._clear_transport_error_unlocked(dev)
+                applied_to_device = True
+            show_info_store.persist_device_show_info(
+                _state_file(),
+                dev["ip"],
+                dev.get("name"),
+                dev.get("character_name"),
+                dev.get("performer_name"),
+            )
+            dev["show_info_edited_at"] = time.time()
+            _save_devices(self.devices)
+            return {"ok": True, "applied_to_device": applied_to_device}
 
     def set_device_ip(self, di, static_ip, gateway, subnet):
         with self.lock:

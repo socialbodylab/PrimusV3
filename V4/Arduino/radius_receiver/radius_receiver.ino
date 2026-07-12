@@ -24,6 +24,7 @@
 #include "cues.h"
 #include "ftp.h"
 #include "telemetry.h"
+#include "battery.h"
 
 bool sdBusy = false;
 
@@ -52,6 +53,9 @@ bool senderKnown = false;
 Preferences prefs;
 char customShortName[18] = {0};
 bool hasCustomName = false;
+
+char showCharacterName[SHOW_INFO_FIELD_LEN + 1] = {0};
+char showPerformerName[SHOW_INFO_FIELD_LEN + 1] = {0};
 
 bool useStaticIP = false;
 bool activeStaticIP = false;
@@ -111,6 +115,24 @@ void loadStoredDeviceName() {
       stored.toCharArray(customShortName, sizeof(customShortName));
       hasCustomName = true;
     }
+  }
+}
+
+void loadStoredShowInfo() {
+  if (prefs.isKey("characterName")) {
+    String stored = prefs.getString("characterName", "");
+    stored.toCharArray(showCharacterName, sizeof(showCharacterName));
+  }
+  if (prefs.isKey("performerName")) {
+    String stored = prefs.getString("performerName", "");
+    stored.toCharArray(showPerformerName, sizeof(showPerformerName));
+  }
+  if (showCharacterName[0] != '\0' || showPerformerName[0] != '\0') {
+    Serial.print("Loaded show info: character=\"");
+    Serial.print(showCharacterName);
+    Serial.print("\" performer=\"");
+    Serial.print(showPerformerName);
+    Serial.println("\"");
   }
 }
 
@@ -403,6 +425,71 @@ void handleArtIPConfig(uint8_t* data, uint16_t len) {
   }
 }
 
+// ── ArtShowInfo (0x8210) ─────────────────────────────────────────────
+
+void sendShowInfoReply(IPAddress dest) {
+  uint8_t reply[SHOW_INFO_PACKET_LEN];
+  memset(reply, 0, sizeof(reply));
+  memcpy(reply, ARTNET_MAGIC, 8);
+  reply[8] = (ARTNET_OPCODE_SHOW_INFO) & 0xFF;
+  reply[9] = (ARTNET_OPCODE_SHOW_INFO >> 8) & 0xFF;
+  reply[10] = 0;
+  reply[11] = ARTNET_PROTOCOL_VER;
+  reply[12] = SHOW_INFO_MODE_RESPONSE;
+  uint8_t charLen = strnlen(showCharacterName, SHOW_INFO_FIELD_LEN);
+  uint8_t perfLen = strnlen(showPerformerName, SHOW_INFO_FIELD_LEN);
+  reply[13] = charLen;
+  memcpy(reply + 14, showCharacterName, charLen);
+  reply[78] = perfLen;
+  memcpy(reply + 79, showPerformerName, perfLen);
+
+  udp.beginPacket(dest, ARTNET_PORT);
+  udp.write(reply, sizeof(reply));
+  udp.endPacket();
+}
+
+void handleArtShowInfo(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
+  if (len < SHOW_INFO_PACKET_LEN) return;
+
+  uint8_t mode = data[12];
+  if (mode == SHOW_INFO_MODE_READ) {
+    sendShowInfoReply(remoteAddr);
+    return;
+  }
+
+  if (mode != SHOW_INFO_MODE_WRITE) return;
+
+  char newCharacter[SHOW_INFO_FIELD_LEN + 1] = {0};
+  char newPerformer[SHOW_INFO_FIELD_LEN + 1] = {0};
+  uint8_t charLen = data[13];
+  if (charLen > SHOW_INFO_FIELD_LEN) charLen = SHOW_INFO_FIELD_LEN;
+  if (charLen > 0) {
+    memcpy(newCharacter, data + 14, charLen);
+    newCharacter[charLen] = '\0';
+  }
+  uint8_t perfLen = data[78];
+  if (perfLen > SHOW_INFO_FIELD_LEN) perfLen = SHOW_INFO_FIELD_LEN;
+  if (perfLen > 0) {
+    memcpy(newPerformer, data + 79, perfLen);
+    newPerformer[perfLen] = '\0';
+  }
+
+  strncpy(showCharacterName, newCharacter, SHOW_INFO_FIELD_LEN);
+  showCharacterName[SHOW_INFO_FIELD_LEN] = '\0';
+  strncpy(showPerformerName, newPerformer, SHOW_INFO_FIELD_LEN);
+  showPerformerName[SHOW_INFO_FIELD_LEN] = '\0';
+  prefs.putString("characterName", showCharacterName);
+  prefs.putString("performerName", showPerformerName);
+
+  Serial.print("ArtShowInfo write stored: character=\"");
+  Serial.print(showCharacterName);
+  Serial.print("\" performer=\"");
+  Serial.print(showPerformerName);
+  Serial.println("\"");
+
+  sendShowInfoReply(remoteAddr);
+}
+
 // ── ArtFtpCmd (0x8301) ───────────────────────────────────────────────
 
 void handleArtFtpCmd(uint8_t* data, uint16_t len) {
@@ -534,6 +621,10 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   }
   if (opcode == ARTNET_OPCODE_IP_CONFIG) {
     handleArtIPConfig(data, len);
+    return;
+  }
+  if (opcode == ARTNET_OPCODE_SHOW_INFO) {
+    handleArtShowInfo(data, len, remoteAddr);
     return;
   }
   if (opcode == ARTNET_OPCODE_AUDIO_CMD) {
@@ -783,6 +874,7 @@ void setup() {
 
   prefs.begin("artnet", false);
   loadStoredDeviceName();
+  loadStoredShowInfo();
   loadStoredNetworkConfig();
   setDisplayName(hasCustomName ? customShortName : DEVICE_SHORT_NAME);
 
@@ -892,6 +984,15 @@ void loop() {
     packetCount = 0;
     lastFpsTime = now;
   }
+
+#if BOARD_BATTERY_MONITOR
+  // Battery sampling blocks ~16 ms (8 ADC reads with settle delays).
+  // Audio here is main-loop fed (no DREQ interrupt), so a pause that long
+  // can underrun the VS1053 — skip sampling while a track is playing.
+  if (!audioIsPlaying()) {
+    batteryTelemetryTick(udpFps, senderIP, senderKnown, wifiConnected);
+  }
+#endif
 
 #if RADIUS_DIAG
   unsigned long loopUs = micros() - loopStartUs;

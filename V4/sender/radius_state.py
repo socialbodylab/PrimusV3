@@ -25,9 +25,12 @@ from artnet import (
     ftp_delete,
     ftp_mkdir,
     discover_artnet_nodes,
+    sync_show_info_to_device,
     RADIUS_ARTNET_PORT,
 )
 from paths import state_file
+
+import show_info_store
 
 
 DEFAULT_RADIUS_CAPABILITIES = {
@@ -133,9 +136,12 @@ def _save_devices(devices):
     directory = os.path.dirname(state_file())
     if directory:
         os.makedirs(directory, exist_ok=True)
-    payload = {"devices": []}
+    # Preserve foreign keys (e.g. the device_show_info backup map) — this
+    # file is shared with show_info_store.
+    payload = show_info_store.read_state_data(state_file())
+    saved = []
     for dev in devices:
-        payload["devices"].append({
+        saved.append({
             "name": dev.get("name"),
             "ip": dev.get("ip"),
             "hardware_profile": dev.get("hardware_profile"),
@@ -146,7 +152,12 @@ def _save_devices(devices):
             "static_ip": dev.get("static_ip"),
             "gateway": dev.get("gateway"),
             "subnet": dev.get("subnet"),
+            "character_name": show_info_store.normalize_show_info_value(
+                dev.get("character_name")),
+            "performer_name": show_info_store.normalize_show_info_value(
+                dev.get("performer_name")),
         })
+    payload["devices"] = saved
     with open(state_file(), "w") as f:
         json.dump(payload, f, indent=2)
 
@@ -218,6 +229,8 @@ class RadiusState:
                     "static_ip": saved_dev.get("static_ip"),
                     "gateway": saved_dev.get("gateway"),
                     "subnet": saved_dev.get("subnet"),
+                    "character_name": saved_dev.get("character_name", ""),
+                    "performer_name": saved_dev.get("performer_name", ""),
                 }, auto_save=False)
         if refreshed:
             _save_devices(self.devices)
@@ -257,6 +270,8 @@ class RadiusState:
                 ip_changed = bool(new_ip and new_ip != old_ip)
                 if ip_changed:
                     dev["ip"] = new_ip
+                    show_info_store.migrate_device_show_info_key(
+                        state_file(), old_ip, new_ip, dev.get("name"))
                 updated = self._refresh_device_from_node_unlocked(dev, node_info)
                 if updated or ip_changed:
                     refreshed.append({"device_index": idx, "ip": dev.get("ip"), "old_ip": old_ip})
@@ -294,6 +309,10 @@ class RadiusState:
         dev["static_ip"] = caps.get("static_ip")
         dev["gateway"] = caps.get("gateway")
         dev["subnet"] = caps.get("subnet")
+        # Discovery-provided show info fills in only after the local-edit
+        # grace period so a fresh UI edit is not stomped by stale replies.
+        if show_info_store.discovery_show_info_may_apply(dev):
+            show_info_store.apply_persisted_show_info(state_file(), dev, node_info)
         return updated
 
     def add_device_from_node(self, node_info, auto_save=True):
@@ -301,17 +320,30 @@ class RadiusState:
             idx = self._find_existing_device_index_unlocked(node_info)
             if idx is not None:
                 dev = self.devices[idx]
-                ip_changed = dev.get("ip") != node_info.get("ip")
+                old_ip = dev.get("ip")
+                ip_changed = old_ip != node_info.get("ip")
                 if ip_changed and node_info.get("ip"):
                     dev["ip"] = node_info["ip"]
+                    show_info_store.migrate_device_show_info_key(
+                        state_file(), old_ip, dev["ip"], dev.get("name"))
                 updated = self._refresh_device_from_node_unlocked(dev, node_info)
                 if (updated or ip_changed) and auto_save:
                     _save_devices(self.devices)
                 return {"status": "updated" if (updated or ip_changed) else "exists", "device_index": idx}
 
             caps = _capabilities_from_node(node_info)
+            character_name, performer_name = show_info_store.show_info_from_node(node_info)
+            character_name, performer_name = show_info_store.merge_show_info_fields(
+                state_file(),
+                character_name,
+                performer_name,
+                node_info.get("ip"),
+                node_info.get("short_name"),
+            )
             dev = {
                 "name": node_info.get("short_name") or "Radius",
+                "character_name": character_name,
+                "performer_name": performer_name,
                 "ip": node_info.get("ip"),
                 "connected": False,
                 "is_radius": _is_radius_node(node_info, caps),
@@ -326,6 +358,7 @@ class RadiusState:
                 "current_track": "",
                 "playback_state": 0,
             }
+            show_info_store.apply_persisted_show_info(state_file(), dev, node_info)
             self.devices.append(dev)
             if auto_save:
                 _save_devices(self.devices)
@@ -378,6 +411,43 @@ class RadiusState:
             dev["name"] = new_name
             _save_devices(self.devices)
             return {"ok": True}
+
+    def update_device_show_info(self, di, character_name=None, performer_name=None):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index"}
+            dev = self.devices[di]
+            if character_name is not None:
+                dev["character_name"] = show_info_store.normalize_show_info_value(
+                    character_name)
+            if performer_name is not None:
+                dev["performer_name"] = show_info_store.normalize_show_info_value(
+                    performer_name)
+            applied_to_device = False
+            if (dev.get("capabilities") or {}).get("show_info"):
+                try:
+                    ok, error = sync_show_info_to_device(
+                        dev["ip"],
+                        dev.get("character_name", ""),
+                        dev.get("performer_name", ""),
+                        source_ip=self.artnet_source_ip,
+                        port=RADIUS_ARTNET_PORT,
+                    )
+                except OSError as exc:
+                    return {"ok": False, "error": str(exc) or "show info write failed"}
+                if not ok:
+                    return {"ok": False, "error": error}
+                applied_to_device = True
+            show_info_store.persist_device_show_info(
+                state_file(),
+                dev["ip"],
+                dev.get("name"),
+                dev.get("character_name"),
+                dev.get("performer_name"),
+            )
+            dev["show_info_edited_at"] = time.time()
+            _save_devices(self.devices)
+            return {"ok": True, "applied_to_device": applied_to_device}
 
     def set_device_ip(self, di, static_ip, gateway, subnet):
         with self.lock:
@@ -554,6 +624,10 @@ class RadiusState:
             dev["fps"] = telemetry.get("fps")
         if "pkt_rate" in telemetry:
             dev["pkt_rate"] = telemetry.get("pkt_rate")
+        for key in ("battery_mv", "battery_pct", "battery_power_mode",
+                    "battery_warning", "live_firmware_version"):
+            if key in telemetry:
+                dev[key] = telemetry.get(key)
 
     def get_json(self):
         with self.lock:
@@ -561,6 +635,8 @@ class RadiusState:
             for dev in self.devices:
                 item = {
                     "name": dev.get("name"),
+                    "character_name": dev.get("character_name", ""),
+                    "performer_name": dev.get("performer_name", ""),
                     "ip": dev.get("ip"),
                     "connected": bool(dev.get("connected")),
                     "is_radius": bool(dev.get("is_radius")),
@@ -575,6 +651,11 @@ class RadiusState:
                     "subnet": dev.get("subnet"),
                     "current_track": dev.get("current_track", ""),
                     "playback_state": dev.get("playback_state", 0),
+                    "battery_mv": None,
+                    "battery_pct": None,
+                    "battery_power_mode": None,
+                    "battery_warning": None,
+                    "live_firmware_version": None,
                 }
                 self._merge_telemetry_unlocked(item)
                 if item.pop("_has_telemetry", False):

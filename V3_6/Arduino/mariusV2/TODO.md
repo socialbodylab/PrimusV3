@@ -140,6 +140,44 @@ Decision: schema-first (Option C) → firmware ramp (Option A).
       (recommended) or waits for fade completion
 - [ ] Convert cue 99 ALL STOP to a 2 s fade-all once implemented
 
+### Performer / character names + Radius battery (ported 2026-07-11)
+
+Investigated 2026-07-11: origin/main already implemented show info; ported
+to radius-central the same day (main's wire protocol kept intact so the
+eventual branch merge is clean). Radius battery is new on this branch —
+main has battery for Primus only.
+
+Ported/implemented on radius-central:
+- ArtShowInfo 0x8210 in both firmware families + sender + all three
+  frontends; `POST /api/device_show_info`; NVS storage with read-back
+  verification; `show_info_store.py` sender-side backup map
+- Radius rv1 battery: `battery.h` port (A13), `B` caps flag, PBT parsing
+  in RadiusTelemetryListener, battery chip in Radius/Devices UI
+- NOT ported (comes with the merge): flash-time show-info overrides
+  (`PRIMUSV3_FORCE_CHARACTER_NAME_OVERRIDE`), rename read-back
+  (`sync_device_name_to_receiver`), main's generalized battery.h (ADC
+  scale/rail boards), character-name monitor filtering
+- rv2 battery still open: needs `Adafruit_MAX1704X` over I2C (0x36) —
+  verify the fuel gauge on real hardware first
+- [ ] Flash the fleet and verify: names survive reboot, battery shows in
+      sidebar on battery power, no audio underruns during playback
+
+- Names: ArtShowInfo opcode **0x8210** (commit a17ad3e, firmware v3.10) —
+  character/performer stored in receiver NVS, 64-byte fields, read/write/
+  response modes, 143-byte packet, read-back verification (89d6936),
+  `POST /api/device_show_info`, inline sidebar editing in both frontends,
+  character-name monitor filtering (v0.93), flash-time overrides (v0.95).
+  Receiver-NVS design won over the sender-side plan drafted here.
+- Battery: main's `battery.h` (since b7644a1, 2026-06-16) is a superset of
+  the radius-central copy — configurable ADC scaling + rail-powered board
+  support. Main also integrated Radius devices into DeviceManager/
+  RadiusCentral (1d8c914).
+- Branches diverged at 4b5ede3 (2026-06-15): 62 commits unique to
+  radius-central, 52 to origin/main, heavy overlap in V4/sender and
+  V4/Arduino/radius_receiver. Merge will conflict; radius-central's VS1053
+  silence fixes, FTP cue-reload trigger, and upload.sh consolidation
+  (main still has radius_upload.sh) must survive the merge.
+
 ### Sender — discovery port race (deferred)
 
 Seen 2026-07-08 during a session with heavy unrelated network traffic:

@@ -38,6 +38,32 @@ def function_body(source, signature):
 
 
 class ConfigContracts(unittest.TestCase):
+    def test_show_info_contracts_match_sender(self):
+        # ArtShowInfo 0x8210: firmware and sender must agree on opcode,
+        # packet size, and field length, and the node must advertise the
+        # S capability flag or the sender never sends/reads names.
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from artnet import (
+            ARTNET_OPCODE_SHOW_INFO, SHOW_INFO_PACKET_LEN, SHOW_INFO_FIELD_LEN,
+        )
+        config = read_source("config.h")
+        match = re.search(r"#define\s+ARTNET_OPCODE_SHOW_INFO\s+(0x[0-9A-Fa-f]+)", config)
+        self.assertIsNotNone(match, "ARTNET_OPCODE_SHOW_INFO missing from config.h")
+        self.assertEqual(int(match.group(1), 16), ARTNET_OPCODE_SHOW_INFO)
+        match = re.search(r"#define\s+SHOW_INFO_PACKET_LEN\s+(\d+)", config)
+        self.assertEqual(int(match.group(1)), SHOW_INFO_PACKET_LEN)
+        match = re.search(r"#define\s+SHOW_INFO_FIELD_LEN\s+(\d+)", config)
+        self.assertEqual(int(match.group(1)), SHOW_INFO_FIELD_LEN)
+        self.assertIn('"RASB"', config, "rv1 caps must advertise show info + battery")
+        self.assertIn('"RAS"', config, "rv2 caps must advertise show info")
+
+    def test_battery_monitor_enabled_for_rv1(self):
+        # HUZZAH32 (rv1) has the A13 half-divider; the define gates
+        # battery.h and switches the caps string to RASB.
+        config = read_source("config.h")
+        self.assertIn("BOARD_BATTERY_MONITOR        1", config)
+        self.assertIn("BOARD_BATTERY_PIN            A13", config)
+
     def test_artnet_port_matches_sender(self):
         # Radius nodes listen on their own Art-Net port (off 6454 so LED
         # traffic and third-party gear never reach them). Firmware and
@@ -68,6 +94,26 @@ class ReceiverSketchContracts(unittest.TestCase):
         # resets modem sleep. It must also run in checkWifiConnection().
         body = function_body(self.ino, "void checkWifiConnection()")
         self.assertIn("WiFi.setSleep(false)", body)
+
+    def test_show_info_handled_and_loaded_at_boot(self):
+        # ArtShowInfo must be dispatched from the packet router and the
+        # stored names loaded from NVS at boot, or writes silently vanish
+        # on restart.
+        self.assertIn("handleArtShowInfo(data, len, remoteAddr)", self.ino)
+        self.assertIn("loadStoredShowInfo();", self.ino)
+        self.assertIn('prefs.putString("characterName"', self.ino)
+        self.assertIn('prefs.putString("performerName"', self.ino)
+
+    def test_battery_tick_skips_active_playback(self):
+        # Battery sampling blocks ~16 ms and Radius audio is main-loop
+        # fed (no DREQ interrupt) — sampling mid-track underruns the
+        # VS1053. The tick must be gated on !audioIsPlaying().
+        self.assertIn('#include "battery.h"', self.ino)
+        match = re.search(
+            r"if\s*\(!audioIsPlaying\(\)\)\s*\{\s*\n\s*batteryTelemetryTick",
+            self.ino)
+        self.assertIsNotNone(
+            match, "batteryTelemetryTick must be gated on !audioIsPlaying()")
 
 
 class FtpHeaderContracts(unittest.TestCase):

@@ -104,6 +104,46 @@
                     </template>
                     <span class="audio-badge" x-show="dev.is_radius" title="Radius audio node">&#9834;</span>
                 </div>
+                <div class="device-show-info">
+                    <template x-if="!$store.conn.isEditingShowInfo(dev._di, 'character_name')">
+                        <button class="device-show-info-field"
+                                :class="{ 'device-show-info-empty': !dev.character_name }"
+                                :title="$store.conn.showInfoHint('character_name')"
+                                @click="$store.conn.startShowInfoEdit(dev._di, 'character_name')"
+                                x-text="$store.conn.showInfoDisplay(dev, 'character_name')"></button>
+                    </template>
+                    <template x-if="$store.conn.isEditingShowInfo(dev._di, 'character_name')">
+                        <input class="device-show-info-input" type="text" maxlength="64"
+                               placeholder="Character"
+                               x-model="$store.conn.showInfoValue"
+                               @keydown.enter="$store.conn.finishShowInfoEdit(dev._di, 'character_name')"
+                               @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                               @blur="$store.conn.finishShowInfoEdit(dev._di, 'character_name')"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
+                    <span class="device-show-info-sep">&mdash;</span>
+                    <template x-if="!$store.conn.isEditingShowInfo(dev._di, 'performer_name')">
+                        <button class="device-show-info-field"
+                                :class="{ 'device-show-info-empty': !dev.performer_name }"
+                                :title="$store.conn.showInfoHint('performer_name')"
+                                @click="$store.conn.startShowInfoEdit(dev._di, 'performer_name')"
+                                x-text="$store.conn.showInfoDisplay(dev, 'performer_name')"></button>
+                    </template>
+                    <template x-if="$store.conn.isEditingShowInfo(dev._di, 'performer_name')">
+                        <input class="device-show-info-input" type="text" maxlength="64"
+                               placeholder="Performer"
+                               x-model="$store.conn.showInfoValue"
+                               @keydown.enter="$store.conn.finishShowInfoEdit(dev._di, 'performer_name')"
+                               @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                               @blur="$store.conn.finishShowInfoEdit(dev._di, 'performer_name')"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
+                    <span class="device-battery"
+                          x-show="$store.conn.showBattery(dev)"
+                          :class="$store.conn.batteryClass(dev)"
+                          :title="$store.conn.batteryTitle(dev)"
+                          x-text="$store.conn.batteryLabel(dev)"></span>
+                </div>
                 <div class="device-meta">
                     <button class="device-ip-button"
                             :class="{ active: $store.conn.ipConfigDevice === dev._di }"

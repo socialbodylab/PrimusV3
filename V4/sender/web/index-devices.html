@@ -111,8 +111,9 @@
                                @blur="$store.conn.finishRename(entry._index)"
                                x-init="$nextTick(() => { $el.focus(); $el.select() })">
                     </template>
-                    <div class="device-stats" x-show="entry.dev.connected && $store.app.product === 'primus'">
+                    <div class="device-stats" x-show="entry.dev.connected">
                         <span class="device-fps"
+                              x-show="$store.app.product === 'primus'"
                               x-text="$store.conn.receiverFpsLabel(entry.dev)"></span>
                         <span class="device-battery"
                               x-show="$store.conn.showBattery(entry.dev)"
@@ -123,6 +124,42 @@
                     <span class="audio-badge"
                           x-show="$store.app.product === 'radius' && entry.dev.is_radius"
                           title="Radius audio node">&#9834;</span>
+                </div>
+
+                <div class="device-show-info">
+                    <template x-if="!$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                        <button class="device-show-info-field"
+                                :class="{ 'device-show-info-empty': !entry.dev.character_name }"
+                                :title="$store.conn.showInfoHint('character_name')"
+                                @click="$store.conn.startShowInfoEdit(entry._index, 'character_name')"
+                                x-text="$store.conn.showInfoDisplay(entry.dev, 'character_name')"></button>
+                    </template>
+                    <template x-if="$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                        <input class="device-show-info-input" type="text" maxlength="64"
+                               placeholder="Character"
+                               x-model="$store.conn.showInfoValue"
+                               @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
+                               @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                               @blur="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
+                    <span class="device-show-info-sep">&mdash;</span>
+                    <template x-if="!$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
+                        <button class="device-show-info-field"
+                                :class="{ 'device-show-info-empty': !entry.dev.performer_name }"
+                                :title="$store.conn.showInfoHint('performer_name')"
+                                @click="$store.conn.startShowInfoEdit(entry._index, 'performer_name')"
+                                x-text="$store.conn.showInfoDisplay(entry.dev, 'performer_name')"></button>
+                    </template>
+                    <template x-if="$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
+                        <input class="device-show-info-input" type="text" maxlength="64"
+                               placeholder="Performer"
+                               x-model="$store.conn.showInfoValue"
+                               @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'performer_name')"
+                               @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                               @blur="$store.conn.finishShowInfoEdit(entry._index, 'performer_name')"
+                               x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                    </template>
                 </div>
 
                 <div class="device-meta">

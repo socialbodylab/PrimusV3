@@ -78,7 +78,7 @@ enum OutputType {
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP   // Collar (72 px strip)
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A13
-  #define BOARD_BATTERY_FEATURES  "RIOHBM"
+  #define BOARD_BATTERY_FEATURES  "RIOHBMS"
 #elif defined(PRIMUS_PROFILE_V2)
   #define BOARD_PROFILE_ID        "v2_feather"
   #define BOARD_PROFILE_CODE      "v2"
@@ -115,7 +115,7 @@ enum OutputType {
   #define BOARD_BATTERY_MONITOR   0
 #endif
 #ifndef BOARD_BATTERY_FEATURES
-  #define BOARD_BATTERY_FEATURES  "RIOHM"
+  #define BOARD_BATTERY_FEATURES  "RIOHMS"
 #endif
 
 #ifndef BOARD_HAS_STATUS_LED
@@ -271,7 +271,17 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_OUTPUT_CONFIG 0x8100  // Vendor-defined: set output types
 #define ARTNET_OPCODE_RECEIVE_CONFIG 0x8110 // Vendor-defined: set receive mode / universe base
 #define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
+#define ARTNET_OPCODE_SHOW_INFO    0x8210  // Vendor-defined: read/write show metadata
 #define ARTNET_PROTOCOL_VER    14
+
+// ArtShowInfo (0x8210): character/performer names stored in NVS.
+// Packet: [12]=mode, [13]=char len, [14..77]=character,
+//         [78]=perf len, [79..142]=performer. Total 143 bytes.
+#define SHOW_INFO_FIELD_LEN        64
+#define SHOW_INFO_MODE_READ        0
+#define SHOW_INFO_MODE_WRITE       1
+#define SHOW_INFO_MODE_RESPONSE    2
+#define SHOW_INFO_PACKET_LEN       143
 
 // Device identity — reported in ArtPollReply
 #ifndef DEVICE_SHORT_NAME

@@ -508,6 +508,27 @@ class Handler(BaseHTTPRequestHandler):
                 code = 400 if result.get("error") == "invalid device index" else 409
                 self._json_error(code, result.get("error", "rename failed"))
 
+        elif path == "/api/device_show_info":
+            self._sync_artnet_source()
+            di = data.get("device", -1)
+            if "character_name" not in data and "performer_name" not in data:
+                self._json_error(400, "character_name or performer_name required")
+                return
+            kwargs = {}
+            if "character_name" in data:
+                kwargs["character_name"] = data.get("character_name")
+            if "performer_name" in data:
+                kwargs["performer_name"] = data.get("performer_name")
+            result = self._device_state().update_device_show_info(di, **kwargs)
+            if result.get("ok"):
+                self._json_response({
+                    "ok": True,
+                    "applied_to_device": bool(result.get("applied_to_device")),
+                })
+            else:
+                code = 400 if result.get("error") == "invalid device index" else 409
+                self._json_error(code, result.get("error", "update failed"))
+
         elif path == "/api/hello_device":
             self._sync_artnet_source()
             di = data.get("device", -1)

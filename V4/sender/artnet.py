@@ -23,6 +23,7 @@ ARTNET_OPCODE_ADDRESS = 0x6000
 ARTNET_OPCODE_OUTPUT_CONFIG = 0x8100
 ARTNET_OPCODE_RECEIVE_CONFIG = 0x8110
 ARTNET_OPCODE_IP_CONFIG = 0x8200
+ARTNET_OPCODE_SHOW_INFO = 0x8210
 ARTNET_OPCODE_AUDIO_CMD = 0x8300
 ARTNET_OPCODE_FTP_CMD = 0x8301
 ARTNET_OPCODE_AUDIO_STATUS = 0x8302
@@ -271,7 +272,7 @@ def parse_pfp_packet(raw):
 class PrimusTelemetryListener:
     """Listens on UDP 6455 for PFP and PBT telemetry from Primus receivers."""
 
-    def __init__(self):
+    def __init__(self, port=FPS_LISTEN_PORT):
         self.lock = threading.Lock()
         self.data = {}
         self.running = True
@@ -280,7 +281,7 @@ class PrimusTelemetryListener:
         bound = False
         for attempt in range(10):
             try:
-                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                self._sock.bind(("0.0.0.0", port))
                 bound = True
                 break
             except OSError:
@@ -290,7 +291,7 @@ class PrimusTelemetryListener:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                self._sock.bind(("0.0.0.0", port))
                 bound = True
             except OSError:
                 pass
@@ -298,7 +299,7 @@ class PrimusTelemetryListener:
             self._sock.bind(("0.0.0.0", 0))
             fallback_port = self._sock.getsockname()[1]
             print(
-                f"ERROR: telemetry port {FPS_LISTEN_PORT} in use "
+                f"ERROR: telemetry port {port} in use "
                 f"(listening on {fallback_port} instead) — receiver telemetry will not display. "
                 f"Stop other PrimusCentral/RadiusCentral instances."
             )
@@ -374,9 +375,9 @@ def parse_track_packet(raw):
 
 
 class RadiusTelemetryListener:
-    """Listens on UDP 6455 for PTR track-name telemetry from Radius nodes."""
+    """Listens on UDP 6455 for PTR track, audio status, and PBT battery telemetry."""
 
-    def __init__(self):
+    def __init__(self, port=FPS_LISTEN_PORT):
         self.lock = threading.Lock()
         self.data = {}
         self.running = True
@@ -385,14 +386,14 @@ class RadiusTelemetryListener:
         bound = False
         for attempt in range(10):
             try:
-                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                self._sock.bind(("0.0.0.0", port))
                 bound = True
                 break
             except OSError:
                 time.sleep(0.2)
         if not bound:
             self._sock.bind(("0.0.0.0", 0))
-            print(f"WARNING: telemetry port {FPS_LISTEN_PORT} in use — track telemetry may not display.")
+            print(f"WARNING: telemetry port {port} in use — track telemetry may not display.")
         self._sock.settimeout(1.0)
 
     def run(self):
@@ -403,8 +404,12 @@ class RadiusTelemetryListener:
                 continue
             status = parse_audio_status_packet(raw) or parse_track_packet(raw)
             if status is not None:
+                # Merge instead of replace — battery and FPS keys arrive in
+                # separate packets and must survive a status update.
                 with self.lock:
-                    self.data[addr[0]] = {**status, "ts": time.monotonic()}
+                    entry = self.data.setdefault(addr[0], {})
+                    entry.update(status)
+                    entry["ts"] = time.monotonic()
                 state = status["playback_state"]
                 name = status["current_track"]
                 state_str = "playing" if state == 1 else ("paused" if state == 2 else "stopped")
@@ -413,6 +418,14 @@ class RadiusTelemetryListener:
                 continue
             if len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
                 continue  # other Art-Net traffic on the telemetry port — ignore
+            if len(raw) >= 9 and raw[:3] == BATTERY_MAGIC:
+                parsed = parse_pbt_packet(raw)
+                if parsed:
+                    with self.lock:
+                        entry = self.data.setdefault(addr[0], {})
+                        entry.update(parsed)
+                        entry["ts"] = time.monotonic()
+                continue
             if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
                 fps = (raw[3] << 8) | raw[4]
                 pkt = (raw[5] << 8) | raw[6]
@@ -539,8 +552,12 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None, port=ARTN
 
         known_ip_set = set(known_ips) if known_ips else set()
         nodes = {}
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        # Reserve the tail of the timeout budget for show-info reads so
+        # discovery still returns within `timeout` overall.
+        poll_budget = max(0.5, timeout * 0.6)
+        poll_deadline = time.monotonic() + poll_budget
+        show_deadline = time.monotonic() + timeout
+        while time.monotonic() < poll_deadline:
             if known_ip_set and known_ip_set.issubset(nodes):
                 break
             try:
@@ -586,11 +603,39 @@ def discover_artnet_nodes(known_ips=None, timeout=2.0, interface=None, port=ARTN
                 "subnet": capabilities.get("subnet"),
                 "num_ports": num_ports,
                 "universes": universes,
+                "character_name": "",
+                "performer_name": "",
             }
+
+        node_list = list(nodes.values())
+        show_info_nodes = [
+            node for node in node_list
+            if (node.get("capabilities") or {}).get("show_info")
+        ]
+        known = set(known_ips or [])
+        if known:
+            show_info_nodes.sort(key=lambda node: 0 if node.get("ip") in known else 1)
+        per_node_timeout = 0.35
+        if show_info_nodes:
+            remaining_budget = max(0.0, show_deadline - time.monotonic())
+            per_node_timeout = min(0.35, remaining_budget / len(show_info_nodes))
+        for node in show_info_nodes:
+            remaining = show_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            show = query_show_info(
+                node["ip"],
+                timeout=min(per_node_timeout, remaining),
+                sock=sock,
+                port=port,
+            )
+            if show:
+                node["character_name"] = show.get("character_name", "")
+                node["performer_name"] = show.get("performer_name", "")
 
     finally:
         sock.close()
-    return list(nodes.values())
+    return node_list
 
 
 # ======================================================================
@@ -654,6 +699,8 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
         "output_config": False,
         "audio": False,
         "ftp": False,
+        "show_info": False,
+        "battery": False,
     }
     parts = _parse_radius_capability_parts(node_report)
     if not parts:
@@ -680,6 +727,8 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
         caps["ip_config"] = caps["ip_config"] or "I" in features
         caps["audio"] = "A" in features
         caps["ftp"] = caps["ftp"] or "F" in features or "A" in features
+        caps["show_info"] = "S" in features
+        caps["battery"] = "B" in features
     return caps
 
 
@@ -735,6 +784,7 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
         "battery": False,
         "audio": False,
         "ftp": False,
+        "show_info": False,
     }
     name_blob = f"{short_name} {long_name}".lower()
     parts = _node_capability_parts(node_report)
@@ -765,6 +815,7 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             caps["output_config"] = "O" in features
             caps["receive_config"] = "M" in features
             caps["battery"] = "B" in features
+            caps["show_info"] = "S" in features
         if saw_feature_token:
             if caps["hardware_profile"] == "unknown" and "primusv3" in name_blob:
                 caps["hardware_profile"] = "v31"
@@ -1223,3 +1274,145 @@ def ftp_mkdir(ip, path, source_ip=None):
     with _ftp_session(ip, source_ip=source_ip) as ftp:
         ftp.mkd(path)
     netlog.log("OUT", "ftp_mkdir", f"FTP mkdir {path} on {ip}")
+
+
+# ======================================================================
+#  ART-NET SHOW INFO — ArtShowInfo (opcode 0x8210)
+# ======================================================================
+# Character/performer names stored in receiver NVS. Ported from origin/main
+# (a17ad3e); adapted for the dedicated Radius port — pass
+# port=RADIUS_ARTNET_PORT for Radius nodes.
+
+SHOW_INFO_FIELD_LEN = 64
+SHOW_INFO_PACKET_LEN = 143
+SHOW_INFO_MODE_READ = 0
+SHOW_INFO_MODE_WRITE = 1
+SHOW_INFO_MODE_RESPONSE = 2
+
+
+def _encode_show_info_field(value):
+    return str(value or "").encode("utf-8", errors="replace")[:SHOW_INFO_FIELD_LEN]
+
+
+def build_show_info_packet(mode, character_name="", performer_name=""):
+    char_bytes = _encode_show_info_field(character_name)
+    perf_bytes = _encode_show_info_field(performer_name)
+    pkt = bytearray(SHOW_INFO_PACKET_LEN)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_SHOW_INFO)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    pkt[12] = mode & 0xFF
+    pkt[13] = len(char_bytes)
+    pkt[14:14 + SHOW_INFO_FIELD_LEN] = char_bytes.ljust(SHOW_INFO_FIELD_LEN, b"\x00")
+    pkt[78] = len(perf_bytes)
+    pkt[79:79 + SHOW_INFO_FIELD_LEN] = perf_bytes.ljust(SHOW_INFO_FIELD_LEN, b"\x00")
+    return bytes(pkt)
+
+
+def parse_show_info_packet(raw):
+    if len(raw) < SHOW_INFO_PACKET_LEN or raw[:8] != ARTNET_HEADER:
+        return None
+    if struct.unpack("<H", raw[8:10])[0] != ARTNET_OPCODE_SHOW_INFO:
+        return None
+    char_len = min(raw[13], SHOW_INFO_FIELD_LEN)
+    perf_len = min(raw[78], SHOW_INFO_FIELD_LEN)
+    return {
+        "mode": raw[12],
+        "character_name": raw[14:14 + char_len].decode("utf-8", errors="replace"),
+        "performer_name": raw[79:79 + perf_len].decode("utf-8", errors="replace"),
+    }
+
+
+def send_show_info(ip, character_name="", performer_name="", source_ip=None,
+                   port=ARTNET_PORT):
+    pkt = build_show_info_packet(
+        SHOW_INFO_MODE_WRITE,
+        character_name=character_name,
+        performer_name=performer_name,
+    )
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
+    netlog.log("OUT", "show_info", f"ArtShowInfo write to {ip}")
+
+
+def _bind_artnet_query_socket(source_ip=None, port=ARTNET_PORT):
+    """Bind a UDP socket for Art-Net request/response pairs.
+
+    Receivers reply to the controller port (6454 / 6456), not the ephemeral
+    source port, so try to own that port and fall back to ephemeral.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    bind_addrs = []
+    if source_ip:
+        bind_addrs.append((source_ip, port))
+    bind_addrs.append(("", port))
+    if source_ip:
+        bind_addrs.append((source_ip, 0))
+    bind_addrs.append(("", 0))
+    for addr in bind_addrs:
+        try:
+            sock.bind(addr)
+            return sock
+        except OSError:
+            continue
+    sock.close()
+    raise OSError("unable to bind Art-Net query socket")
+
+
+def query_show_info(ip, timeout=0.35, sock=None, source_ip=None, port=ARTNET_PORT):
+    """Read character/performer strings stored on a receiver."""
+    owns_sock = sock is None
+    if owns_sock:
+        sock = _bind_artnet_query_socket(source_ip=source_ip, port=port)
+    sock.settimeout(max(0.05, timeout))
+
+    try:
+        pkt = build_show_info_packet(SHOW_INFO_MODE_READ)
+        sock.sendto(pkt, (ip, port))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw, addr = sock.recvfrom(512)
+            except socket.timeout:
+                continue
+            if addr[0] != ip:
+                continue
+            parsed = parse_show_info_packet(raw)
+            if parsed and parsed.get("mode") == SHOW_INFO_MODE_RESPONSE:
+                return parsed
+    finally:
+        if owns_sock:
+            sock.close()
+    return None
+
+
+def _normalize_show_info_compare(value):
+    return str(value or "").strip()[:SHOW_INFO_FIELD_LEN]
+
+
+def sync_show_info_to_device(
+    ip,
+    character_name="",
+    performer_name="",
+    source_ip=None,
+    timeout=0.5,
+    port=ARTNET_PORT,
+):
+    """Write show info and verify the receiver stored the expected values."""
+    send_show_info(
+        ip,
+        character_name=character_name,
+        performer_name=performer_name,
+        source_ip=source_ip,
+        port=port,
+    )
+    result = query_show_info(ip, timeout=timeout, source_ip=source_ip, port=port)
+    if not result:
+        return False, "receiver did not respond to show info read"
+    expected_char = _normalize_show_info_compare(character_name)
+    expected_perf = _normalize_show_info_compare(performer_name)
+    actual_char = _normalize_show_info_compare(result.get("character_name"))
+    actual_perf = _normalize_show_info_compare(result.get("performer_name"))
+    if actual_char != expected_char or actual_perf != expected_perf:
+        return False, "receiver did not confirm show info save"
+    return True, ""

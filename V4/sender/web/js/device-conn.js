@@ -18,6 +18,9 @@ document.addEventListener("alpine:init", () => {
         manualIp: "",
         renamingDevice: -1,
         renameValue: "",
+        showInfoDevice: -1,
+        showInfoField: "",
+        showInfoValue: "",
         groupModal: false,
         editGroup: null,
         editGroupName: "",
@@ -573,6 +576,60 @@ document.addEventListener("alpine:init", () => {
         cancelRename() {
             this.renamingDevice = -1;
             this.renameValue = "";
+        },
+
+        // ── Show info (character / performer names, ArtShowInfo 0x8210) ──
+
+        showInfoLabel(field) {
+            return field === "character_name" ? "character" : "performer";
+        },
+
+        showInfoDisplay(dev, field) {
+            const value = (dev?.[field] || "").trim();
+            return value || ("+ " + this.showInfoLabel(field));
+        },
+
+        showInfoHint(field) {
+            return "Click to edit " + this.showInfoLabel(field) + " name";
+        },
+
+        isEditingShowInfo(di, field) {
+            return this.showInfoDevice === di && this.showInfoField === field;
+        },
+
+        startShowInfoEdit(di, field) {
+            this.showInfoDevice = di;
+            this.showInfoField = field;
+            this.showInfoValue = this.devices[di]?.[field] || "";
+        },
+
+        async finishShowInfoEdit(di, field) {
+            if (!this.isEditingShowInfo(di, field)) return;
+            const value = this.showInfoValue.trim();
+            const oldValue = (this.devices[di]?.[field] || "").trim();
+            this.showInfoDevice = -1;
+            this.showInfoField = "";
+            this.showInfoValue = "";
+            if (value === oldValue) return;
+            try {
+                const result = await api("POST", "/api/device_show_info",
+                    { device: di, [field]: value });
+                await Alpine.store("app").fetchState();
+                const stored = result?.applied_to_device
+                    ? "Saved to receiver."
+                    : "Saved locally (receiver does not support show info).";
+                Alpine.store("app").showNotice(
+                    "Updated " + this.showInfoLabel(field) + " name. " + stored,
+                    "success");
+            } catch (e) {
+                Alpine.store("app").showApiError("Show info update failed", e);
+            }
+        },
+
+        cancelShowInfoEdit() {
+            this.showInfoDevice = -1;
+            this.showInfoField = "";
+            this.showInfoValue = "";
         },
 
         openIpConfig(di) {

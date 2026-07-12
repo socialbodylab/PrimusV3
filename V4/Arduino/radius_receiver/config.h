@@ -40,6 +40,10 @@
   #define BOARD_HAS_STATUS_LED         1
   #define BOARD_STATUS_LED_PIN         LED_BUILTIN
   #define BOARD_STATUS_LED_ACTIVE_HIGH 1
+  // HUZZAH32 LiPo monitoring: A13 (GPIO35) half-divider — free of the
+  // Music Maker pins (32/33/15/14).
+  #define BOARD_BATTERY_MONITOR        1
+  #define BOARD_BATTERY_PIN            A13
 #else
   #define FIRMWARE_NAME    "Radius V2"
   #define DEVICE_LONG_NAME "Radius Central V2"
@@ -109,10 +113,20 @@
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000
 #define ARTNET_OPCODE_IP_CONFIG  0x8200
+#define ARTNET_OPCODE_SHOW_INFO  0x8210
 #define ARTNET_OPCODE_AUDIO_CMD    0x8300
 #define ARTNET_OPCODE_FTP_CMD      0x8301
 #define ARTNET_OPCODE_AUDIO_STATUS 0x8302  // unsolicited playback status from device
 #define ARTNET_PROTOCOL_VER      14
+
+// ArtShowInfo (0x8210): character/performer names stored in NVS.
+// Packet: [12]=mode, [13]=char len, [14..77]=character,
+//         [78]=perf len, [79..142]=performer. Total 143 bytes.
+#define SHOW_INFO_FIELD_LEN        64
+#define SHOW_INFO_MODE_READ        0
+#define SHOW_INFO_MODE_WRITE       1
+#define SHOW_INFO_MODE_RESPONSE    2
+#define SHOW_INFO_PACKET_LEN       143
 
 #ifndef DEVICE_SHORT_NAME
 #define DEVICE_SHORT_NAME  "Radius"
@@ -120,8 +134,17 @@
 #define OEM_CODE           0xFFFF
 #define ESTA_CODE          0x0000
 
+#ifndef BOARD_BATTERY_MONITOR
+  #define BOARD_BATTERY_MONITOR 0
+#endif
+
 #define NODE_CAPS_PREFIX  "PVRAD1"
-#define NODE_CAPS_FEATURES "RA"
+// R rename, A audio (implies FTP), S show info, B battery telemetry
+#if BOARD_BATTERY_MONITOR
+  #define NODE_CAPS_FEATURES "RASB"
+#else
+  #define NODE_CAPS_FEATURES "RAS"
+#endif
 
 // =====================================================================
 //  Telemetry (UDP 6455 back-channel)

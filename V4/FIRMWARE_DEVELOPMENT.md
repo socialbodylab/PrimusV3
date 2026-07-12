@@ -81,8 +81,14 @@ Radius firmware optimizes for **audio-first loop scheduling** and **exclusive SD
 |--------|------|---------|
 | 0x6000 | ArtAddress | Rename (NVS) |
 | 0x8200 | ArtIPConfig | Static IP / DHCP (NVS, reboot) |
+| 0x8210 | ArtShowInfo | Character/performer names (NVS): read / write / response, 143-byte packet, two 64-byte fields |
 | 0x8300 | ArtAudioCmd | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
 | 0x8301 | ArtFtpCmd | FTP server start/stop |
+
+Radius capability flags in the ArtPollReply node report (`PVRAD1|…|F:`):
+`R` rename, `A` audio (implies FTP), `S` show info, `B` battery telemetry
+(rv1 only — HUZZAH32 A13 half-divider, 9-byte `PBT` packets on UDP 6455
+every 5 s, skipped while a track is playing because audio is main-loop fed).
 
 ### ArtAudioCmd (0x8300)
 
@@ -133,12 +139,12 @@ UDP 6455 back-channel:
 
 ## Compile-time overrides
 
-[`radius_upload.sh`](radius_upload.sh) supports the same `-include` override header as Primus:
+[`upload.sh`](upload.sh) supports the same `-include` override header for Radius profiles as for Primus:
 
 ```bash
-./radius_upload.sh --board radius_v1 -ssid "MyRouter" -pw "secret" --name "StageLeft" --compile
-./radius_upload.sh --board radius_v1 --static-ip 192.168.1.50 --gateway 192.168.1.1 --subnet 255.255.255.0 --compile
-./radius_upload.sh --board radius_v1 --dhcp --compile
+./upload.sh -rv1 -ssid "MyRouter" -pw "secret" --name "StageLeft" --compile
+./upload.sh -rv1 --static-ip 192.168.1.50 --gateway 192.168.1.1 --subnet 255.255.255.0 --compile
+./upload.sh -rv1 --dhcp --compile
 ```
 
 ## Diagnostics
