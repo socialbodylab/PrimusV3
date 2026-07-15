@@ -1,0 +1,25 @@
+{
+  "id": "524b7dee-6696-4e81-a15d-d7dd984ba124",
+  "name": "Soft Lantern Grid",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "solid",
+  "start_color": [
+    255,
+    170,
+    80
+  ],
+  "end_color": [
+    255,
+    170,
+    80
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-05-08T22:02:11.853074+00:00",
+  "modified": "2026-05-08T22:02:11.853096+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "a1bc73a4-1579-4c91-bf43-b33469dcb1cf",
+  "name": "Runway Static Noise",
+  "group": "noise",
+  "output_type": "extra_long_strip",
+  "effect": "static_noise",
+  "start_color": [
+    10,
+    10,
+    10
+  ],
+  "end_color": [
+    255,
+    255,
+    255
+  ],
+  "speed": 2.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 3.0,
+  "created": "2026-05-13T20:00:14+00:00",
+  "modified": "2026-05-13T20:00:14+00:00"
+}

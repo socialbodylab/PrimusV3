@@ -1,0 +1,25 @@
+{
+  "id": "b3e2c4d5-c4b8-45b1-bd49-24135fc7c4c8",
+  "name": "Warm Shimmer",
+  "group": "short_strip",
+  "output_type": "short_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    255,
+    100,
+    0
+  ],
+  "end_color": [
+    255,
+    220,
+    80
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.290714+00:00",
+  "modified": "2026-04-08T13:57:40.290756+00:00"
+}

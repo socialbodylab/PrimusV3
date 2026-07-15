@@ -1,0 +1,25 @@
+{
+  "id": "b9377fd8-2d85-4ab7-a988-16ba4cc3cb7e",
+  "name": "Pocket Lava Noise",
+  "group": "noise",
+  "output_type": "small_grid",
+  "effect": "noise",
+  "start_color": [
+    45,
+    7,
+    0
+  ],
+  "end_color": [
+    255,
+    126,
+    22
+  ],
+  "speed": 0.65,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 7.0,
+  "created": "2026-05-13T20:00:10+00:00",
+  "modified": "2026-05-13T20:00:10+00:00"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "ceb864a6-6014-4415-888c-70235bc75c3b",
+  "name": "Rainbow Crawl",
+  "group": "Rainbow Crawl",
+  "output_type": "short_strip",
+  "effect": "rainbow",
+  "start_color": [
+    255,
+    0,
+    255
+  ],
+  "end_color": [
+    0,
+    255,
+    255
+  ],
+  "speed": 0.4,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.676162+00:00",
+  "modified": "2026-04-08T18:59:58.676175+00:00"
+}

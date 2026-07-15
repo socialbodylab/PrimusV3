@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device Manager</title>
+<link rel="stylesheet" href="/css/style.css">
+<script defer src="/js/alpine.min.js"></script>
+<script src="/js/qrcode.js"></script>
+<script src="/js/ui-lifecycle.js"></script>
+<script src="/js/app-devices.js"></script>
+<script src="/js/device-conn.js"></script>
+<script src="/js/firmware.js"></script>
+<script src="/js/settings.js"></script>
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="navbar-brand" x-data x-text="$store.app.brandLabel"></div>
+    <div class="navbar-tabs navbar-tabs-primary"></div>
+    <div class="navbar-tabs navbar-tabs-secondary" x-data>
+        <template x-for="m in ($store.app.mobileView ? ['monitor'] : ['monitor', 'firmware', 'settings'])">
+            <div class="navbar-tab"
+                 :class="{ active: $store.app.mode === m }"
+                 @click="$store.app.setMode(m)"
+                 x-text="m === 'monitor' ? 'Monitor' : (m === 'firmware' ? 'Firmware' : 'Settings')"></div>
+        </template>
+    </div>
+    <div class="navbar-status" x-data>
+        <span class="monitor-only-badge"
+              x-show="$store.app.runtime?.monitor_only"
+              title="This instance only watches devices — it never opens an Art-Net output connection or sends DMX, so it can safely run alongside a control machine or console.">
+            Monitor Only &middot; Not Sending Output
+        </span>
+        <button class="network-chip"
+                :class="$store.app.networkChipClass()"
+                :title="$store.app.networkChipTitle()"
+                disabled>
+            <span class="network-chip-label">Net</span>
+            <span class="network-chip-value" x-text="$store.app.networkChipLabel()"></span>
+        </button>
+        <div class="status-dot" :class="{ connected: $store.app.summaryOnline > 0 }"></div>
+        <span x-text="$store.app.onlineDeviceSummary"></span>
+    </div>
+</nav>
+
+<div class="notice-banner" x-data x-show="$store.app.notice" x-cloak>
+    <div class="notice-pill"
+         :class="'notice-' + ($store.app.notice?.level || 'info')">
+        <span class="notice-text" x-text="$store.app.notice?.message"></span>
+        <button class="notice-close" @click="$store.app.clearNotice()">&times;</button>
+    </div>
+</div>
+
+<!-- ==================== MONITOR ==================== -->
+<div class="device-manager-main main-content" x-data x-init="$store.app.init()" x-show="$store.app.mode === 'monitor'">
+    <div class="device-manager-toolbar">
+        <div class="device-manager-toolbar-sync">
+            <button class="btn btn-sm"
+                    @click="$store.conn.syncNetwork()"
+                    :disabled="$store.conn.syncing"
+                    x-text="$store.conn.syncing ? 'Syncing…' : 'Sync now'"></button>
+        </div>
+        <div class="dm-character-filters"
+             x-show="$store.app.hasPrimusDevices && $store.app.isProductFilterVisible('primus')">
+            <button type="button"
+                    class="dm-character-filter-label dm-product-filter-label"
+                    :class="{ 'dm-product-filter-active': $store.app.isProductFilterActive('primus') }"
+                    @click="$store.app.toggleProductFilter('primus')">Primus</button>
+            <button type="button"
+                    class="dm-character-chip"
+                    :class="{ 'dm-character-chip-active': !$store.app.filterPrimusCharacter }"
+                    @click="$store.app.clearPrimusCharacterFilter()">All</button>
+            <template x-for="name in $store.app.primusCharacterFilterOptions" :key="'primus-' + name">
+                <button type="button"
+                        class="dm-character-chip"
+                        :class="{ 'dm-character-chip-active': $store.app.filterPrimusCharacter === name }"
+                        @click="$store.app.togglePrimusCharacterFilter(name)"
+                        x-text="name"></button>
+            </template>
+        </div>
+        <div class="dm-character-filters"
+             x-show="$store.app.hasRadiusDevices && $store.app.isProductFilterVisible('radius')">
+            <button type="button"
+                    class="dm-character-filter-label dm-product-filter-label"
+                    :class="{ 'dm-product-filter-active': $store.app.isProductFilterActive('radius') }"
+                    @click="$store.app.toggleProductFilter('radius')">Radius</button>
+            <button type="button"
+                    class="dm-character-chip"
+                    :class="{ 'dm-character-chip-active': !$store.app.filterRadiusCharacter }"
+                    @click="$store.app.clearRadiusCharacterFilter()">All</button>
+            <template x-for="name in $store.app.radiusCharacterFilterOptions" :key="'radius-' + name">
+                <button type="button"
+                        class="dm-character-chip"
+                        :class="{ 'dm-character-chip-active': $store.app.filterRadiusCharacter === name }"
+                        @click="$store.app.toggleRadiusCharacterFilter(name)"
+                        x-text="name"></button>
+            </template>
+        </div>
+    </div>
+
+    <div class="dm-summary-strip">
+        <div class="dm-summary-item">
+            <span class="dm-summary-value" x-text="$store.app.summaryOnline + '/' + $store.app.summaryTotal"></span>
+            <span class="dm-summary-label">Online</span>
+        </div>
+        <div class="dm-summary-item">
+            <span class="dm-summary-value" x-text="$store.app.summaryPrimusCount"></span>
+            <span class="dm-summary-label">Primus</span>
+        </div>
+        <div class="dm-summary-item">
+            <span class="dm-summary-value" x-text="$store.app.summaryRadiusCount"></span>
+            <span class="dm-summary-label">Radius</span>
+        </div>
+        <div class="dm-summary-item dm-summary-warn" x-show="$store.app.summaryLowBattery">
+            <span class="dm-summary-value" x-text="$store.app.summaryLowBattery"></span>
+            <span class="dm-summary-label">Low Battery</span>
+        </div>
+        <div class="dm-summary-item dm-summary-danger" x-show="$store.app.summaryErrors">
+            <span class="dm-summary-value" x-text="$store.app.summaryErrors"></span>
+            <span class="dm-summary-label">Errors</span>
+        </div>
+    </div>
+
+    <!-- ---- Bulk Rename panel ---- -->
+    <div class="dm-bulk-panel" x-show="$store.app.bulkPanel === 'rename'" x-cloak>
+        <div class="dm-bulk-panel-header">
+            <span class="output-name">Bulk Rename — <span x-text="$store.app.currentBulkGroup()?.name"></span></span>
+            <button class="notice-close" @click="$store.app.closeBulkPanel()">&times;</button>
+        </div>
+        <div class="dm-bulk-form">
+            <div class="form-group compact">
+                <label class="form-label">Pattern (use {n} for number)</label>
+                <input class="form-input form-input-sm" type="text"
+                       x-model="$store.app.bulkRenamePattern"
+                       @input="$store.app.updateBulkRenamePreview()">
+            </div>
+            <div class="form-group compact">
+                <label class="form-label">Start #</label>
+                <input class="form-input form-input-sm" type="number" min="0"
+                       x-model.number="$store.app.bulkRenameStart"
+                       @input="$store.app.updateBulkRenamePreview()">
+            </div>
+            <div class="form-group compact">
+                <label class="form-label">Zero-pad width</label>
+                <input class="form-input form-input-sm" type="number" min="0" max="4"
+                       x-model.number="$store.app.bulkRenamePad"
+                       @input="$store.app.updateBulkRenamePreview()">
+            </div>
+        </div>
+        <div class="dm-bulk-preview">
+            <template x-for="item in $store.app.bulkRenamePlan" :key="item.di">
+                <div class="dm-bulk-preview-row" :class="{ 'dm-bulk-preview-disabled': !item.canRename }">
+                    <span x-text="item.oldName || item.ip"></span>
+                    <span>&rarr;</span>
+                    <span x-text="item.newName"></span>
+                    <span class="text-sm text-muted" x-show="!item.canRename">(rename not supported)</span>
+                </div>
+            </template>
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+            <button class="btn btn-sm btn-primary" @click="$store.app.applyBulkRename()">Apply Rename</button>
+            <button class="btn btn-sm" @click="$store.app.closeBulkPanel()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- ---- Bulk Apply panel ---- -->
+    <div class="dm-bulk-panel" x-show="$store.app.bulkPanel === 'apply'" x-cloak>
+        <div class="dm-bulk-panel-header">
+            <span class="output-name">Bulk Apply — <span x-text="$store.app.currentBulkGroup()?.name"></span></span>
+            <button class="notice-close" @click="$store.app.closeBulkPanel()">&times;</button>
+        </div>
+        <div class="dm-bulk-form">
+            <div class="form-group compact">
+                <label class="form-label">Output</label>
+                <input class="form-input form-input-sm" type="number" min="0"
+                       x-model.number="$store.app.bulkOutputIndex">
+            </div>
+            <div class="form-group compact">
+                <label class="form-label">Output Type</label>
+                <select class="form-input form-input-sm" x-model="$store.app.bulkOutputType">
+                    <template x-for="type in $store.app.outputTypes" :key="type">
+                        <option :value="type" x-text="$store.app.outputTypeLabel(type)"></option>
+                    </template>
+                </select>
+            </div>
+            <button class="btn btn-sm btn-primary" @click="$store.app.applyBulkOutputType()">Apply Output Type</button>
+            <div class="form-group compact">
+                <label class="form-label">Management preset / descriptor</label>
+                <select class="form-input form-input-sm" x-model="$store.app.bulkPresetId">
+                    <option value="">Choose preset…</option>
+                    <template x-for="preset in $store.conn.outputPresets" :key="preset.id">
+                        <option :value="preset.id"
+                                x-text="preset.name + (preset.built_in ? ' · Built-in' : '')"></option>
+                    </template>
+                </select>
+            </div>
+            <button class="btn btn-sm btn-primary"
+                    :disabled="!$store.app.bulkPresetId"
+                    @click="$store.app.applyBulkPreset()">Apply Preset</button>
+        </div>
+        <div class="dm-bulk-preview" x-show="$store.app.bulkApplyResults.length">
+            <template x-for="result in $store.app.bulkApplyResults" :key="result.device">
+                <div class="dm-bulk-preview-row">
+                    <span x-text="result.device"></span>
+                    <span x-text="result.status.replace('_', ' ')"></span>
+                    <span class="text-sm text-muted" x-show="result.error" x-text="result.error"></span>
+                </div>
+            </template>
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+            <button class="btn btn-sm" @click="$store.app.closeBulkPanel()">Close</button>
+        </div>
+    </div>
+
+    <div class="device-manager-empty text-muted"
+         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterPrimusCharacter || $store.app.filterRadiusCharacter || $store.app.filterProductType)"
+         x-cloak>
+        No devices match the selected filters.
+    </div>
+
+    <div class="device-manager-empty text-muted"
+         x-show="!$store.conn.devices.length && !$store.conn.syncing"
+         x-cloak>
+        No devices found yet. Device Manager scans the network automatically every 20 seconds — use "Sync now" for an immediate check.
+    </div>
+
+    <template x-for="product in $store.app.productSectionList" :key="product.key">
+        <div class="dm-product-section" x-cloak>
+            <div class="dm-product-header">
+                <span class="dm-product-title" x-text="product.label"></span>
+                <span class="dm-product-count" x-text="product.count"></span>
+            </div>
+            <template x-for="section in product.sections" :key="product.key + '-' + section.key">
+                <div class="dm-section" x-show="section.entries.length" x-cloak>
+                    <div class="dm-section-header">
+                        <span class="dm-section-title" x-text="section.label"></span>
+                        <span class="dm-section-count" x-text="section.entries.length"></span>
+                    </div>
+                    <div class="device-manager-grid">
+                        <template x-for="entry in section.entries" :key="entry._index">
+                    <div class="device-card dm-card" :class="'dm-card-' + entry._section">
+
+                        <!-- Primary heading: Character Name, always editable (placeholder when unset) -->
+                        <div class="dm-heading">
+                            <template x-if="$store.conn.showInfoEnabled(entry.dev) && !$store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                                <h3 class="dm-title"
+                                    :class="{ 'dm-title-fallback': !entry.dev.character_name }"
+                                    @click="!$store.app.mobileView && $store.conn.startShowInfoEdit(entry._index, 'character_name')"
+                                    :title="$store.conn.showInfoHint('character_name')"
+                                    x-text="$store.conn.showInfoDisplay(entry.dev, 'character_name')"></h3>
+                            </template>
+                            <template x-if="$store.conn.showInfoEnabled(entry.dev) && $store.conn.isEditingShowInfo(entry._index, 'character_name')">
+                                <input class="dm-title-input" type="text" maxlength="64"
+                                       x-model="$store.conn.showInfoEditValue"
+                                       @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
+                                       @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                                       @blur="$store.conn.finishShowInfoEdit(entry._index, 'character_name')"
+                                       x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                            </template>
+                            <template x-if="!$store.conn.showInfoEnabled(entry.dev) && $store.conn.renamingDevice !== entry._index">
+                                <h3 class="dm-title dm-title-fallback"
+                                    @click="!$store.app.mobileView && $store.conn.startRename(entry._index)"
+                                    :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) || $store.app.mobileView }"
+                                    :title="$store.conn.renameHint(entry.dev)"
+                                    x-text="entry.dev.name"></h3>
+                            </template>
+                            <template x-if="!$store.conn.showInfoEnabled(entry.dev) && $store.conn.renamingDevice === entry._index">
+                                <input class="dm-title-input" type="text" maxlength="17"
+                                       x-model="$store.conn.renameValue"
+                                       @keydown.enter="$store.conn.finishRename(entry._index)"
+                                       @keydown.escape="$store.conn.cancelRename()"
+                                       @blur="$store.conn.finishRename(entry._index)"
+                                       x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                            </template>
+                            <span class="device-config-status"
+                                  :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(entry._index, 'character'))"
+                                  x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"
+                                  x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"></span>
+                            <button type="button" class="dm-expand-toggle"
+                                    x-show="!$store.app.mobileView"
+                                    :class="{ 'dm-expand-toggle-open': $store.app.isCardExpanded(entry._index) }"
+                                    :aria-expanded="$store.app.isCardExpanded(entry._index) ? 'true' : 'false'"
+                                    :title="$store.app.isCardExpanded(entry._index) ? 'Collapse configuration' : 'Expand configuration'"
+                                    @click="$store.app.toggleCardExpanded(entry._index)">&#9656;</button>
+                        </div>
+
+                        <!-- Performer Name subheading -->
+                        <div class="dm-subheading" x-show="$store.conn.showInfoEnabled(entry.dev)" x-cloak>
+                            <template x-if="!$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
+                                <button type="button" class="dm-subtitle-value"
+                                        :class="{ 'device-identity-empty': !entry.dev.performer_name }"
+                                        :title="$store.conn.showInfoHint('performer_name')"
+                                        :disabled="$store.app.mobileView"
+                                        @click="!$store.app.mobileView && $store.conn.startShowInfoEdit(entry._index, 'performer_name')"
+                                        x-text="$store.conn.showInfoDisplay(entry.dev, 'performer_name')"></button>
+                            </template>
+                            <template x-if="$store.conn.isEditingShowInfo(entry._index, 'performer_name')">
+                                <input class="device-rename-input device-identity-input" type="text" maxlength="64"
+                                       x-model="$store.conn.showInfoEditValue"
+                                       @keydown.enter="$store.conn.finishShowInfoEdit(entry._index, 'performer_name')"
+                                       @keydown.escape="$store.conn.cancelShowInfoEdit()"
+                                       @blur="$store.conn.finishShowInfoEdit(entry._index, 'performer_name')"
+                                       x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                            </template>
+                            <span class="device-config-status"
+                                  :class="$store.conn.configFeedbackClass($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"
+                                  x-show="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"
+                                  x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'performer'))"></span>
+                        </div>
+
+                        <!-- Device (technical) name -->
+                        <div class="dm-device-name-row" x-show="$store.conn.showInfoEnabled(entry.dev)">
+                            <span class="device-config-label">Device</span>
+                            <template x-if="$store.conn.renamingDevice !== entry._index">
+                                <span class="dm-footer-name-value"
+                                      @click="!$store.app.mobileView && $store.conn.startRename(entry._index)"
+                                      :class="{ 'device-name-disabled': !$store.conn.canRenameDevice(entry.dev) || $store.app.mobileView }"
+                                      :title="$store.conn.renameHint(entry.dev)"
+                                      x-text="entry.dev.name"></span>
+                            </template>
+                            <template x-if="$store.conn.renamingDevice === entry._index">
+                                <input class="device-rename-input" type="text" maxlength="17"
+                                       x-model="$store.conn.renameValue"
+                                       @keydown.enter="$store.conn.finishRename(entry._index)"
+                                       @keydown.escape="$store.conn.cancelRename()"
+                                       @blur="$store.conn.finishRename(entry._index)"
+                                       x-init="$nextTick(() => { $el.focus(); $el.select() })">
+                            </template>
+                        </div>
+
+                        <!-- Status cluster: connection status / battery -->
+                        <div class="dm-status-cluster">
+                            <span class="dm-status-pill" :class="$store.conn.monitorStatusClass(entry.dev)"
+                                  x-text="$store.conn.monitorStatusLabel(entry.dev)"></span>
+                            <span class="device-fps" :class="$store.conn.monitorLiveClass(entry.dev)"
+                                  x-show="$store.conn.monitorShowFps(entry.dev)"
+                                  x-text="$store.conn.monitorFpsLabel(entry.dev)"></span>
+                            <span class="device-battery"
+                                  x-show="$store.conn.monitorShowBattery(entry.dev)"
+                                  :class="$store.conn.batteryClass(entry.dev)"
+                                  :title="$store.conn.batteryTitle(entry.dev)"
+                                  x-text="$store.conn.batteryLabel(entry.dev)"></span>
+                            <span class="audio-badge"
+                                  x-show="$store.app.isRadiusDevice(entry.dev)"
+                                  title="Radius audio node">&#9834;</span>
+                            <button type="button" class="btn btn-sm dm-hello-btn"
+                                    x-show="$store.app.isRadiusDevice(entry.dev) && $store.conn.monitorCanHello(entry.dev)"
+                                    :title="$store.conn.helloHint(entry.dev)"
+                                    @click="$store.conn.helloDevice(entry._index)">Hello</button>
+                        </div>
+
+                        <!-- IP / Universe -->
+                        <div class="dm-row dm-row-ip">
+                            <button class="device-ip-button"
+                                    :class="{ active: $store.conn.ipConfigDevice === entry._index }"
+                                    :disabled="!$store.conn.canConfigureIp(entry.dev) || $store.app.mobileView || !$store.app.isCardExpanded(entry._index)"
+                                    :title="$store.app.isCardExpanded(entry._index) ? $store.conn.ipConfigHint(entry.dev) : 'Expand card to configure'"
+                                    @click="$store.conn.ipConfigDevice === entry._index ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(entry._index)"
+                                    x-text="entry.dev.ip"></button>
+                            <span class="dm-universe" x-show="!$store.app.isRadiusDevice(entry.dev)"
+                                  x-text="'U' + (entry.dev.base_universe ?? 0)"></span>
+                            <span class="device-network-badge"
+                                  :class="$store.conn.networkModeClass(entry.dev)"
+                                  :title="$store.conn.networkModeTitle(entry.dev)"
+                                  x-text="$store.conn.networkModeLabel(entry.dev)"></span>
+                        </div>
+
+                        <div class="device-ip-config"
+                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index) && $store.conn.ipConfigDevice === entry._index"
+                             x-cloak>
+                            <div class="form-group compact">
+                                <label class="form-label">Static IP</label>
+                                <input class="form-input form-input-sm" type="text"
+                                       x-model="$store.conn.ipConfigIp" placeholder="192.168.1.100">
+                            </div>
+                            <div class="form-group compact">
+                                <label class="form-label">Gateway</label>
+                                <input class="form-input form-input-sm" type="text"
+                                       x-model="$store.conn.ipConfigGateway" placeholder="192.168.1.1">
+                            </div>
+                            <div class="form-group compact">
+                                <label class="form-label">Subnet</label>
+                                <input class="form-input form-input-sm" type="text"
+                                       x-model="$store.conn.ipConfigSubnet" placeholder="255.255.255.0">
+                            </div>
+                            <div class="btn-group" style="margin-top:4px">
+                                <button class="btn btn-sm btn-primary" @click="$store.conn.setStaticIp(entry._index)">Set Static IP</button>
+                                <button class="btn btn-sm btn-danger" @click="$store.conn.revertDhcp(entry._index)">Revert to DHCP</button>
+                            </div>
+                            <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(entry.dev)"></div>
+                        </div>
+
+                        <!-- Receive Mode -->
+                        <div class="dm-row dm-row-receive"
+                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
+                             :title="$store.conn.receiveModeHint(entry.dev)"
+                             x-init="$store.conn.initReceiveConfigDrafts(entry._index)">
+                            <span class="device-config-label">Receive</span>
+                            <select class="form-input form-input-sm device-output-select"
+                                    :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'mode'))"
+                                    :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'mode')) || $store.app.mobileView"
+                                    x-model="$store.conn.receiveConfigDrafts[entry._index].receive_mode"
+                                    @change="$store.conn.setDeviceReceiveModeValue(entry._index, $store.conn.receiveConfigDrafts[entry._index].receive_mode)">
+                                <option value="split">Split</option>
+                                <option value="combined" :disabled="!$store.conn.canUseCombinedMode(entry.dev)">Combined</option>
+                            </select>
+                            <input class="form-input form-input-sm device-output-select device-config-input"
+                                   type="number" min="0" max="32767"
+                                   :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'base'))"
+                                   :disabled="!$store.conn.canConfigureReceiveMode(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'base')) || $store.app.mobileView"
+                                   x-model.number="$store.conn.receiveConfigDrafts[entry._index].base_universe"
+                                   @focus="$store.conn.receiveConfigFocus = entry._index + ':base_universe'"
+                                   @blur="$store.conn.finishReceiveConfigBaseEdit(entry._index)"
+                                   @keydown.enter="$event.target.blur()">
+                            <span class="device-config-status"
+                                  :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'mode')) || $store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'base'))"
+                                  x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'mode')) || $store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'base'))"
+                                  x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'mode')) || $store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'base'))"></span>
+                        </div>
+
+                        <!-- Outputs + Resolution -->
+                        <div class="device-outputs dm-outputs-table"
+                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
+                             :title="$store.conn.outputConfigHint(entry.dev)">
+                            <template x-for="(o, oi) in $store.conn.physicalOutputs(entry.dev)" :key="oi">
+                                <div class="device-output-group" x-init="$store.conn.initVirtualConfigDrafts(entry._index)">
+                                    <div class="device-output-row">
+                                        <span class="device-output-label" x-text="$store.app.outputLabel(o.name, oi)"></span>
+                                        <select class="form-input form-input-sm device-output-select"
+                                                :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'output', oi))"
+                                                :disabled="!$store.conn.canConfigureOutputs(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'output', oi)) || $store.app.mobileView"
+                                                x-effect="$el.value = o.type || 'none'"
+                                                @change="$store.conn.setDeviceOutputType(entry._index, oi, $event.target.value)">
+                                            <template x-for="type in $store.conn.deviceOutputTypesFor(entry.dev, oi)" :key="type">
+                                                <option :value="type" x-text="$store.app.outputTypeLabel(type)"></option>
+                                            </template>
+                                        </select>
+                                        <span class="device-config-status"
+                                              :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'output', oi))"
+                                              x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'output', oi))"
+                                              x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'output', oi))"></span>
+                                        <button type="button" class="btn btn-sm device-descriptor-open"
+                                                x-show="$store.conn.isPrimusManagementDevice(entry.dev)"
+                                                :disabled="$store.conn.deviceSettingsLocked(entry.dev) || $store.app.mobileView"
+                                                @click="$store.conn.openDescriptorEditor(entry._index, oi)">Setup</button>
+                                    </div>
+                                    <div class="device-output-row" x-show="o.type && o.type !== 'none'"
+                                         :title="$store.conn.virtualResolutionHint(entry.dev)">
+                                        <span class="device-config-label">Send px</span>
+                                        <input class="form-input form-input-sm device-output-select device-config-input"
+                                               type="number" min="1" :max="Math.max(1, o.count || 1)"
+                                               :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'virtual', oi))"
+                                               :disabled="!$store.conn.canConfigureOutputs(entry.dev) || $store.conn.isConfigPending($store.conn.configFeedbackKey(entry._index, 'virtual', oi)) || $store.app.mobileView"
+                                               x-model.number="$store.conn.virtualConfigDrafts[entry._index][oi]"
+                                               @focus="$store.conn.virtualConfigFocus = entry._index + ':' + oi"
+                                               @blur="$store.conn.finishVirtualConfigEdit(entry._index, oi)"
+                                               @keydown.enter="$event.target.blur()">
+                                        <span class="device-virtual-readout"
+                                              x-text="$store.conn.virtualTransportReadout(o, $store.conn.virtualConfigDrafts[entry._index]?.[oi])"></span>
+                                        <span class="device-config-status"
+                                              :class="$store.conn.configFeedbackClass($store.conn.configFeedbackKey(entry._index, 'virtual', oi))"
+                                              x-show="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'virtual', oi))"
+                                              x-text="$store.conn.configFeedbackMessage($store.conn.configFeedbackKey(entry._index, 'virtual', oi))"></span>
+                                    </div>
+
+                                    <template x-if="$store.conn.descriptorEditorOpen(entry._index, oi)">
+                                    <div class="device-descriptor-editor" x-cloak>
+                                        <div class="device-setup-heading">
+                                            <strong x-text="'Output ' + oi + ' descriptor'"></strong>
+                                            <button type="button" class="notice-close"
+                                                    @click="$store.conn.closeDescriptorEditor()">&times;</button>
+                                        </div>
+                                        <div class="device-setup-grid">
+                                            <label class="form-group compact">
+                                                <span class="form-label">Layout</span>
+                                                <select class="form-input form-input-sm"
+                                                        :value="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout || 'off'"
+                                                        @change="$store.conn.setDescriptorLayout(entry._index, oi, $event.target.value)">
+                                                    <option value="off">Off</option>
+                                                    <option value="linear">Strip</option>
+                                                    <option value="grid">Grid</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout === 'linear'">
+                                                <span class="form-label">Physical length</span>
+                                                <input class="form-input form-input-sm" type="number" min="1" max="170"
+                                                       x-model.number="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].physical_pixels">
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout === 'grid'">
+                                                <span class="form-label">Rows</span>
+                                                <input class="form-input form-input-sm" type="number" min="1" max="170"
+                                                       x-model.number="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].rows">
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout === 'grid'">
+                                                <span class="form-label">Columns</span>
+                                                <input class="form-input form-input-sm" type="number" min="1" max="170"
+                                                       x-model.number="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].columns">
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout === 'grid'">
+                                                <span class="form-label">Traversal</span>
+                                                <select class="form-input form-input-sm"
+                                                        x-model="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].traversal_axis">
+                                                    <option value="row_major">Row-major</option>
+                                                    <option value="column_major">Column-major</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout === 'grid'">
+                                                <span class="form-label">Wiring</span>
+                                                <select class="form-input form-input-sm"
+                                                        x-model="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].scan_pattern">
+                                                    <option value="progressive">Progressive</option>
+                                                    <option value="serpentine">Serpentine</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout === 'grid'">
+                                                <span class="form-label">Start corner</span>
+                                                <select class="form-input form-input-sm"
+                                                        x-model="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].start_corner">
+                                                    <option value="top_left">Top-left</option>
+                                                    <option value="top_right">Top-right</option>
+                                                    <option value="bottom_left">Bottom-left</option>
+                                                    <option value="bottom_right">Bottom-right</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-group compact"
+                                                   x-show="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]?.layout !== 'off'">
+                                                <span class="form-label">Virtual pixels</span>
+                                                <input class="form-input form-input-sm" type="number" min="1" max="170"
+                                                       x-model.number="$store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)].virtual_pixels">
+                                            </label>
+                                        </div>
+                                        <p class="device-descriptor-summary"
+                                           x-text="$store.conn.descriptorSummary($store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)])"></p>
+                                        <div class="device-order-preview"
+                                             x-show="$store.conn.descriptorOrderPreview($store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)]).length">
+                                            <template x-for="cell in $store.conn.descriptorOrderPreview($store.conn.descriptorDrafts[$store.conn.descriptorKey(entry._index, oi)])" :key="cell">
+                                                <span x-text="cell"></span>
+                                            </template>
+                                        </div>
+                                        <p class="device-descriptor-error"
+                                           x-show="$store.conn.descriptorError(entry._index, oi)"
+                                           x-text="$store.conn.descriptorError(entry._index, oi)"></p>
+                                        <div class="device-preset-controls">
+                                            <select class="form-input form-input-sm"
+                                                    x-model="$store.conn.presetSelection[$store.conn.descriptorKey(entry._index, oi)]"
+                                                    @change="$store.conn.loadSelectedPresetDraft(entry._index, oi)">
+                                                <option value="">Choose preset…</option>
+                                                <template x-for="preset in $store.conn.outputPresets" :key="preset.id">
+                                                    <option :value="preset.id"
+                                                            x-text="preset.name + (preset.built_in ? ' · Built-in' : '')"></option>
+                                                </template>
+                                            </select>
+                                            <button type="button" class="btn btn-sm"
+                                                    :disabled="!$store.conn.selectedPreset(entry._index, oi)"
+                                                    @click="$store.conn.applySelectedPreset(entry._index, oi)">Apply preset</button>
+                                            <input class="form-input form-input-sm" type="text" maxlength="64"
+                                                   placeholder="User preset name"
+                                                   x-model="$store.conn.presetNameDrafts[$store.conn.descriptorKey(entry._index, oi)]">
+                                            <button type="button" class="btn btn-sm"
+                                                    @click="$store.conn.createOutputPreset(entry._index, oi)">Save new</button>
+                                            <button type="button" class="btn btn-sm"
+                                                    x-show="$store.conn.selectedPreset(entry._index, oi)?.editable"
+                                                    @click="$store.conn.updateSelectedPreset(entry._index, oi)">Update / rename</button>
+                                            <button type="button" class="btn btn-sm btn-danger"
+                                                    x-show="$store.conn.selectedPreset(entry._index, oi)?.deletable"
+                                                    @click="$store.conn.deleteSelectedPreset(entry._index, oi)">Delete</button>
+                                        </div>
+                                        <div class="btn-group device-descriptor-actions">
+                                            <button type="button" class="btn btn-sm btn-primary"
+                                                    :disabled="!$store.conn.descriptorValid(entry._index, oi) || $store.conn.deviceSettingsLocked(entry.dev)"
+                                                    @click="$store.conn.applyDescriptorDraft(entry._index, oi)">Apply descriptor</button>
+                                            <button type="button" class="btn btn-sm"
+                                                    @click="$store.conn.closeDescriptorEditor()">Close</button>
+                                            <span class="device-config-status"
+                                                  :class="$store.conn.configFeedbackClass($store.conn.managementFeedbackKey(entry._index, 'descriptor', oi))"
+                                                  x-text="$store.conn.configFeedbackMessage($store.conn.managementFeedbackKey(entry._index, 'descriptor', oi))"></span>
+                                        </div>
+                                    </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+
+                        <section class="device-management-panel"
+                                 x-show="!$store.app.mobileView && !$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index) && $store.conn.isPrimusManagementDevice(entry.dev)"
+                                 x-cloak>
+                            <div class="device-setup-heading">
+                                <strong>Management v2 setup</strong>
+                                <span class="device-mode-badge"
+                                      :class="$store.conn.operatingModeClass(entry.dev)"
+                                      x-text="$store.conn.operatingModeLabel(entry.dev)"></span>
+                            </div>
+                            <div class="btn-group device-management-refresh">
+                                <button type="button" class="btn btn-sm"
+                                        @click="$store.conn.queryDeviceFullConfig(entry._index)">Show cached config</button>
+                                <button type="button" class="btn btn-sm"
+                                        @click="$store.conn.refreshDeviceFullConfig(entry._index)">Refresh from receiver</button>
+                                <span class="device-config-status"
+                                      :class="$store.conn.configFeedbackClass($store.conn.managementFeedbackKey(entry._index, 'refresh'))"
+                                      x-text="$store.conn.configFeedbackMessage($store.conn.managementFeedbackKey(entry._index, 'refresh'))"></span>
+                            </div>
+                            <div class="device-telemetry-panel">
+                                <div class="device-setup-heading">
+                                    <span class="device-config-label">Telemetry</span>
+                                    <span class="device-telemetry-badge"
+                                          :class="$store.conn.telemetryHealthClass(entry.dev)"
+                                          x-text="$store.conn.telemetryHealthLabel(entry.dev)"></span>
+                                </div>
+                                <div class="device-telemetry-target">
+                                    <input class="form-input form-input-sm" type="text"
+                                           placeholder="Target IPv4 (unset = no telemetry)"
+                                           :disabled="$store.conn.deviceSettingsLocked(entry.dev)"
+                                           x-model="$store.conn.telemetryTargetDrafts[entry._index]"
+                                           @input="$store.conn.markTelemetryTargetDirty(entry._index)"
+                                           @focus="$store.conn.telemetryTargetFocus = entry._index"
+                                           @blur="$store.conn.telemetryTargetFocus = null">
+                                    <button type="button" class="btn btn-sm"
+                                            :disabled="$store.conn.deviceSettingsLocked(entry.dev) || !$store.conn.selectedSenderIp()"
+                                            @click="$store.conn.useSelectedSenderTelemetryTarget(entry._index)">Use sender IP</button>
+                                    <button type="button" class="btn btn-sm btn-primary"
+                                            :disabled="$store.conn.deviceSettingsLocked(entry.dev)"
+                                            @click="$store.conn.setTelemetryTarget(entry._index)">Apply</button>
+                                    <button type="button" class="btn btn-sm"
+                                            :disabled="$store.conn.deviceSettingsLocked(entry.dev) || !entry.dev.telemetry_configured"
+                                            @click="$store.conn.clearTelemetryTarget(entry._index)">Clear</button>
+                                    <button type="button" class="btn btn-sm"
+                                            :disabled="!$store.conn.telemetryTargetDirty[entry._index]"
+                                            @click="$store.conn.resetTelemetryTargetDraft(entry._index)">Reset draft</button>
+                                </div>
+                                <p class="device-setup-note">
+                                    Target: <span x-text="$store.conn.telemetryTargetLabel(entry.dev)"></span>.
+                                    Unset means the receiver sends no PST telemetry. The target is explicit and is never learned from ArtDmx or EOS traffic.
+                                </p>
+                                <div class="device-telemetry-stats">
+                                    <span x-text="$store.conn.telemetryProtocolLabel(entry.dev)"></span>
+                                    <span x-text="$store.conn.telemetryAgeLabel(entry.dev)"></span>
+                                    <span x-text="$store.conn.telemetryDiagnostics(entry.dev)"></span>
+                                    <span x-text="$store.conn.telemetryBatterySummary(entry.dev)"></span>
+                                </div>
+                                <span class="device-config-status"
+                                      :class="$store.conn.configFeedbackClass($store.conn.managementFeedbackKey(entry._index, 'telemetry'))"
+                                      x-text="$store.conn.configFeedbackMessage($store.conn.managementFeedbackKey(entry._index, 'telemetry'))"></span>
+                            </div>
+                            <div class="device-production-panel">
+                                <p class="device-setup-note">
+                                    Production locks technical name, show metadata, IP, outputs, receive mode, and telemetry. Hello, ArtDmx, discovery, and monitoring remain active.
+                                </p>
+                                <p class="device-setup-note" x-text="$store.conn.productionRecoveryText(entry.dev)"></p>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-sm btn-danger"
+                                            x-show="!$store.conn.deviceSettingsLocked(entry.dev)"
+                                            @click="$store.conn.enterProductionMode(entry._index)">Enter production…</button>
+                                    <button type="button" class="btn btn-sm btn-primary"
+                                            x-show="$store.conn.deviceSettingsLocked(entry.dev) && !$store.conn.isV3Hardware(entry.dev)"
+                                            :disabled="!entry.dev.unlock_window_open"
+                                            @click="$store.conn.requestBootWindowUnlock(entry._index)">Request boot-window unlock</button>
+                                    <span class="device-config-status"
+                                          :class="$store.conn.configFeedbackClass($store.conn.managementFeedbackKey(entry._index, 'mode'))"
+                                          x-text="$store.conn.configFeedbackMessage($store.conn.managementFeedbackKey(entry._index, 'mode'))"></span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Footer: secondary metadata -->
+                        <div class="device-footer-actions dm-footer">
+                            <div class="dm-footer-meta">
+                                <span class="device-profile" x-text="$store.conn.monitorProductLabel(entry.dev)"></span>
+                                <span class="device-fw-version"
+                                      x-show="$store.conn.firmwareLabel(entry.dev) !== '—'"
+                                      x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
+                                <button type="button" class="btn btn-sm dm-hello-btn"
+                                        x-show="!$store.app.isRadiusDevice(entry.dev) && $store.conn.monitorCanHello(entry.dev)"
+                                        :title="$store.conn.helloHint(entry.dev)"
+                                        @click="$store.conn.helloDevice(entry._index)">Hello</button>
+                                <span class="device-group-tag text-sm text-muted"
+                                      x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.deviceGroupNames(entry.dev)"
+                                      x-text="$store.app.deviceGroupNames(entry.dev)"></span>
+                                <span class="device-transport-error" x-show="entry.dev.transport_error" x-text="entry.dev.transport_error"></span>
+                            </div>
+                            <button class="btn btn-sm btn-danger device-remove-btn"
+                                    x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index)"
+                                    @click="$store.conn.removeDevice(entry._index)">Remove</button>
+                        </div>
+                    </div>
+                </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+</div>
+
+<!-- ==================== FIRMWARE ==================== -->
+<div class="dm-firmware-main main-content" x-data="firmwareUploader" x-init="multiFamily = true; family = 'radius'" x-show="$store.app.mode === 'firmware'">
+    <div class="flex justify-between items-center mb-4 firmware-title-row">
+        <div>
+            <h2 class="section-title" style="margin:0">Firmware</h2>
+            <div class="text-sm text-muted" x-text="availabilityMessage"></div>
+            <div class="firmware-tools-path" x-show="toolsDir" x-text="toolsDir"></div>
+        </div>
+        <button class="btn btn-primary firmware-install-tools"
+                x-show="showInstallTools"
+                @click="installTools()">Install Firmware Tools</button>
+        <div class="firmware-status-pill" :class="statusClass()">
+            <span x-text="jobLabel()"></span>
+        </div>
+    </div>
+
+    <div class="output-section firmware-tool-callout" x-show="showInstallTools" x-cloak>
+        <div class="output-header">
+            <span class="output-name">Firmware Tools Required</span>
+            <span class="text-sm text-muted">One-time setup</span>
+        </div>
+        <p class="text-sm text-muted">Download Arduino CLI, install ESP32 board support, and prepare the receiver firmware libraries before compiling or uploading.</p>
+    </div>
+
+    <!-- Step 1: Firmware version + device profile -->
+    <div class="output-section firmware-section dm-firmware-step">
+        <div class="output-header">
+            <span class="output-name">Step 1 — Firmware Profile</span>
+        </div>
+
+        <div class="dm-firmware-choice-stack" x-show="multiFamily" x-cloak>
+            <div class="dm-firmware-choice-block dm-firmware-choice-block-primary">
+                <div class="dm-firmware-choice-heading">
+                    <span class="dm-firmware-choice-label">Product</span>
+                    <span class="dm-firmware-choice-hint">Choose the receiver family you are flashing</span>
+                </div>
+                <div class="sub-mode-toggle dm-firmware-family-toggle">
+                    <button type="button" class="sub-mode-btn" :class="{ active: family === 'primus' }" :disabled="running" @click="setFamily('primus')">Primus</button>
+                    <button type="button" class="sub-mode-btn" :class="{ active: family === 'radius' }" :disabled="running" @click="setFamily('radius')">Radius</button>
+                </div>
+            </div>
+
+            <div class="dm-firmware-choice-block">
+                <div class="dm-firmware-choice-heading">
+                    <span class="dm-firmware-choice-label">Board profile</span>
+                </div>
+                <div class="sub-mode-toggle firmware-profile-toggle dm-firmware-profile-toggle">
+                    <template x-for="item in familyProfiles" :key="item.id">
+                        <button class="sub-mode-btn" :class="{ active: profile === item.id }" :disabled="running" @click="setProfile(item.id)">
+                            <span x-text="item.label"></span>
+                        </button>
+                    </template>
+                </div>
+                <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+            </div>
+        </div>
+
+        <div class="dm-firmware-version-panel">
+            <div class="dm-firmware-version-header" x-show="showPrimusFirmwareUpdates" x-cloak>
+                <span class="dm-firmware-choice-label">Firmware version</span>
+                <div class="firmware-version-actions">
+                    <button class="btn btn-sm" @click="checkForUpdates(true)" :disabled="running || checkingUpdates">Check for Updates</button>
+                    <button class="btn btn-sm btn-primary" x-show="updateAvailable" @click="downloadFirmware()" :disabled="running || checkingUpdates">Download &amp; Install</button>
+                </div>
+            </div>
+            <div class="firmware-version-grid" x-show="showPrimusFirmwareUpdates" x-cloak>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Installed</span>
+                    <span class="firmware-version-value" x-text="installedFirmwareLabel()"></span>
+                </div>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Latest on GitHub</span>
+                    <span class="firmware-version-value" x-text="remoteFirmwareLabel()"></span>
+                </div>
+                <div class="firmware-version-item">
+                    <span class="firmware-version-label">Status</span>
+                    <span class="firmware-status-pill firmware-version-status" :class="updateStatusClass()" x-text="updateStatusLabel()"></span>
+                </div>
+            </div>
+            <div class="firmware-version-note text-sm text-muted" x-show="updateError && showPrimusFirmwareUpdates" x-text="updateError"></div>
+            <div class="firmware-version-note text-sm text-muted" x-show="!showPrimusFirmwareUpdates" x-cloak>
+                Radius firmware is built from <code>V5/Arduino/radius_receiver/</code>. Default WiFi baked into config: OPERADEV / torrentoflight.
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Device / port selection -->
+    <div class="output-section firmware-section firmware-device-section dm-firmware-step">
+        <div class="output-header">
+            <span class="output-name">Step 2 — Device</span>
+            <button class="btn btn-sm" @click="scanPorts()" :disabled="!available || running">Refresh Devices</button>
+        </div>
+        <div class="firmware-target-summary" x-text="targetSummary()"></div>
+        <div class="firmware-port-list">
+            <template x-if="candidatePorts.length === 0">
+                <div class="firmware-empty-state">No firmware devices found. Refresh after connecting a receiver over USB.</div>
+            </template>
+            <button type="button" class="firmware-port-row firmware-port-all"
+                    :class="{ 'firmware-port-selected': portMode === 'all' }"
+                    x-show="candidatePorts.length > 0"
+                    :disabled="running || candidatePorts.length === 0"
+                    @click="selectAllDevices()">
+                <span class="firmware-port-address">All Available Devices</span>
+                <span class="firmware-port-board" x-text="candidatePorts.length + ' detected'"></span>
+                <span class="firmware-port-badge">All</span>
+                <span class="firmware-port-reason">Upload the selected firmware version to every detected ESP32-like port.</span>
+            </button>
+            <template x-for="port in candidatePorts" :key="port.address">
+                <button type="button" class="firmware-port-row" :class="portRowClass(port)" :disabled="running" @click="selectPort(port)">
+                    <span class="firmware-port-address" x-text="port.address"></span>
+                    <span class="firmware-port-board" x-text="port.board"></span>
+                    <span class="firmware-port-badge" x-text="portBadge(port)"></span>
+                    <span class="firmware-port-reason" x-text="port.reason"></span>
+                </button>
+            </template>
+        </div>
+    </div>
+
+    <!-- Step 3: Overrides (collapsed by default) -->
+    <details class="output-section firmware-section dm-firmware-step">
+        <summary class="output-header dm-firmware-step-summary">
+            <span class="output-name">Step 3 — Overrides (optional)</span>
+            <span class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></span>
+        </summary>
+        <div class="firmware-override-toggles">
+            <label class="firmware-inline-check">
+                <input type="checkbox" x-model="nameEnabled" :disabled="running">
+                <span>Use custom name</span>
+            </label>
+            <label class="firmware-inline-check">
+                <input type="checkbox" x-model="wifiEnabled" :disabled="running">
+                <span>Use custom credentials</span>
+            </label>
+            <label class="firmware-inline-check">
+                <input type="checkbox" x-model="characterNameEnabled" :disabled="running">
+                <span>Use custom character name</span>
+            </label>
+            <label class="firmware-inline-check">
+                <input type="checkbox" x-model="performerNameEnabled" :disabled="running">
+                <span>Use custom performer name</span>
+            </label>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Device Name</label>
+            <input class="form-input" type="text" maxlength="17" x-model="deviceName" :disabled="running || !nameEnabled" :placeholder="deviceNamePlaceholder" autocomplete="off">
+        </div>
+        <div class="firmware-form-grid">
+            <div class="form-group">
+                <label class="form-label">Character Name</label>
+                <input class="form-input" type="text" maxlength="64" x-model="characterName" :disabled="running || !characterNameEnabled" placeholder="Character" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Performer Name</label>
+                <input class="form-input" type="text" maxlength="64" x-model="performerName" :disabled="running || !performerNameEnabled" placeholder="Performer" autocomplete="off">
+            </div>
+        </div>
+        <div class="firmware-form-grid">
+            <div class="form-group">
+                <label class="form-label">SSID</label>
+                <input class="form-input" type="text" x-model="wifiSsid" :disabled="running || !wifiEnabled" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
+            </div>
+        </div>
+        <div class="firmware-ip-mode-row" role="group" aria-label="Firmware IP override mode">
+            <button type="button" class="seg-btn" :class="{ active: ipMode === 'keep' }" :disabled="running" @click="ipMode = 'keep'">Keep IP Setting</button>
+            <button type="button" class="seg-btn" :class="{ active: ipMode === 'static' }" :disabled="running" @click="ipMode = 'static'">Set Static IP</button>
+            <button type="button" class="seg-btn" :class="{ active: ipMode === 'dhcp' }" :disabled="running" @click="ipMode = 'dhcp'">Use DHCP</button>
+        </div>
+        <div class="firmware-form-grid" x-show="ipMode === 'static'" x-cloak>
+            <div class="form-group">
+                <label class="form-label">Static IP</label>
+                <input class="form-input" type="text" x-model="staticIp" :disabled="running" autocomplete="off" placeholder="192.168.1.50">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Gateway</label>
+                <input class="form-input" type="text" x-model="gateway" :disabled="running" autocomplete="off" placeholder="192.168.1.1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Subnet</label>
+                <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
+            </div>
+        </div>
+        <div class="firmware-ip-mode-row" role="group" aria-label="Default receive mode" x-show="showReceiveModeOverrides" x-cloak>
+            <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'keep' }" :disabled="running" @click="receiveModeMode = 'keep'">Keep Receive Default</button>
+            <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'split' }" :disabled="running" @click="receiveModeMode = 'split'">Split</button>
+            <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'combined' }" :disabled="running" @click="receiveModeMode = 'combined'">Combined</button>
+        </div>
+        <div class="form-group" x-show="showReceiveModeOverrides && receiveModeMode !== 'keep'" x-cloak>
+            <label class="form-label">Base Universe</label>
+            <input class="form-input" type="number" min="0" max="32767" x-model.number="receiveBaseUniverse" :disabled="running" placeholder="0">
+            <div class="text-sm text-muted" style="margin-top:4px" x-show="receiveModeMode === 'combined'">Combined mode supports at most 170 pixels across both outputs.</div>
+            <div class="text-sm text-muted" style="margin-top:4px">Baked into NVS at flash time. Remote changes remain available after firmware v3.8+.</div>
+        </div>
+    </details>
+
+    <!-- Step 4: Compile / Upload -->
+    <div class="output-section firmware-section firmware-actions-section dm-firmware-step">
+        <div class="output-header">
+            <span class="output-name">Step 4 — Compile / Upload</span>
+            <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
+        </div>
+        <div class="firmware-actions">
+            <button class="btn" @click="startJob('compile')" :disabled="!canCompile">Compile</button>
+            <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
+        </div>
+    </div>
+
+    <div class="output-section firmware-log-section">
+        <div class="output-header">
+            <span class="output-name">Output</span>
+            <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
+        </div>
+        <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
+        <div class="firmware-log" x-show="activeJob" x-ref="firmwareLog" x-cloak>
+            <div class="firmware-log-line firmware-log-waiting text-muted" x-show="showJobWaitingPlaceholder">Job running — waiting for output...</div>
+            <template x-for="(line, idx) in outputLines" :key="idx">
+                <div class="firmware-log-line" x-text="line"></div>
+            </template>
+        </div>
+        <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
+    </div>
+
+    <div class="output-section firmware-log-section">
+        <div class="output-header">
+            <span class="output-name">Serial Monitor</span>
+            <span class="text-sm text-muted" x-text="serialActive ? ('Monitoring ' + serialPort) : monitorPortLabel"></span>
+        </div>
+        <div class="firmware-actions">
+            <select class="form-input form-input-sm firmware-monitor-port" x-model="monitorPort" :disabled="serialActive || running">
+                <option value="">Select port...</option>
+                <template x-for="port in candidatePorts" :key="port.address">
+                    <option :value="port.address" x-text="port.address"></option>
+                </template>
+            </select>
+            <button class="btn btn-sm" @click="startSerialMonitor()" :disabled="!canStartSerial">Start</button>
+            <button class="btn btn-sm" @click="stopSerialMonitor()" :disabled="!serialActive">Stop</button>
+        </div>
+        <div class="firmware-log firmware-serial-log" x-ref="serialLog" x-show="serialOutputLines.length" x-cloak>
+            <template x-for="(line, idx) in serialOutputLines" :key="'serial-' + idx">
+                <div class="firmware-log-line" x-text="line"></div>
+            </template>
+        </div>
+        <div class="firmware-empty-state" x-show="!serialOutputLines.length">Connect a device over USB and start the monitor to view serial output.</div>
+    </div>
+</div>
+
+<!-- ==================== SETTINGS ==================== -->
+<div class="dm-settings-main main-content settings-panel" x-show="$store.app.mode === 'settings'" x-data="settingsPanel">
+    <div class="flex justify-between items-center mb-4 settings-title-row">
+        <div>
+            <h2 class="section-title" style="margin:0">Settings</h2>
+            <div class="text-sm text-muted" x-text="$store.app.networkChipTitle()"></div>
+        </div>
+        <button class="btn btn-sm" @click="refresh()" :disabled="loading" x-text="loading ? 'Refreshing...' : 'Refresh'"></button>
+    </div>
+
+    <template x-if="warnings.length">
+        <div class="output-section settings-warning-section">
+            <template x-for="warning in warnings" :key="warning">
+                <div class="settings-warning-line" x-text="warning"></div>
+            </template>
+        </div>
+    </template>
+
+    <!-- Group: Network Interface -->
+    <div class="dm-section">
+        <div class="dm-section-header">
+            <span class="dm-section-title">Network Interface</span>
+        </div>
+        <div class="settings-grid">
+            <div class="output-section settings-section settings-router-section">
+                <div class="output-header">
+                    <span class="output-name">Show Router Setup</span>
+                    <span class="settings-status-pill settings-pill-router" x-text="routerStatusLabel"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="routerSetupSummary()"></div>
+                <div class="settings-detail-grid settings-router-grid">
+                    <div>
+                        <span class="settings-detail-label">Connection</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.service || selectedInterface?.device || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Sender IP</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.source_ip || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.cidr || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.network?.usable_range || 'Unknown'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-primary" @click="selectInterface(selectedInterface)" :disabled="!selectedInterface?.id || applying">Use for Art-Net</button>
+                    <button class="btn" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Receivers</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-current-section">
+                <div class="output-header">
+                    <span class="output-name">Sender Route</span>
+                    <span class="settings-status-pill" :class="statusPillClass(selectedInterface)" x-text="selectedInterface?.is_preferred ? 'Preferred' : (selectedInterface?.is_default ? 'Default' : 'Status')"></span>
+                </div>
+                <div class="settings-current-main" x-text="interfaceLabel(selectedInterface)"></div>
+                <div class="settings-current-meta" x-text="interfaceMeta(selectedInterface)"></div>
+                <div class="settings-detail-grid">
+                    <div>
+                        <span class="settings-detail-label">Type</span>
+                        <span class="settings-detail-value" x-text="typeLabel(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Gateway</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.gateway || 'None' "></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Subnet</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.subnet || 'None'"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label" x-text="hostConfigLabel"></span>
+                        <span class="settings-detail-value" x-text="configuredSummary(selectedInterface)"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">SSID</span>
+                        <span class="settings-detail-value" x-text="selectedInterface?.ssid || 'None'"></span>
+                    </div>
+                </div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-sm" @click="clearPreferred()" :disabled="applying">Automatic Routing</button>
+                    <button class="btn btn-sm btn-primary" @click="$store.conn.discover()" :disabled="$store.conn.discovering">Discover Devices</button>
+                </div>
+            </div>
+
+            <div class="output-section settings-section settings-interface-section">
+                <div class="output-header">
+                    <span class="output-name">Active Connections</span>
+                    <span class="text-sm text-muted" x-text="visibleInterfaces.length + ' active' + (hiddenInterfaceCount ? ', ' + hiddenInterfaceCount + ' hidden' : '')"></span>
+                </div>
+                <div class="settings-interface-list">
+                    <template x-if="visibleInterfaces.length === 0">
+                        <div class="firmware-empty-state">No active IPv4 connections found.</div>
+                    </template>
+                    <template x-for="iface in visibleInterfaces" :key="iface.id">
+                        <button type="button" class="settings-interface-row"
+                                :class="interfaceRowClass(iface)"
+                                @click="selectInterface(iface)">
+                            <span class="settings-interface-name" x-text="interfaceLabel(iface)"></span>
+                            <span class="settings-interface-meta" x-text="interfaceMeta(iface)"></span>
+                            <span class="settings-interface-badges">
+                                <span class="settings-status-pill" :class="statusPillClass(iface)" x-text="iface.connected ? 'Active' : 'Inactive'"></span>
+                                <span class="settings-status-pill settings-pill-controller" x-show="iface.is_controller">Controller</span>
+                                <span class="settings-status-pill settings-pill-preferred" x-show="iface.is_preferred">Preferred</span>
+                                <span class="settings-status-pill" x-show="iface.is_default">Default</span>
+                            </span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group: Mobile / Tablet View -->
+    <div class="dm-section" x-data>
+        <div class="dm-section-header">
+            <span class="dm-section-title">Mobile / Tablet View</span>
+        </div>
+        <div class="settings-grid">
+            <div class="output-section settings-section">
+                <div class="output-header">
+                    <span class="output-name">Scan to view on a phone or tablet</span>
+                </div>
+                <div class="text-sm text-muted" style="margin-bottom:8px">
+                    Connect the phone or tablet to the same network as this computer, then scan
+                    this code for a live, read-only view of device status. No internet connection
+                    is needed on either device.
+                </div>
+                <template x-if="$store.app.mobileAccessUrl">
+                    <div class="dm-mobile-qr-wrap">
+                        <div class="dm-mobile-qr" x-html="$store.app.mobileAccessSvg"></div>
+                        <div class="settings-current-meta" x-text="$store.app.mobileAccessUrl"></div>
+                    </div>
+                </template>
+                <template x-if="!$store.app.mobileAccessUrl">
+                    <div class="firmware-empty-state" x-text="$store.app.mobileAccessUnavailableReason"></div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group: Sender IP -->
+    <div class="dm-section">
+        <div class="dm-section-header">
+            <span class="dm-section-title">Sender IP</span>
+        </div>
+        <div class="settings-grid">
+            <div class="output-section settings-section settings-profile-section">
+                <div class="output-header">
+                    <span class="output-name">Sender IP on Show Router</span>
+                    <span class="text-sm text-muted" x-text="scope === 'ssid' ? (profileSsid || 'SSID') : (selectedInterface?.service || 'Service')"></span>
+                </div>
+                <div class="firmware-ip-mode-row" role="group" aria-label="Sender IP mode">
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'static' }"
+                            :disabled="applying"
+                            @click="mode = 'static'">Static IP</button>
+                    <button type="button" class="seg-btn"
+                            :class="{ active: mode === 'dhcp' }"
+                            :disabled="applying"
+                            @click="mode = 'dhcp'">DHCP</button>
+                </div>
+                <div class="firmware-form-grid" x-show="mode === 'static'" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label">Sender Static IP</label>
+                        <input class="form-input" type="text" x-model="staticIp" :disabled="applying" autocomplete="off" placeholder="10.0.0.10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gateway</label>
+                        <input class="form-input" type="text" x-model="gateway" :disabled="applying" autocomplete="off" placeholder="10.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Subnet</label>
+                        <input class="form-input" type="text" x-model="subnet" :disabled="applying" autocomplete="off" placeholder="255.255.255.0">
+                    </div>
+                </div>
+                <div class="settings-detail-grid settings-profile-network" x-show="mode === 'static'" x-cloak>
+                    <div>
+                        <span class="settings-detail-label">Network</span>
+                        <span class="settings-detail-value" x-text="profileNetworkLabel"></span>
+                    </div>
+                    <div>
+                        <span class="settings-detail-label">Usable Range</span>
+                        <span class="settings-detail-value" x-text="profileUsableRange"></span>
+                    </div>
+                </div>
+                <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!validationMessage }" x-text="validationMessage || profileModeNote()"></div>
+                <div class="settings-actions-row">
+                    <button class="btn" @click="saveProfile()" :disabled="!canSaveProfile" x-text="saving ? 'Saving...' : 'Save Sender Profile'"></button>
+                    <button class="btn btn-primary" x-show="mode === 'static'" @click="applyStaticIp()" :disabled="!canApplyStatic" x-text="applying ? 'Applying...' : applyStaticLabel"></button>
+                    <button class="btn btn-danger" @click="revertDhcp()" :disabled="!canRevertDhcp" x-text="applying ? 'Applying...' : 'Revert to DHCP'"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group: Advanced -->
+    <div class="dm-section">
+        <div class="dm-section-header">
+            <span class="dm-section-title">Advanced</span>
+        </div>
+        <div class="settings-grid">
+            <details class="output-section settings-section settings-controller-section settings-advanced-wifi">
+                <summary class="settings-advanced-summary">
+                    <span class="output-name">Advanced WiFi Router</span>
+                    <span class="settings-status-pill" :class="{ 'settings-pill-controller': controllerNetworkActive, 'settings-pill-muted': !controllerSsidValue }" x-text="controllerNetworkStatusLabel"></span>
+                </summary>
+                <div class="settings-current-main" x-text="controllerSsidValue || 'No controller SSID set'"></div>
+                <div class="settings-current-meta" x-text="'Current WiFi: ' + currentWifiLabel()"></div>
+                <div class="settings-controller-form">
+                    <div class="form-group">
+                        <label class="form-label">Controller SSID</label>
+                        <input class="form-input" type="text" x-model="controllerSsid" :disabled="applying" autocomplete="off" placeholder="PrimusController">
+                    </div>
+                    <div class="settings-actions-row settings-controller-actions">
+                        <button class="btn btn-primary" @click="saveControllerNetwork()" :disabled="!canSaveControllerNetwork">Save WiFi Router</button>
+                        <button class="btn" @click="useCurrentWifiAsController()" :disabled="!currentWifi?.ssid || applying">Use Current WiFi</button>
+                        <button class="btn btn-danger" @click="clearControllerWifi()" x-show="controllerConnection.ssid" :disabled="applying">Clear</button>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

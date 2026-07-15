@@ -1,0 +1,25 @@
+{
+  "id": "27c7bffa-4d9a-48b3-a9ff-bc4a957055c8",
+  "name": "Grid Pulse Ice",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "pulse",
+  "start_color": [
+    0,
+    100,
+    200
+  ],
+  "end_color": [
+    180,
+    240,
+    255
+  ],
+  "speed": 0.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.307643+00:00",
+  "modified": "2026-04-08T13:57:40.307671+00:00"
+}

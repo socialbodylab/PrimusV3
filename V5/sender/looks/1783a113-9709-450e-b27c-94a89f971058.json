@@ -1,0 +1,43 @@
+{
+  "name": "Midnight Chase",
+  "description": "Coordinated chase patterns on strip and grid with cool tones",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "0eb43744-fe6d-4ce4-a2dd-cf4ab3a96c76",
+          "clip_name": "Chase Forward",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "a7519f09-8dcd-4cc7-94ea-1ec9fe1ca9c6",
+          "clip_name": "Chase Diagonal",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "1783a113-9709-450e-b27c-94a89f971058",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}

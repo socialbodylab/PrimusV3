@@ -1,0 +1,43 @@
+{
+  "name": "Fire & Lava",
+  "description": "Warm fire-themed animation with knight rider strips and fiery grid",
+  "outputs": [
+    {"port": "A0", "type": "short_strip"},
+    {"port": "A1", "type": "grid"}
+  ],
+  "tracks": [
+    {
+      "port": "A0",
+      "segments": [
+        {
+          "id": "seg1",
+          "clip_id": "457c21ef-4093-426d-b699-245866d1e227",
+          "clip_name": "Fire Knight Rider",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    },
+    {
+      "port": "A1",
+      "segments": [
+        {
+          "id": "seg2",
+          "clip_id": "e593acd9-fba0-4527-bd21-dfe5e9f15e6e",
+          "clip_name": "Fire Grid",
+          "start_time": 0,
+          "duration": 5.0,
+          "fade_in": 0.5,
+          "fade_out": 0.5
+        }
+      ]
+    }
+  ],
+  "playback": "loop",
+  "total_duration": 5.0,
+  "id": "4c078c76-ce35-4703-bdcd-b14eb111ff95",
+  "created": "2026-04-09T16:51:26.870221+00:00",
+  "modified": "2026-04-09T16:51:26.870221+00:00"
+}

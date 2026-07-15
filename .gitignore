@@ -22,10 +22,17 @@ V3_6/build/
 V3_6/dist/
 V4/build/
 V4/dist/
+V5/build/
+V5/dist/
 
 # Primus sender runtime state (V4)
 V4/sender/.primus_state.json
 V4/sender/.radius_state.json
+
+# Primus sender runtime state (V5)
+V5/sender/.primus_state.json
+V5/sender/.radius_state.json
+V5/sender/.central_server.json
 
 # Local Apple signing material
 *.certSigningRequest
