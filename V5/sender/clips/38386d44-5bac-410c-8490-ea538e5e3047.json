@@ -1,0 +1,25 @@
+{
+  "id": "38386d44-5bac-410c-8490-ea538e5e3047",
+  "name": "Prism Sweep Grid",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "linear",
+  "start_color": [
+    255,
+    0,
+    90
+  ],
+  "end_color": [
+    0,
+    255,
+    255
+  ],
+  "speed": 1.2,
+  "playback": "boomerang",
+  "angle": 135,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.6,
+  "created": "2026-05-08T22:02:11.858551+00:00",
+  "modified": "2026-05-08T22:02:11.858571+00:00"
+}

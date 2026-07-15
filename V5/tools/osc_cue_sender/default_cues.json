@@ -1,0 +1,8 @@
+{
+  "cues": [
+    {"number": 1, "name": "Opening Look"},
+    {"number": 2, "name": "Verse"},
+    {"number": 3, "name": "Chorus"},
+    {"number": 4, "name": "Blackout"}
+  ]
+}

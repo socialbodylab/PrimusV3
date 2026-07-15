@@ -1,0 +1,25 @@
+{
+  "id": "f816d7a1-cdc2-44a1-b38f-75577ee2ba06",
+  "name": "Electric Jitter",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "constrainbow",
+  "start_color": [
+    0,
+    150,
+    255
+  ],
+  "end_color": [
+    200,
+    0,
+    255
+  ],
+  "speed": 3.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.301719+00:00",
+  "modified": "2026-04-08T13:57:40.301754+00:00"
+}

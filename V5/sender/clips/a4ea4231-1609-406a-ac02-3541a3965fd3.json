@@ -1,0 +1,25 @@
+{
+  "id": "a4ea4231-1609-406a-ac02-3541a3965fd3",
+  "name": "Lava Scan",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "knight_rider",
+  "start_color": [
+    255,
+    50,
+    0
+  ],
+  "end_color": [
+    80,
+    0,
+    0
+  ],
+  "speed": 1.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 6,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-04-08T15:30:31.476816+00:00",
+  "modified": "2026-04-08T15:30:31.476828+00:00"
+}

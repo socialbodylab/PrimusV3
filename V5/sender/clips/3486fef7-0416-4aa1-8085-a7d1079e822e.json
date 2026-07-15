@@ -1,0 +1,25 @@
+{
+  "id": "3486fef7-0416-4aa1-8085-a7d1079e822e",
+  "name": "Center Burst",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    255,
+    255,
+    255
+  ],
+  "speed": 1.5,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "center",
+  "duration": 4.0,
+  "created": "2026-04-08T15:30:31.485425+00:00",
+  "modified": "2026-04-08T15:30:31.485459+00:00"
+}

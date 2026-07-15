@@ -1,0 +1,25 @@
+{
+  "id": "a7519f09-8dcd-4cc7-94ea-1ec9fe1ca9c6",
+  "name": "Chase Diagonal",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "chase",
+  "start_color": [
+    0,
+    0,
+    0
+  ],
+  "end_color": [
+    0,
+    255,
+    200
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 45,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.306307+00:00",
+  "modified": "2026-04-08T13:57:40.306337+00:00"
+}

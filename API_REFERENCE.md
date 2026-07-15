@@ -288,8 +288,8 @@ Combined mode requires total **virtual** pixel counts ≤ **170** (512-byte ArtD
 ### Upload-time defaults
 
 ```bash
-./V4/Arduino/upload.sh -v1 --auto --receivemode combined --universe 104
-./V4/Arduino/upload.sh -v3 --compile --receivemode split --universe 0
+./V5/Arduino/upload.sh -v1 --auto --receivemode combined --universe 104
+./V5/Arduino/upload.sh -v3 --compile --receivemode split --universe 0
 ```
 
 ### Node Report examples (firmware 3.8–3.11)
@@ -434,9 +434,9 @@ Each Look has two output slots matching the current V3.6 receiver profile contra
 
 ---
 
-## 8. HTTP Control API (V4 PrimusCentral Sender)
+## 8. HTTP Control API (V5 PrimusCentral Sender)
 
-The PrimusCentral sender (`python3 V4/sender/run.py --product primus`) serves a web UI and exposes a JSON API. The historical V3.6 source tree (`V3_6/sender/run.py`) exposes the same Primus endpoints for comparison. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup. PrimusCentral and RadiusCentral always bind to `127.0.0.1` (loopback only). DeviceManager is the one exception: when it starts its own fresh backend (`run_devices.py`, or `run.py --lan`), it binds to `0.0.0.0` instead so a phone or tablet on the same network can reach its read-only Mobile View (see `lan_enabled` below) — it stays loopback-only if it instead attaches to an already-running Central server.
+The PrimusCentral sender (`python3 V5/sender/run.py --product primus`) serves a web UI and exposes a JSON API. The historical V3.6 source tree (`V3_6/sender/run.py`) exposes the same Primus endpoints for comparison. All POST/DELETE bodies and responses are JSON. The server defaults to `http://127.0.0.1:8080`, falls back to an auto-selected port if 8080 is busy, and prints the active URL at startup. PrimusCentral and RadiusCentral always bind to `127.0.0.1` (loopback only). DeviceManager is the one exception: when it starts its own fresh backend (`run_devices.py`, or `run.py --lan`), it binds to `0.0.0.0` instead so a phone or tablet on the same network can reach its read-only Mobile View (see `lan_enabled` below) — it stays loopback-only if it instead attaches to an already-running Central server.
 
 ### GET Endpoints
 
@@ -494,7 +494,7 @@ The v0.65 packaged app keeps live output responsive with a `caffeinate -dimsu -w
 The API surface above is the same in source and packaged runs. The release build path for the packaged PrimusCentral sender is:
 
 ```bash
-python3 V4/build_sender_app.py \
+python3 V5/build_sender_app.py \
   --target macos \
   --product primus \
   --name PrimusCentral \
@@ -505,7 +505,7 @@ python3 V4/build_sender_app.py \
 
 Build-time overrides are `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime/storage overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`. The macOS timing assertion override is `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1`.
 
-The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V4/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V4/PACKAGING.md](V4/PACKAGING.md).
+The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V5/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V5/PACKAGING.md](V5/PACKAGING.md).
 
 ### POST Endpoints — Device Management
 
@@ -719,7 +719,7 @@ Cue lookup for name-based OSC triggers is exact case-insensitive name first, the
 
 ### POST Endpoints — Firmware Upload
 
-These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V4/Arduino/upload.sh` or `radius_upload.sh` per profile, run one job at a time, and redact WiFi passwords from job output.
+These endpoints are local sender helpers for firmware tool setup, compile, and upload workflows. They wrap `V5/Arduino/upload.sh` or `radius_upload.sh` per profile, run one job at a time, and redact WiFi passwords from job output.
 
 **Profile scope:** default `product` scope filters profiles by sender product (`primus` → `v1`/`v2`/`v3`; `radius` → `radius_v1`/`radius_v2`). DeviceManager passes `"scope": "mixed"` (or `GET /api/firmware/status?scope=mixed`) to expose all five board profiles from one panel. PrimusCentral and RadiusCentral keep product-scoped behavior.
 
@@ -911,7 +911,7 @@ Pixel counts and byte sizes propagate automatically from these tables — no oth
 
 ---
 
-## Radius Central (V4) vendor opcodes
+## Radius Central (V5) vendor opcodes
 
 Radius Central firmware uses the shared `0x8200` ArtIPConfig opcode from V3.6 Primus receivers, plus additional vendor opcodes:
 
@@ -926,7 +926,7 @@ Discovery capability tag: `PVRAD1|B:v1|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=
 
 Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][name:utf8...]`.
 
-### V4 HTTP routes — device audio (SD card)
+### V5 HTTP routes — device audio (SD card)
 
 | Method | Route | Purpose |
 |--------|-------|---------|
@@ -940,7 +940,7 @@ Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][na
 | POST | `/api/audio/cue_map` | Write `/cues.json` to device SD |
 | POST | `/api/hello_device` | Test tone (cmd 5); body `{device, volume?}` |
 
-### V4 HTTP routes — sender cue sheet & library
+### V5 HTTP routes — sender cue sheet & library
 
 | Method | Route | Purpose |
 |--------|-------|---------|
@@ -953,9 +953,9 @@ Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][na
 | POST | `/api/project_audio?filename=` | Upload WAV to project library |
 | DELETE | `/api/project_audio/<name>` | Remove file from library |
 
-**Persistence:** `audio_cues.json`, `audio/` folder, `audio/.checksums.json` under the V4 sender data directory (`RADIUSV4_DATA_DIR` or app data).
+**Persistence:** `audio_cues.json`, `audio/` folder, `audio/.checksums.json` under the V5 sender data directory (`RADIUSV5_DATA_DIR` or app data; `RADIUSV4_DATA_DIR` remains a compatibility alias).
 
-### V4 HTTP routes — push sync & net log
+### V5 HTTP routes — push sync & net log
 
 | Method | Route | Purpose |
 |--------|-------|---------|
@@ -964,7 +964,6 @@ Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][na
 | GET | `/api/netlog?since=N` | Network event log entries |
 | POST | `/api/netlog/clear` | Clear log buffer |
 
-Push sync stops playback on all connected nodes, then FTP-uploads cue-referenced WAV files missing from each SD card. Pull sync and conflict resolution are **not** implemented in V4.
+Push sync stops playback on all connected nodes, then FTP-uploads cue-referenced WAV files missing from each SD card. Pull sync and conflict resolution are **not** implemented in V5.
 
-Implementation: `V4/sender/artnet.py`, `V4/sender/radius_state.py`, `V4/sender/audio_cues.py`, `V4/sender/netlog.py`, firmware `V4/Arduino/radius_receiver/`. Launch with `python3 V4/sender/run.py`.
-
+Implementation: `V5/sender/artnet.py`, `V5/sender/radius_state.py`, `V5/sender/audio_cues.py`, `V5/sender/netlog.py`, firmware `V5/Arduino/radius_receiver/`. Launch with `python3 V5/sender/run.py`.

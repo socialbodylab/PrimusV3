@@ -1,0 +1,25 @@
+{
+  "id": "fb7504e7-bccd-44fa-87af-cb0c0aa5b946",
+  "name": "Magma Radial",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "radial",
+  "start_color": [
+    255,
+    50,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T15:30:31.481149+00:00",
+  "modified": "2026-04-08T15:30:31.481165+00:00"
+}

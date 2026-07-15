@@ -1,0 +1,25 @@
+{
+  "id": "94abe02f-22e6-4752-95f4-a3fa139847cb",
+  "name": "Spiral Boomerang",
+  "group": "Spiral Boomerang",
+  "output_type": "grid",
+  "effect": "spiral",
+  "start_color": [
+    255,
+    100,
+    0
+  ],
+  "end_color": [
+    0,
+    50,
+    255
+  ],
+  "speed": 1.0,
+  "playback": "boomerang",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T18:59:58.687432+00:00",
+  "modified": "2026-04-08T18:59:58.687453+00:00"
+}

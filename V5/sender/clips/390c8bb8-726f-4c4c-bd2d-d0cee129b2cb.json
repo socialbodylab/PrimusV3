@@ -1,0 +1,25 @@
+{
+  "id": "390c8bb8-726f-4c4c-bd2d-d0cee129b2cb",
+  "name": "Ember Grid Pulse",
+  "group": "small_grid",
+  "output_type": "small_grid",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    45,
+    0
+  ],
+  "end_color": [
+    50,
+    0,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 3.8,
+  "created": "2026-05-08T22:02:11.849546+00:00",
+  "modified": "2026-05-08T22:02:11.849559+00:00"
+}

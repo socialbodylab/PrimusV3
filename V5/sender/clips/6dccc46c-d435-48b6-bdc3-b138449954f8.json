@@ -1,0 +1,25 @@
+{
+  "id": "6dccc46c-d435-48b6-bdc3-b138449954f8",
+  "name": "Electric Lime",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    100,
+    255,
+    0
+  ],
+  "end_color": [
+    0,
+    80,
+    0
+  ],
+  "speed": 1.5,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-04-08T15:30:31.477445+00:00",
+  "modified": "2026-04-08T15:30:31.477456+00:00"
+}

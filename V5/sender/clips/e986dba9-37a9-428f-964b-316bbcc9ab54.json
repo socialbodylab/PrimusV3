@@ -1,0 +1,25 @@
+{
+  "id": "e986dba9-37a9-428f-964b-316bbcc9ab54",
+  "name": "Magma Pulse",
+  "group": "long_strip",
+  "output_type": "long_strip",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    30,
+    0
+  ],
+  "end_color": [
+    80,
+    0,
+    0
+  ],
+  "speed": 1.2,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 4.0,
+  "created": "2026-05-08T22:02:11.865401+00:00",
+  "modified": "2026-05-08T22:02:11.865426+00:00"
+}

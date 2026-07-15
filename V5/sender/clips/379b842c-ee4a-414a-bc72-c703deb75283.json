@@ -1,0 +1,25 @@
+{
+  "id": "379b842c-ee4a-414a-bc72-c703deb75283",
+  "name": "White Strobe Fast",
+  "group": "White Strobe Fast",
+  "output_type": "short_strip",
+  "effect": "pulse",
+  "start_color": [
+    255,
+    255,
+    255
+  ],
+  "end_color": [
+    0,
+    0,
+    0
+  ],
+  "speed": 8.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 2.0,
+  "created": "2026-04-08T18:59:58.674798+00:00",
+  "modified": "2026-04-08T18:59:58.674822+00:00"
+}

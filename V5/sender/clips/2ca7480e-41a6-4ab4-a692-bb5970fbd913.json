@@ -1,0 +1,25 @@
+{
+  "id": "2ca7480e-41a6-4ab4-a692-bb5970fbd913",
+  "name": "Aurora Noise Short",
+  "group": "noise",
+  "output_type": "short_strip",
+  "effect": "noise",
+  "start_color": [
+    28,
+    20,
+    92
+  ],
+  "end_color": [
+    0,
+    220,
+    180
+  ],
+  "speed": 0.7,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 8.0,
+  "created": "2026-05-13T20:00:01+00:00",
+  "modified": "2026-05-13T20:00:01+00:00"
+}

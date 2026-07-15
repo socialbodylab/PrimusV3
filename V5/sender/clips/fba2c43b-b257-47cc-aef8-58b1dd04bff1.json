@@ -1,0 +1,25 @@
+{
+  "id": "fba2c43b-b257-47cc-aef8-58b1dd04bff1",
+  "name": "Gold Sparkle Long",
+  "group": "noise",
+  "output_type": "long_strip",
+  "effect": "sparkle_noise",
+  "start_color": [
+    18,
+    10,
+    0
+  ],
+  "end_color": [
+    255,
+    200,
+    64
+  ],
+  "speed": 0.9,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 7.0,
+  "created": "2026-05-13T20:00:06+00:00",
+  "modified": "2026-05-13T20:00:06+00:00"
+}

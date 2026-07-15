@@ -1,0 +1,25 @@
+{
+  "id": "3db84616-8012-4310-8e98-da5bbf66f616",
+  "name": "Mini Static Flicker",
+  "group": "noise",
+  "output_type": "small_grid",
+  "effect": "static_noise",
+  "start_color": [
+    4,
+    4,
+    8
+  ],
+  "end_color": [
+    120,
+    190,
+    255
+  ],
+  "speed": 2.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 3.0,
+  "created": "2026-05-13T20:00:11+00:00",
+  "modified": "2026-05-13T20:00:11+00:00"
+}

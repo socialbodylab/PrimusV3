@@ -19,34 +19,38 @@ The included Python sender runs a web UI with a built-in effects engine. It comp
 
 ## Versions
 
-### V4 (Current Shipping Track)
+### V5 (Canonical Development Track)
 
-V4 is the **canonical sender and packaging tree** for PrimusCentral (LED clip/look/cue) and RadiusCentral (audio). Shipped PrimusCentral releases from v0.81 onward are built from `V4/` with `--product primus`. One Python codebase, two apps, shared device discovery and firmware tooling.
+V5 is the **canonical sender, firmware, and packaging tree** for PrimusCentral
+(LED clip/look/cue), RadiusCentral (audio), and DeviceManager. It is a complete
+copy of the finalized V4 flexible-device-control tree at commit
+`5ca259cb8ec94610d2a41c72f3fd54e3cf425202`, promoted to an independent V5 path.
+V4 is retained unchanged as the historical shipping/reference track.
 
 Main updates:
-- Unified sender under `V4/sender/` with `--product primus` (PrimusCentral) or `--product radius` (RadiusCentral).
-- Canonical receiver firmware under `V4/Arduino/` (Primus `-v1`/`-v2`/`-v3` profiles plus Radius audio firmware).
-- Packaged PrimusCentral app data: `PrimusV3/V4/sender/` (replacing the earlier `V3_6/sender/` app-data path).
+- Unified sender under `V5/sender/` with `--product primus` (PrimusCentral) or `--product radius` (RadiusCentral).
+- Canonical receiver firmware under `V5/Arduino/` (Primus `-v1`/`-v2`/`-v3` profiles plus Radius audio firmware).
+- Packaged app data under the product-specific `V5/sender/` application-support path.
 - Recent releases (v0.83–v0.86): multi-interface OSC listen, Cue Controller network log, Art-Net connect routing fallback, Windows installer fixes.
 
 **Launch PrimusCentral:**
 
 ```bash
-python3 V4/sender/run.py --product primus
-python3 V4/sender/run.py --product primus --no-browser --port 8090
+python3 V5/sender/run.py --product primus
+python3 V5/sender/run.py --product primus --no-browser --port 8090
 ```
 
 **Build PrimusCentral:**
 
 ```bash
-python3 V4/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
 ```
 
-See [V4/README.md](V4/README.md) and [V4/PACKAGING.md](V4/PACKAGING.md).
+See [V5/README.md](V5/README.md) and [V5/PACKAGING.md](V5/PACKAGING.md).
 
 ### V3.6 (Protocol Reference / Historical Source)
 
-V3.6 documents the Art-Net protocol and receiver compatibility for V1/V2/V3.1 hardware. The `V3_6/` tree can still be run from source for comparison, but **new PrimusCentral releases and day-to-day development should use `V4/`**.
+V3.6 documents the Art-Net protocol and receiver compatibility for V1/V2/V3.1 hardware. The `V3_6/` tree can still be run from source for comparison, but **new PrimusCentral releases and day-to-day development should use `V5/`**.
 
 Main updates:
 - One active V3.6 sender under `V3_6/sender/` with the clip/look/cue workflow from V3.1.
@@ -71,10 +75,10 @@ The setup script creates/checks `.venv`, confirms the sender has no external Pyt
 python3 setup_primus.py --check
 ```
 
-Launch the V4 PrimusCentral interface:
+Launch the V5 PrimusCentral interface:
 
 ```bash
-python3 V4/sender/run.py --product primus
+python3 V5/sender/run.py --product primus
 ```
 
 For the historical V3.6 source tree only:
@@ -223,25 +227,25 @@ flowchart LR
 
 ## Quick Start
 
-### Sender (PrimusCentral — V4)
+### Sender (PrimusCentral — V5)
 
 ```bash
-python3 V4/sender/run.py --product primus
+python3 V5/sender/run.py --product primus
 ```
 
 Opens the PrimusCentral web UI at `http://127.0.0.1:8080` unless that port is busy. No external dependencies — Python 3 stdlib only.
 
 ```bash
-python3 V4/sender/run.py --product primus --port 8080         # specify port
-python3 V4/sender/run.py --product primus --port 0            # force auto-selected port
-python3 V4/sender/run.py --product primus --no-browser        # don't auto-open browser
+python3 V5/sender/run.py --product primus --port 8080         # specify port
+python3 V5/sender/run.py --product primus --port 0            # force auto-selected port
+python3 V5/sender/run.py --product primus --no-browser        # don't auto-open browser
 ```
 
-### Firmware (canonical: V4/Arduino)
+### Firmware (canonical: V5/Arduino)
 
 ```bash
-./V4/Arduino/upload.sh --ports
-./V4/Arduino/upload.sh -v3 --auto
+./V5/Arduino/upload.sh --ports
+./V5/Arduino/upload.sh -v3 --auto
 ```
 
 Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks required libraries, compiles, and uploads. Upload commands compile automatically before flashing, so `--compile` is only needed when you want a verify-only pass. Use `--ports` to inspect likely ESP32 serial devices, `--auto` when exactly one device is attached, `--all` when multiple connected devices should receive the same profile, or explicit serial ports when mixed board types are connected.
@@ -257,10 +261,10 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks r
 
 The v0.65 release is the baseline for packaged macOS performance. It fixed a macOS app-bundle FPS drop that only reproduced when `PrimusCentral.app` was launched through Finder or LaunchServices. Do not validate packaged FPS by directly running `V3_6/dist/macos/PrimusCentral.app/Contents/MacOS/PrimusCentral`; that bypasses the scheduling path that caused the issue.
 
-Build, sign, notarize, staple, and verify the macOS app with the V4 builder:
+Build, sign, notarize, staple, and verify the macOS app with the V5 builder:
 
 ```bash
-python3 V4/build_sender_app.py \
+python3 V5/build_sender_app.py \
     --target macos \
     --product primus \
     --name PrimusCentral \
@@ -269,7 +273,7 @@ python3 V4/build_sender_app.py \
     --notary-timeout 1h
 ```
 
-The bundle identifier is `com.socialbodylab.PrimusCentral`; the signed app is written to `V4/dist/macos/PrimusCentral.app`. The same signing settings can be supplied as `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime path overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`.
+The bundle identifier is `com.socialbodylab.PrimusCentral`; the signed app is written to `V5/dist/macos/PrimusCentral.app`. The same signing settings can be supplied as `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime path overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`.
 
 Packaged macOS builds intentionally enable these live-output timing protections:
 
@@ -280,23 +284,23 @@ Packaged macOS builds intentionally enable these live-output timing protections:
 Use LaunchServices for packaged FPS validation, optionally with a fixed test port:
 
 ```bash
-open -n V4/dist/macos/PrimusCentral.app --args --port 8097
+open -n V5/dist/macos/PrimusCentral.app --args --port 8097
 curl -s http://127.0.0.1:8097/api/performance
 ```
 
 For GitHub release DMGs, create a fresh staging directory containing only `PrimusCentral.app` and an `/Applications` symlink, then build and notarize the DMG. Regenerate the SHA-256 checksum after the final stapling step.
 
 ```bash
-rm -rf V4/build/macos/dmg-staging
-mkdir -p V4/build/macos/dmg-staging
-ditto V4/dist/macos/PrimusCentral.app V4/build/macos/dmg-staging/PrimusCentral.app
-ln -s /Applications V4/build/macos/dmg-staging/Applications
+rm -rf V5/build/macos/dmg-staging
+mkdir -p V5/build/macos/dmg-staging
+ditto V5/dist/macos/PrimusCentral.app V5/build/macos/dmg-staging/PrimusCentral.app
+ln -s /Applications V5/build/macos/dmg-staging/Applications
 hdiutil create -volname "PrimusCentral 0.86" \
-    -srcfolder V4/build/macos/dmg-staging \
-    -ov -format UDZO V4/dist/macos/PrimusCentral-0.86-macOS-arm64.dmg
+    -srcfolder V5/build/macos/dmg-staging \
+    -ov -format UDZO V5/dist/macos/PrimusCentral-0.86-macOS-arm64.dmg
 ```
 
-Full packaging notes live in [V4/PACKAGING.md](V4/PACKAGING.md). The historical V3.6 builder remains in [V3_6/PACKAGING.md](V3_6/PACKAGING.md) for reference.
+Full packaging notes live in [V5/PACKAGING.md](V5/PACKAGING.md). The historical V3.6 builder remains in [V3_6/PACKAGING.md](V3_6/PACKAGING.md) for reference.
 
 ## Hardware
 
@@ -359,10 +363,11 @@ Any Art-Net compatible software can drive these nodes directly by sending RGB Ar
 
 ```
 PrimusV3/
-├── V4/                              # Canonical sender + packaging (PrimusCentral + RadiusCentral)
-│   ├── README.md                    # V4 documentation index
+├── V5/                              # Canonical sender + packaging (PrimusCentral + RadiusCentral)
+│   ├── README.md                    # V5 documentation index
 │   ├── PACKAGING.md                 # App packaging, signing, and release
 │   ├── Arduino/                     # Primus + Radius receiver firmware (canonical)
+├── V4/                              # Historical finalized shipping/reference tree
 │   ├── sender/                      # Unified Python sender + web UI
 │   └── build_sender_app.py
 ├── V3_6/                            # V3.6 protocol/source reference (historical release line)

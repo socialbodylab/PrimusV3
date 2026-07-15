@@ -1,0 +1,25 @@
+{
+  "id": "197f38b2-dee0-494a-b490-f582bba731ec",
+  "name": "Spiral Galaxy",
+  "group": "grid",
+  "output_type": "grid",
+  "effect": "spiral",
+  "start_color": [
+    100,
+    0,
+    255
+  ],
+  "end_color": [
+    255,
+    100,
+    0
+  ],
+  "speed": 1.0,
+  "playback": "loop",
+  "angle": 0,
+  "highlight_width": 5,
+  "chase_origin": "start",
+  "duration": 5.0,
+  "created": "2026-04-08T13:57:40.303785+00:00",
+  "modified": "2026-04-08T13:57:40.303816+00:00"
+}
