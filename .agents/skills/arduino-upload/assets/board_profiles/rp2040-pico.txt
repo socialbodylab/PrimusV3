@@ -1,0 +1,8 @@
+# Raspberry Pi Pico (RP2040) via earlephilhower's arduino-pico core.
+NAME=default
+FQBN=rp2040:rp2040:rpipico
+BAUD=115200
+LIBS=
+DESC=Raspberry Pi Pico (RP2040)
+VIDS=2e8a
+KEYWORDS=rp2040,pico,raspberry

@@ -1,0 +1,9 @@
+# Arduino Uno (classic AVR).
+NAME=default
+FQBN=arduino:avr:uno
+BAUD=115200
+LIBS=
+DESC=Arduino Uno (AVR)
+# AVR uses FTDI/CH340 bridges, not ESP32 native USB. Keep default VIDs.
+VIDS=2341,2a03,0403,1a86
+KEYWORDS=arduino,uno,ftdi,ch340,ft232

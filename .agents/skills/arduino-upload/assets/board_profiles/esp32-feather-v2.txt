@@ -1,0 +1,6 @@
+# Adafruit Feather ESP32 V2 (2025 redesign).
+NAME=default
+FQBN=esp32:esp32:adafruit_feather_esp32_v2
+BAUD=115200
+LIBS=Adafruit NeoPixel
+DESC=Adafruit Feather ESP32 V2

@@ -1,0 +1,7 @@
+# Adafruit HUZZAH32 Feather (ESP32) — the most common ESP32 Feather.
+# Preset consumed by new_aus_script.sh. Format: KEY=VALUE lines.
+NAME=default
+FQBN=esp32:esp32:featheresp32
+BAUD=115200
+LIBS=Adafruit NeoPixel
+DESC=Adafruit HUZZAH32 (ESP32 Feather)

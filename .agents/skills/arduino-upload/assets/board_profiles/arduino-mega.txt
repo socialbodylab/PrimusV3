@@ -1,0 +1,8 @@
+# Arduino Mega 2560 (AVR).
+NAME=default
+FQBN=arduino:avr:mega
+BAUD=115200
+LIBS=
+DESC=Arduino Mega 2560 (AVR)
+VIDS=2341,2a03,0403,1a86
+KEYWORDS=arduino,mega,ftdi,ch340,ft232

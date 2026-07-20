@@ -1,0 +1,8 @@
+# ESP8266 NodeMCU / Wemos D1 mini.
+NAME=default
+FQBN=esp8266:esp8266:nodemcuv2
+BAUD=921600
+LIBS=
+DESC=ESP8266 NodeMCU
+VIDS=10c4,1a86,0403
+KEYWORDS=esp8266,nodemcu,wemos,d1,ch340,cp210

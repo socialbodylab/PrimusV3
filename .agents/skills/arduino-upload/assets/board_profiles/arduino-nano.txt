@@ -1,0 +1,8 @@
+# Arduino Nano (classic AVR, ATmega328P). Use arduino-nano33iot for the SAMD version.
+NAME=default
+FQBN=arduino:avr:nano
+BAUD=57600
+LIBS=
+DESC=Arduino Nano (AVR, ATmega328P)
+VIDS=2341,2a03,0403,1a86
+KEYWORDS=arduino,nano,ftdi,ch340,ft232

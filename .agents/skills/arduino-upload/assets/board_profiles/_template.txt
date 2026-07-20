@@ -1,0 +1,12 @@
+# Template for adding your own preset. Copy this file, rename it, fill in values.
+# Preset consumed by new_aus_script.sh. Format: KEY=VALUE lines. Lines starting
+# with # are comments. Empty values are OK.
+NAME=default
+FQBN=packager:arch:board_id
+BAUD=115200
+LIBS=
+DESC=Your board description
+# Optional: override the default ESP32-leaning port-detection signals.
+# VIDS and KEYWORDS are comma-separated. If omitted, ESP32 defaults apply.
+# VIDS=1111,2222
+# KEYWORDS=keyword1,keyword2
