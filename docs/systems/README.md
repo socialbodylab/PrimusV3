@@ -2,6 +2,8 @@
 
 Start here. One overview map, then drill into component diagrams. Device **API controls** live in [API_CONTROLS.md](API_CONTROLS.md).
 
+**Visual production (preferred):** [FIGMA_DIAGRAM_BRIEF.md](FIGMA_DIAGRAM_BRIEF.md) — Figma artboards → **grouped PDF** → Adobe Illustrator. Mermaid/draw.io/PNG below are content drafts and underlays, not final art.
+
 **Sources:** Primus = V5 management-v2 · Radius = `radius-central` (Art-Net **:6456**) · ignore Radius narrative inside V5.
 
 ---
@@ -73,11 +75,12 @@ flowchart TB
 | File | Role |
 |------|------|
 | [README.md](README.md) | **Hub** (this page) — linked diagram set |
+| [FIGMA_DIAGRAM_BRIEF.md](FIGMA_DIAGRAM_BRIEF.md) | **Figma → PDF → Illustrator** artboard list, layers, story beats |
 | [API_CONTROLS.md](API_CONTROLS.md) | Full Primus + Radius control tables |
 | [SYSTEMS_OUTLINE.md](SYSTEMS_OUTLINE.md) | Narrative detail + Mermaid sources |
-| [Primus-Radius-Systems.drawio](Primus-Radius-Systems.drawio) | diagrams.net workbook (page **00 Index** + L* + D*) |
+| [Primus-Radius-Systems.drawio](Primus-Radius-Systems.drawio) | diagrams.net workbook (structural draft) |
 | [L0-companion-poster.excalidraw](L0-companion-poster.excalidraw) | Workshop poster |
-| [png/](png/) · [svg/](svg/) | Slide exports |
+| [png/](png/) · [svg/](svg/) | Draft exports / Figma underlays |
 
 Open the `.drawio` in [diagrams.net](https://app.diagrams.net/). First page **00 Index** mirrors this hub.
 
