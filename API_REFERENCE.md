@@ -8,18 +8,16 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 
 | Function | Protocol | Port | Direction |
 |---|---|---|---|
-| **LED data** (ArtDmx) | UDP / Art-Net | 6454 | Sender → Node |
+| **LED data** (ArtDmx) | UDP / Art-Net | 6454 Show | Sender → Node |
 | **Discovery** (ArtPoll / ArtPollReply) | UDP / Art-Net | 6454 | Bidirectional |
-| **Device naming** (ArtAddress) | UDP / Art-Net | 6454 | Sender → Node |
-| **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
-| **Receive mode** (custom 0x8110) | UDP / Art-Net | 6454 | Sender → Node |
-| **Virtual resolution** (custom 0x8130) | UDP / Art-Net | 6454 | Sender → Node |
-| **IP config** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
-| **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
+| **Setup / management** (0x8140, ArtAddress, 0x8100/8110/8130, IP, show-info) | UDP / Art-Net | **6457 Setup** (default; dual-listen on 6454 during migrate) | Sender → Node |
+| **Radius ArtAudioCmd** (0x8300) | UDP / Art-Net | **6456 Show** | Sender → Node |
+| **Radius ArtFtpCmd / identity** | UDP / Art-Net | **6457 Setup** | Sender → Node |
+| **FPS / status telemetry** (PFP/PST/PTR) | UDP | 6455 Watch | Node → Sender |
 | **Sender HTTP API** | TCP / HTTP JSON | 8080 or auto-selected | Browser/tool → Sender |
 | **OSC cue control** | UDP / OSC | 53001 default | Show-control tool → Sender |
 
-Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing is required to drive receiver nodes directly. The V3.6 sender also exposes a local HTTP JSON API for Primus Central and an inbound OSC listener for external cue triggers.
+V5 lane ports (Show / Setup / Watch) are documented in [docs/systems/PORT_ORGANIZATION.md](docs/systems/PORT_ORGANIZATION.md). Receivers advertise ports in ArtPollReply (`SHOW`/`AUD`/`MGMT`/`TELE`/`FTP`) and store overrides in NVS. Stock Eos continues to target Primus ArtDmx on **6454**.
 
 ---
 

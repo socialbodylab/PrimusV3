@@ -1,8 +1,19 @@
 # Primus + Radius — linked systems diagrams
 
-Start here. One overview map, then drill into component diagrams. Device **API controls** live in [API_CONTROLS.md](API_CONTROLS.md).
+**Presentation (preferred):** open the greyscale website — [site/](site/) · [site/README.md](site/README.md).
 
-**Visual production (preferred):** [FIGMA_DIAGRAM_BRIEF.md](FIGMA_DIAGRAM_BRIEF.md) — Figma artboards → **grouped PDF** → Adobe Illustrator. Mermaid/draw.io/PNG below are content drafts and underlays, not final art.
+```bash
+cd docs/systems/site && python3 -m http.server 8765
+# → http://127.0.0.1:8765/
+```
+
+Cue-moment signal flow, role×time blueprint, lock matrix, light/sound recipes, and a filterable API map. Black / white / greyscale only (static HTML + vanilla JS).
+
+Device **API controls** (full tables): [API_CONTROLS.md](API_CONTROLS.md). Narrative: [SYSTEMS_OUTLINE.md](SYSTEMS_OUTLINE.md).
+
+**Port organization (V5):** [PORT_ORGANIZATION.md](PORT_ORGANIZATION.md) — Show / Setup / Watch defaults (`6454` / `6457` / `6455`, Radius show `6456`), overridable via NVS + discovery advertisement. Implemented on branch `port-organization` (dual-listen during migration).
+
+**Older visual drafts:** [Figma](https://www.figma.com/design/VetnYLjB87BDXle5q8r9s3) · [FIGMA_DIAGRAM_BRIEF.md](FIGMA_DIAGRAM_BRIEF.md) · Mermaid/draw.io/PNG below — kept as underlays, not the primary presentation.
 
 **Sources:** Primus = V5 management-v2 · Radius = `radius-central` (Art-Net **:6456**) · ignore Radius narrative inside V5.
 
@@ -74,13 +85,15 @@ flowchart TB
 
 | File | Role |
 |------|------|
-| [README.md](README.md) | **Hub** (this page) — linked diagram set |
-| [FIGMA_DIAGRAM_BRIEF.md](FIGMA_DIAGRAM_BRIEF.md) | **Figma → PDF → Illustrator** artboard list, layers, story beats |
+| **[site/](site/)** | **Primary presentation** — greyscale interactive site |
+| [PORT_ORGANIZATION.md](PORT_ORGANIZATION.md) | **V5 port plan** — Show/Setup/Watch defaults + overrides |
+| [README.md](README.md) | Hub — site + draft diagram index |
 | [API_CONTROLS.md](API_CONTROLS.md) | Full Primus + Radius control tables |
 | [SYSTEMS_OUTLINE.md](SYSTEMS_OUTLINE.md) | Narrative detail + Mermaid sources |
+| [STORY.md](STORY.md) | Per-frame narrative (Figma-era) |
+| [Figma design file](https://www.figma.com/design/VetnYLjB87BDXle5q8r9s3) | Draft frames (optional) |
 | [Primus-Radius-Systems.drawio](Primus-Radius-Systems.drawio) | diagrams.net workbook (structural draft) |
-| [L0-companion-poster.excalidraw](L0-companion-poster.excalidraw) | Workshop poster |
-| [png/](png/) · [svg/](svg/) | Draft exports / Figma underlays |
+| [png/](png/) · [svg/](svg/) | Draft exports / underlays |
 
 Open the `.drawio` in [diagrams.net](https://app.diagrams.net/). First page **00 Index** mirrors this hub.
 

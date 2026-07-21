@@ -39,12 +39,15 @@ Authoritative control tables for **what you can do to a receiver**. Apps (Device
 | HTTP | POST | `/api/revert_device_dhcp` | DHCP (NVS, reboot) | ✓ | ✓ | |
 | Art-Net | — | `0x2000` ArtPoll | Discovery | ✓ | ✓ | |
 | Art-Net | — | `0x2100` ArtPollReply | Caps / name / universes (inbound) | `PV3CAP1` | `PVRAD1` | |
-| Art-Net | — | `0x6000` ArtAddress | Rename | ✓ | ✓ | |
-| Art-Net | — | `0x8200` ArtIPConfig | DHCP/static | ✓ | ✓ | |
-| Art-Net | — | `0x8210` ArtShowInfo | Show names | ✓ | ✓ | Feature `S` |
-| Telemetry | UDP 6455 | `PFP` | Packet-rate / FPS-ish heartbeat | ✓ | ✓ | |
+| Art-Net | — | `0x6000` ArtAddress | Rename | ✓ | ✓ | Setup lane **UDP 6457** (dual-listen on Show during migrate) |
+| Art-Net | — | `0x8200` ArtIPConfig | DHCP/static | ✓ | ✓ | Setup **:6457** |
+| Art-Net | — | `0x8210` ArtShowInfo | Show names | ✓ | ✓ | Feature `S`; Setup **:6457** |
+| Art-Net | — | `0x8220` ArtLanePorts | Set Show/Setup/Watch ports | — | ✓ | Radius Setup; Primus uses mgmt `0x17` |
+| Telemetry | UDP 6455 | `PFP` | Packet-rate / FPS-ish heartbeat | ✓ | ✓ | Watch lane (overridable) |
 | HTTP | GET | `/api/state` | Sender mirror (devices + telemetry) | ✓ | ✓ | Poll surface |
 | HTTP | GET | `/api/runtime` | `monitor_only`, `lan_enabled`, … | ✓ | ✓ | Sender-only |
+| HTTP | GET/POST | `/api/network/lane_ports` | Sender lane defaults | ✓ | ✓ | Show/Setup/Watch profile |
+| HTTP | GET/POST | `/api/device_lane_ports` | Per-device lane ports | ✓ | ✓ | production LOCKED → **409** |
 
 ---
 
@@ -61,6 +64,7 @@ Authoritative control tables for **what you can do to a receiver**. Apps (Device
 | POST | `/api/set_device_telemetry_target` | PST unicast target; `null`/`0.0.0.0` clears | **SET_TELEMETRY_TARGET** `0x11` | production LOCKED |
 | POST | `/api/enter_device_production_mode` | Enter production lock | **SET_OPERATING_MODE** `0x12` | Radius |
 | POST | `/api/unlock_device_boot_window` | V1/V2 recovery unlock | **BOOT_WINDOW_UNLOCK** `0x16` | outside boot window |
+| GET/POST | `/api/device_lane_ports` | Show/Setup/Watch UDP ports | **SET_LANE_PORTS** `0x17` | production LOCKED |
 | GET/POST/DELETE | `/api/output_presets[/{id}]` | Sender preset library | — | apply via `apply_device_output_descriptor` |
 
 ### 2.2 HTTP legacy / capability-aware (also used when management not advertised)
@@ -83,6 +87,9 @@ Authoritative control tables for **what you can do to a receiver**. Apps (Device
 | `0x14` | SET_IP_CONFIG | DHCP/static | LOCKED |
 | `0x15` | SET_IDENTITY | Technical + character + performer | LOCKED |
 | `0x16` | BOOT_WINDOW_UNLOCK | Open unlock window (V1/V2) | Recovery only |
+| `0x17` | SET_LANE_PORTS | Show/Setup/Watch UDP ports (3× uint16 BE) | LOCKED |
+
+GET_CONFIG **v2** includes the three lane ports after the fixed prefix (before output descriptors). Wire destination for management requests is Setup **UDP 6457** when advertised (`MGMT:`); legacy nodes without the token keep Setup on Show **:6454**.
 
 NACK `ErrorCode.LOCKED` → HTTP **409**. Timeout → **504**.
 
@@ -115,7 +122,7 @@ NACK `ErrorCode.LOCKED` → HTTP **409**. Timeout → **504**.
 
 ## 3. Radius-only — audio / FTP / cues
 
-Branch Art-Net control port: **UDP 6456**. Telemetry remains **UDP 6455**.
+Show (ArtAudioCmd): **UDP 6456**. Setup (FTP gate / identity / IP / ArtLanePorts): **UDP 6457**. Discovery ArtPoll remains on **UDP 6454**. Telemetry (Watch): **UDP 6455**. Dual-listen accepts Setup/audio on legacy ports during migration.
 
 ### 3.1 ArtAudioCmd `0x8300`
 
@@ -130,7 +137,7 @@ Branch Art-Net control port: **UDP 6456**. Telemetry remains **UDP 6455**.
 | 6 | play_cue | Cue number in byte 13 → `/cues.json` |
 | 7 | loop_cue | Loop mapped cue |
 
-### 3.2 ArtFtpCmd `0x8301`
+### 3.2 ArtFtpCmd `0x8301` (Setup **:6457**; dual-accept on Show during migrate)
 
 | Byte | Effect |
 |------|--------|

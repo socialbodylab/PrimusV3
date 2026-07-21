@@ -14,16 +14,24 @@ assets and install newer receiver source into app data without upgrading the sen
 | `v2` | ESP32 Feather (2025 Make) | `./upload.sh --board v2` |
 | `v3` | ESP32-S3 Reverse TFT + custom PCB (A0/A1 NeoPixel, A4 battery) | `./upload.sh --board v3` |
 
-Discovery capability tag: `PV3CAP1|F:RIOHBMSG|B:v1|IP:D|U:C:0|G:1P`.
+Discovery capability tag (includes lane ports):  
+`PV3CAP1|F:RIOHBMSG|B:v1|SHOW:6454|MGMT:6457|TELE:6455|IP:D|U:C:0|G:1P`.  
 V1 and V3 add `B` for battery data; `G` advertises management and `G:1P` /
 `G:1L` marks protocol v1 prototype/locked mode. Long Name and ArtPoll
 `NumPorts` always inventory A0 and A1, including Off. Full descriptors come
 from `GET_CONFIG`, not the 64-byte Node Report.
 
+UDP lanes (see `docs/systems/PORT_ORGANIZATION.md`):
+- **Show :6454** — ArtDmx + ArtPoll (Eos-compatible)
+- **Setup :6457** — management `0x8140`/`0x8141`, ArtAddress, output/receive/virtual, IP, show-info, `SET_LANE_PORTS` `0x17`
+- **Watch :6455** — PST / PFP telemetry destination
+- `PORT_DUAL_LISTEN=1` still accepts Setup opcodes on Show during migration
+
 Protocol highlights: ArtDmx pixel output, paired management request/reply
-(`0x8140`/`0x8141`), and explicit-target UDP 6455 unified status (`PST` v1).
-Legacy ArtAddress and `0x8100`/`0x8110`/`0x8130`/`0x8200`/`0x8210` mutations
-remain compatible in prototype mode.
+(`0x8140`/`0x8141`), GET_CONFIG **v2** (includes lane ports), and explicit-target
+UDP 6455 unified status (`PST` v1). Legacy ArtAddress and
+`0x8100`/`0x8110`/`0x8130`/`0x8200`/`0x8210` mutations remain compatible in
+prototype mode (on Setup, or Show while dual-listen is enabled).
 
 ### V3 custom PCB (profile `v3`)
 
@@ -167,12 +175,17 @@ Radius firmware optimizes for **audio-first loop scheduling** and **exclusive SD
 
 ## Protocol
 
-| Opcode | Name | Purpose |
-|--------|------|---------|
-| 0x6000 | ArtAddress | Rename (NVS) |
-| 0x8200 | ArtIPConfig | Static IP / DHCP (NVS, reboot) |
-| 0x8300 | ArtAudioCmd | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
-| 0x8301 | ArtFtpCmd | FTP server start/stop |
+UDP lanes: discovery ArtPoll **:6454**, ArtAudioCmd Show **:6456**, Setup **:6457**
+(ArtAddress / IP / show-info / ArtFtpCmd / ArtLanePorts `0x8220`), Watch telemetry **:6455**.
+Dual-listen accepts Setup/audio on legacy ports during migration.
+
+| Opcode | Name | Purpose | Lane |
+|--------|------|---------|------|
+| 0x6000 | ArtAddress | Rename (NVS) | Setup |
+| 0x8200 | ArtIPConfig | Static IP / DHCP (NVS, reboot) | Setup |
+| 0x8220 | ArtLanePorts | Set Show/Setup/Watch ports (NVS) | Setup |
+| 0x8300 | ArtAudioCmd | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue | Show |
+| 0x8301 | ArtFtpCmd | FTP server start/stop | Setup |
 
 ### ArtAudioCmd (0x8300)
 
@@ -205,11 +218,11 @@ Cue numbers 1–255; firmware stores up to 64 entries. Changes require device re
 Discovery node report (dynamic):
 
 ```
-#0001 [####] PVRAD1|B:v1|IP:D|F:RA
-#0001 [####] PVRAD1|B:v1|IP:S:a.b.c.d:gw:mask|F:RA
+#0001 [####] PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:D|F:RIHAS
+#0001 [####] PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:S:a.b.c.d:gw:mask|F:RIHAS
 ```
 
-UDP 6455 back-channel:
+UDP 6455 Watch back-channel:
 
 - `PFP` — 7-byte packet rate telemetry
 - `PTR` — `[P][T][R][state][name_len][name…]` track name + playback state (0=stopped, 1=playing, 2=paused)

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Primus + Radius — Systems</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="nav-brand">Primus · Radius</div>
+      <nav>
+        <ul class="nav-links">
+          <li><a href="#hero">Thesis</a></li>
+          <li><a href="#signal">Cue flow</a></li>
+          <li><a href="#blueprint">Roles</a></li>
+          <li><a href="#lock">Locks</a></li>
+          <li><a href="#recipes">Recipes</a></li>
+          <li><a href="#api">API</a></li>
+          <li><a href="#appendix">Appendix</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main>
+      <section id="hero" class="hero">
+        <div>
+          <p class="kicker">Costume systems · show LAN</p>
+          <h1>One body.<br />Two media.</h1>
+          <p class="lede" id="hero-thesis"></p>
+          <p class="note">
+            Diagram study (four encodings of the LAN):
+            <a href="explore-01-lan.html">explore 01 →</a>
+          </p>
+        </div>
+        <figure class="hero-map">
+          <figcaption class="hero-map-cap">Three lanes — do not mix</figcaption>
+          <table class="hero-lanes">
+            <thead>
+              <tr>
+                <th scope="col">Lane</th>
+                <th scope="col">Who</th>
+                <th scope="col">Wire</th>
+                <th scope="col">Job</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Show</th>
+                <td>Eos · PrimusCentral · RadiusCentral</td>
+                <td>:6454 ArtDmx<br />:6456 ArtAudio</td>
+                <td>Drive light / sound on the body</td>
+              </tr>
+              <tr>
+                <th scope="row">Setup</th>
+                <td>PrimusCentral · RadiusCentral · DeviceManager</td>
+                <td>HTTP · 0x81xx / 0x82xx · FTP</td>
+                <td>Commission, sync, lock — not during GO</td>
+              </tr>
+              <tr>
+                <th scope="row">Watch</th>
+                <td>DeviceManager</td>
+                <td>:6455 PST / PTR</td>
+                <td>Monitor health · never owns the cue</td>
+              </tr>
+            </tbody>
+          </table>
+        </figure>
+      </section>
+
+      <section id="signal">
+        <p class="kicker">01 · Cue moment</p>
+        <h2 id="signal-title">Signal flow</h2>
+        <p class="lede">
+          What moves on the wire when a cue fires — light, sound, or both — and
+          what stays in the monitor lane.
+        </p>
+        <div class="flow-tabs" role="tablist" aria-label="Cue media">
+          <button type="button" role="tab" data-flow="light" aria-selected="true">
+            Light
+          </button>
+          <button type="button" role="tab" data-flow="sound" aria-selected="false">
+            Sound
+          </button>
+          <button type="button" role="tab" data-flow="together" aria-selected="false">
+            Together
+          </button>
+        </div>
+        <div class="flow-stage">
+          <svg id="signal-svg" class="flow-svg" role="img" aria-label="Signal flow diagram"></svg>
+        </div>
+        <p class="note" id="signal-note"></p>
+      </section>
+
+      <section id="blueprint">
+        <p class="kicker">02 · Who does what when</p>
+        <h2>Role × time blueprint</h2>
+        <p class="lede">
+          Tech through strike. Stage management watches; lighting and sound drive
+          show paths; wardrobe owns flash and production lock.
+        </p>
+        <div id="blueprint-root"></div>
+      </section>
+
+      <section id="lock">
+        <p class="kicker">03 · Prototype vs production</p>
+        <h2>Lock matrix</h2>
+        <p class="lede">
+          Primus firmware can lock commissionable controls. Radius show work is
+          operational (cues / Sync) rather than a matching firmware lock today.
+        </p>
+        <div id="matrix-root"></div>
+      </section>
+
+      <section id="recipes">
+        <p class="kicker">04 · How to ship a look or track</p>
+        <h2>Media recipes</h2>
+        <p class="lede">
+          Two parallel pipelines that meet on the performer — not in one mixed
+          protocol stream.
+        </p>
+        <div class="recipes">
+          <article class="recipe">
+            <h3>Light</h3>
+            <ol id="recipe-light"></ol>
+            <p class="end">Ends on ArtDmx · :6454</p>
+          </article>
+          <article class="recipe">
+            <h3>Sound</h3>
+            <ol id="recipe-sound"></ol>
+            <p class="end">Ends on ArtAudioCmd · :6456</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="api">
+        <p class="kicker">05 · Control surface cheat sheet</p>
+        <h2>API &amp; wire map</h2>
+        <p class="lede">
+          Filter by product and surface. Full tables live in
+          <a href="../API_CONTROLS.md">API_CONTROLS.md</a>.
+        </p>
+        <div class="api-tools">
+          <input id="api-search" type="search" placeholder="Search goal or path…" />
+          <select id="api-product" aria-label="Product filter">
+            <option value="all">All products</option>
+            <option value="primus">Primus</option>
+            <option value="radius">Radius</option>
+            <option value="both">Shared</option>
+          </select>
+          <select id="api-surface" aria-label="Surface filter">
+            <option value="all">All surfaces</option>
+            <option value="HTTP">HTTP</option>
+            <option value="Art-Net">Art-Net</option>
+            <option value="OSC">OSC</option>
+          </select>
+        </div>
+        <div class="api-table-wrap">
+          <table class="api-table" id="api-table">
+            <thead>
+              <tr>
+                <th>Goal</th>
+                <th>Product</th>
+                <th>Surface</th>
+                <th>Path / opcode</th>
+                <th>Mode</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="appendix" class="appendix">
+        <p class="kicker">Appendix</p>
+        <h2>Source notes</h2>
+        <details open>
+          <summary>Ports</summary>
+          <ul>
+            <li>Primus ArtDmx — UDP <strong>6454</strong>; Setup/management — UDP <strong>6457</strong></li>
+            <li>Radius ArtAudioCmd — UDP <strong>6456</strong>; Setup/FTP gate — UDP <strong>6457</strong></li>
+            <li>Telemetry PST / PTR — UDP <strong>6455</strong></li>
+          </ul>
+        </details>
+        <details>
+          <summary>Naming triad</summary>
+          <p>
+            Character · Performer · Device — three independent fields. Device name
+            lives on the board (ArtAddress / NVS); character and performer ride show
+            info (opcode <code>0x8210</code> / sender stores).
+          </p>
+        </details>
+        <details>
+          <summary>Sources of truth</summary>
+          <ul>
+            <li>Primus — V5 management-v2 · DeviceManager <code>monitor_only</code></li>
+            <li>Radius — <code>radius-central</code> (ignore Radius narrative inside V5)</li>
+            <li>Narrative outline — <a href="../SYSTEMS_OUTLINE.md">SYSTEMS_OUTLINE.md</a></li>
+          </ul>
+        </details>
+        <details>
+          <summary>Older diagram drafts</summary>
+          <p>
+            Mermaid / draw.io / Figma remain under
+            <a href="../README.md">docs/systems/</a> as drafts. This site is the
+            presentation surface.
+          </p>
+        </details>
+      </section>
+    </main>
+
+    <footer>
+      Primus + Radius systems · greyscale presentation · static site under docs/systems/site
+    </footer>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

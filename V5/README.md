@@ -183,7 +183,7 @@ See [PACKAGING.md](PACKAGING.md) for signing and release details.
 
 **Device cue map:** `/cues.json` on SD card (loaded at boot). Keys are cue numbers as strings; values are either a WAV filename string or `{"file": "name.wav", "duration": 30}`. Max 64 entries. Edited from the Cue Map panel or via `GET/POST /api/audio/cue_map`.
 
-Capability tag: `PVRAD1|B:v1|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info. Optional Marius tokens `MC:` / `MP:` on V2 when configured.
+Capability tag: `PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info. Optional Marius tokens `MC:` / `MP:` on V2 when configured. ArtAudioCmd listens on **:6456**; Setup (FTP/identity/IP) on **:6457**.
 
 Track telemetry on UDP 6455: magic `PTR` + playback state + track name. FPS telemetry uses the shared `PFP` packet format on the same port.
 
