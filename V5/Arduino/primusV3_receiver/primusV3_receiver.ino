@@ -54,9 +54,14 @@ Adafruit_NeoPixel statusPixel(1, BOARD_STATUS_NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800
 
 // ── Art-Net ──────────────────────────────────────────────────────────
 #define MAX_UDP_PACKET 600
-WiFiUDP udp;
+WiFiUDP udp;                 // Show lane (ArtPoll/ArtDmx)
+WiFiUDP udpSetup;            // Setup lane (management/config opcodes)
 WiFiUDP udpStatus;           // separate nonblocking socket for unified status
 uint8_t udpBuf[MAX_UDP_PACKET];
+
+uint16_t portShow  = PORT_SHOW_DEFAULT;
+uint16_t portSetup = PORT_SETUP_DEFAULT;
+uint16_t portWatch = PORT_WATCH_DEFAULT;
 
 #define ARTNET_HEADER_LEN  8
 #define ARTNET_DATA_OFFSET 18
@@ -599,6 +604,47 @@ void loadStoredNetworkConfig() {
   }
 }
 
+// ── UDP lane ports (Show / Setup / Watch) — stored in NVS ────────────
+bool validUdpLanePort(uint16_t port) {
+  return port != 0 && port >= 1024;
+}
+
+bool validLanePortSet(uint16_t show, uint16_t setup, uint16_t watch) {
+  return validUdpLanePort(show) && validUdpLanePort(setup) && validUdpLanePort(watch) &&
+         show != setup && show != watch && setup != watch;
+}
+
+void loadStoredLanePorts() {
+  uint16_t show  = prefs.getUShort("portShow", PORT_SHOW_DEFAULT);
+  uint16_t setup = prefs.getUShort("portSetup", PORT_SETUP_DEFAULT);
+  uint16_t watch = prefs.getUShort("portWatch", PORT_WATCH_DEFAULT);
+  if (!validLanePortSet(show, setup, watch)) {
+    show  = PORT_SHOW_DEFAULT;
+    setup = PORT_SETUP_DEFAULT;
+    watch = PORT_WATCH_DEFAULT;
+  }
+  portShow  = show;
+  portSetup = setup;
+  portWatch = watch;
+}
+
+bool saveLanePorts(uint16_t show, uint16_t setup, uint16_t watch) {
+  if (!validLanePortSet(show, setup, watch)) return false;
+  if (prefs.putUShort("portShow", show) != sizeof(uint16_t) ||
+      prefs.putUShort("portSetup", setup) != sizeof(uint16_t) ||
+      prefs.putUShort("portWatch", watch) != sizeof(uint16_t)) {
+    return false;
+  }
+  portShow  = show;
+  portSetup = setup;
+  portWatch = watch;
+  return true;
+}
+
+void resetLanePortsToDefaults() {
+  saveLanePorts(PORT_SHOW_DEFAULT, PORT_SETUP_DEFAULT, PORT_WATCH_DEFAULT);
+}
+
 void printStartupConnectionData() {
   Serial.println("Startup connection data:");
   Serial.print("  Device name: ");
@@ -1067,7 +1113,8 @@ void checkWifiConnection() {
       if (connectWifi()) {
         wifiConnected = true;
         setConnectionIndicator(true);
-        udp.begin(ARTNET_PORT);
+        udp.begin(portShow);
+        udpSetup.begin(portSetup);
         enableOutputs();
 #if BOARD_HAS_TFT_DISPLAY
         refreshCurrentInfoScreen();
@@ -1111,8 +1158,8 @@ void sendArtPollReply(IPAddress dest) {
   reply[12] = myIP[2]; reply[13] = myIP[3];
 
   // Port (bytes 14-15, little-endian)
-  reply[14] = ARTNET_PORT & 0xFF;
-  reply[15] = (ARTNET_PORT >> 8) & 0xFF;
+  reply[14] = portShow & 0xFF;
+  reply[15] = (portShow >> 8) & 0xFF;
 
   // Firmware version (bytes 16-17, big-endian)
   reply[16] = FIRMWARE_VERSION_H;
@@ -1176,6 +1223,11 @@ void sendArtPollReply(IPAddress dest) {
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|B:%s", BOARD_PROFILE_CODE);
+    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  }
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                          "|SHOW:%u|MGMT:%u|TELE:%u", portShow, portSetup, portWatch);
     if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
   }
   if (reportPos < (int)sizeof(reportBuf) - 1) {
@@ -1258,8 +1310,9 @@ void sendArtPollReply(IPAddress dest) {
 
   // Remaining bytes 218-238 are filler (already zeroed)
 
-  // Send the reply
-  udp.beginPacket(dest, ARTNET_PORT);
+  // Send the reply — controllers (Eos etc.) listen for discovery on the
+  // standard Show port regardless of which lane the request arrived on.
+  udp.beginPacket(dest, PORT_SHOW_DEFAULT);
   udp.write(reply, sizeof(reply));
   udp.endPacket();
 
@@ -1418,7 +1471,7 @@ void sendShowInfoReply(IPAddress dest) {
   reply[78] = perfLen;
   memcpy(reply + 79, showPerformerName, perfLen);
 
-  udp.beginPacket(dest, ARTNET_PORT);
+  udp.beginPacket(dest, PORT_SHOW_DEFAULT);
   udp.write(reply, sizeof(reply));
   udp.endPacket();
 }
@@ -1520,7 +1573,9 @@ bool buildManagementReplyPacket(uint8_t* reply, uint16_t capacity,
 
 void sendManagementReplyPacket(IPAddress dest, const uint8_t* reply,
                                uint16_t replyLen) {
-  udp.beginPacket(dest, ARTNET_PORT);
+  // Reply on the controller discovery port regardless of which lane the
+  // request came in on — controllers only listen on the Show port.
+  udp.beginPacket(dest, PORT_SHOW_DEFAULT);
   udp.write(reply, replyLen);
   udp.endPacket();
 }
@@ -1592,10 +1647,12 @@ uint16_t appendConfigName(uint8_t* payload, uint16_t pos, uint16_t capacity,
 }
 
 uint16_t buildGetConfigPayload(uint8_t* payload, uint16_t capacity) {
-  const uint16_t fixedLen = 27 + NUM_OUTPUTS * OUTPUT_DESCRIPTOR_WIRE_LEN;
+  // Version 2: bytes 0-26 unchanged, bytes 27-32 add the Show/Setup/Watch
+  // lane ports, descriptors shift from offset 27 to offset 33.
+  const uint16_t fixedLen = 33 + NUM_OUTPUTS * OUTPUT_DESCRIPTOR_WIRE_LEN;
   if (capacity < fixedLen + 3) return 0;
   memset(payload, 0, capacity);
-  payload[0] = 1;
+  payload[0] = 2;
   payload[1] = (uint8_t)currentOperatingMode;
   payload[2] = bootUnlockWindowOpen() ? 1 : 0;
   payload[3] = 0;
@@ -1612,8 +1669,11 @@ uint16_t buildGetConfigPayload(uint8_t* payload, uint16_t capacity) {
     memcpy(payload + 19, storedGateway, 4);
     memcpy(payload + 23, storedSubnet, 4);
   }
+  writeBe16(payload + 27, portShow);
+  writeBe16(payload + 29, portSetup);
+  writeBe16(payload + 31, portWatch);
   for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
-    encodeOutputDescriptor(outputs[i], payload + 27 + i * OUTPUT_DESCRIPTOR_WIRE_LEN);
+    encodeOutputDescriptor(outputs[i], payload + 33 + i * OUTPUT_DESCRIPTOR_WIRE_LEN);
   }
 
   uint16_t pos = fixedLen;
@@ -1889,6 +1949,33 @@ void handleManagementRequest(uint8_t* data, uint16_t len, IPAddress remoteAddr) 
       break;
     }
 
+    case MGMT_SET_LANE_PORTS: {
+      if (request.declaredPayloadLen != 6) {
+        error = MGMT_ERROR_INVALID_PAYLOAD;
+        break;
+      }
+      uint16_t newShow  = readBe16(payload);
+      uint16_t newSetup = readBe16(payload + 2);
+      uint16_t newWatch = readBe16(payload + 4);
+      if (!validLanePortSet(newShow, newSetup, newWatch)) {
+        error = MGMT_ERROR_OUT_OF_RANGE;
+        break;
+      }
+      bool showOrSetupChanged = newShow != portShow || newSetup != portSetup;
+      if (!saveLanePorts(newShow, newSetup, newWatch)) {
+        error = MGMT_ERROR_INTERNAL;
+        break;
+      }
+      if (showOrSetupChanged) {
+        udp.stop();
+        udp.begin(portShow);
+        udpSetup.stop();
+        udpSetup.begin(portSetup);
+      }
+      broadcastArtPollReply();
+      break;
+    }
+
     default:
       error = MGMT_ERROR_UNSUPPORTED_OPERATION;
       break;
@@ -1909,7 +1996,8 @@ void handleManagementRequest(uint8_t* data, uint16_t len, IPAddress remoteAddr) 
 //  Art-Net Packet Router — branch on opcode
 // =====================================================================
 
-void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
+void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr,
+                         bool fromSetupSocket) {
   if (len < 10) return;
 
   // Verify Art-Net magic
@@ -1918,11 +2006,23 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
   // Read opcode (little-endian at bytes 8-9)
   uint16_t opcode = (uint16_t)data[8] | ((uint16_t)data[9] << 8);
 
+  // ArtPoll and ArtDmx are Show-lane only — ignore if they arrive on Setup.
   if (opcode == ARTNET_OPCODE_POLL) {
-    // ArtPoll — respond with ArtPollReply
+    if (fromSetupSocket) return;
     sendArtPollReply(remoteAddr);
     return;
   }
+
+  // Setup opcodes (management/config) also work on Show while dual-listen
+  // is enabled, to ease migration to the dedicated Setup lane.
+  bool isSetupOpcode = opcode == ARTNET_OPCODE_MANAGEMENT_REQUEST ||
+                       opcode == ARTNET_OPCODE_ADDRESS ||
+                       opcode == ARTNET_OPCODE_OUTPUT_CONFIG ||
+                       opcode == ARTNET_OPCODE_VIRTUAL_RESOLUTION ||
+                       opcode == ARTNET_OPCODE_IP_CONFIG ||
+                       opcode == ARTNET_OPCODE_SHOW_INFO ||
+                       opcode == ARTNET_OPCODE_RECEIVE_CONFIG;
+  if (isSetupOpcode && !fromSetupSocket && !PORT_DUAL_LISTEN) return;
 
   if (opcode == ARTNET_OPCODE_MANAGEMENT_REQUEST) {
     handleManagementRequest(data, len, remoteAddr);
@@ -1966,6 +2066,7 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
     return;
   }
 
+  if (fromSetupSocket) return;  // Everything else (ArtDmx) is Show-lane only.
   if (opcode != ARTNET_OPCODE_DMX) return;
   if (testModeActive) return;
 
@@ -2076,7 +2177,7 @@ void sendUnifiedStatus() {
   buf[25] = remaining > 255 ? 255 : (uint8_t)remaining;
   // Bytes 26-27 are reserved and remain zero.
 
-  udpStatus.beginPacket(telemetryTarget, STATUS_REPORT_PORT);
+  udpStatus.beginPacket(telemetryTarget, portWatch);
   udpStatus.write(buf, sizeof(buf));
   udpStatus.endPacket();
 }
@@ -2254,6 +2355,7 @@ void setup() {
   prefs.begin(PERSISTENCE_NAMESPACE, false);
   loadStoredOperatingMode();
   loadStoredTelemetryTarget();
+  loadStoredLanePorts();
 
   // Load output config
   loadDefaultConfig(outputs);
@@ -2311,11 +2413,14 @@ void setup() {
     displaySetPower(false);
   }
 
-  // Init UDP sockets
-  udp.begin(ARTNET_PORT);
+  // Init UDP sockets — Show lane, Setup lane, and outgoing status.
+  udp.begin(portShow);
+  udpSetup.begin(portSetup);
   udpStatus.begin(0);  // ephemeral port for outgoing unified status packets
-  Serial.print("Art-Net listening on port ");
-  Serial.println(ARTNET_PORT);
+  Serial.print("Show lane listening on port ");
+  Serial.println(portShow);
+  Serial.print("Setup lane listening on port ");
+  Serial.println(portSetup);
 
   // Broadcast ArtPollReply so discovery tools see us immediately
   if (wifiConnected) {
@@ -2388,7 +2493,7 @@ void loop() {
   // ── WiFi health ──────────────────────────────────────────────────
   checkWifiConnection();
 
-  // ── Drain all pending Art-Net packets ────────────────────────────
+  // ── Drain all pending Art-Net packets — Show lane ────────────────
   int pktSize;
   while ((pktSize = udp.parsePacket()) > 0) {
     if (pktSize > MAX_UDP_PACKET) {
@@ -2398,7 +2503,20 @@ void loop() {
     int bytesRead = udp.read(udpBuf, pktSize);
     if (bytesRead > 0) {
       IPAddress remoteAddr = udp.remoteIP();
-      processArtNetPacket(udpBuf, bytesRead, remoteAddr);
+      processArtNetPacket(udpBuf, bytesRead, remoteAddr, false);
+    }
+  }
+
+  // ── Drain all pending Art-Net packets — Setup lane ───────────────
+  while ((pktSize = udpSetup.parsePacket()) > 0) {
+    if (pktSize > MAX_UDP_PACKET) {
+      while (udpSetup.available()) udpSetup.read();
+      continue;
+    }
+    int bytesRead = udpSetup.read(udpBuf, pktSize);
+    if (bytesRead > 0) {
+      IPAddress remoteAddr = udpSetup.remoteIP();
+      processArtNetPacket(udpBuf, bytesRead, remoteAddr, true);
     }
   }
 

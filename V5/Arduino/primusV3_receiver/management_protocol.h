@@ -17,6 +17,7 @@ enum ManagementOperation : uint8_t {
   MGMT_SET_IP_CONFIG = 0x14,
   MGMT_SET_IDENTITY = 0x15,
   MGMT_BOOT_WINDOW_UNLOCK = 0x16,
+  MGMT_SET_LANE_PORTS = 0x17,
 };
 
 enum ManagementReplyStatus : uint8_t {
