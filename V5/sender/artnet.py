@@ -34,6 +34,7 @@ from primus_protocol import (
     build_management_request,
     pack_identity,
     pack_ip_config,
+    pack_lane_ports,
     pack_operating_mode,
     pack_output_descriptors,
     pack_receive_config,
@@ -145,15 +146,19 @@ FTP_PASSWORD = "radius"
 class ArtNetSender:
     """Sends one Art-Net ArtDmx packet per output, per frame."""
 
-    def __init__(self, ip, source_ip=None):
+    def __init__(self, ip, source_ip=None, dest_port=None):
         self.ip = ip
         self.source_ip = source_ip or None
+        self.dest_port = int(dest_port or ARTNET_PORT)
         self.sock = None
         self.connected = False
         self.sequence = 1
         self.last_error = None
         self._prefer_unbound_send = False
         self._io_lock = threading.Lock()
+
+    def set_dest_port(self, dest_port):
+        self.dest_port = int(dest_port or ARTNET_PORT)
 
     def set_source_ip(self, source_ip):
         source_ip = source_ip or None
@@ -230,7 +235,7 @@ class ArtNetSender:
                     continue
                 try:
                     self._open_socket_unlocked(bind_source=bind_source)
-                    self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+                    self.sock.sendto(pkt, (self.ip, self.dest_port))
                     self.last_error = None
                     return True
                 except OSError as exc:
@@ -261,7 +266,7 @@ class ArtNetSender:
                     self._open_socket_unlocked(bind_source=bind_source)
                     for universe, pixel_count in outputs_info:
                         pkt = self._build_packet(universe, bytes(pixel_count * 3))
-                        self.sock.sendto(pkt, (self.ip, ARTNET_PORT))
+                        self.sock.sendto(pkt, (self.ip, self.dest_port))
                     self.sequence = (self.sequence % 255) + 1
                     self.last_error = None
                     return True
@@ -1145,6 +1150,8 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
             _parse_ip_capability(part, caps)
             caps["ip_config"] = True
             continue
+        if _apply_lane_port_token(part, caps):
+            continue
         if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
             continue
         features = part[len(NODE_CAPS_FEATURE_PREFIX):]
@@ -1229,6 +1236,8 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             if part.startswith(NODE_CAPS_UNIVERSE_PREFIX):
                 _parse_universe_capability(part, caps)
                 continue
+            if _apply_lane_port_token(part, caps):
+                continue
             if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
                 continue
             saw_feature_token = True
@@ -1297,6 +1306,88 @@ def _parse_ip_capability(part, caps):
             caps["gateway"] = values[2]
         if len(values) > 3 and _looks_like_ipv4(values[3]):
             caps["subnet"] = values[3]
+
+
+def _parse_port_token(part, prefix):
+    """Parse SHOW:/AUD:/MGMT:/TELE:/FTP:NNNN into an int, or None."""
+    if not part.startswith(prefix):
+        return None
+    text = part[len(prefix):].strip()
+    if not text.isdigit():
+        return None
+    value = int(text, 10)
+    if value <= 0 or value > 65535:
+        return None
+    return value
+
+
+def _apply_lane_port_token(part, caps):
+    """Populate port_* fields from a single capability token."""
+    show = _parse_port_token(part, NODE_CAPS_SHOW_PREFIX)
+    if show is not None:
+        caps["port_show"] = show
+        return True
+    aud = _parse_port_token(part, NODE_CAPS_AUD_PREFIX)
+    if aud is not None:
+        caps["port_show"] = aud  # Radius show lane
+        return True
+    mgmt = _parse_port_token(part, NODE_CAPS_MGMT_PREFIX)
+    if mgmt is not None:
+        caps["port_setup"] = mgmt
+        return True
+    tele = _parse_port_token(part, NODE_CAPS_TELE_PREFIX)
+    if tele is not None:
+        caps["port_watch"] = tele
+        return True
+    ftp = _parse_port_token(part, NODE_CAPS_FTP_PREFIX)
+    if ftp is not None:
+        caps["ftp_port"] = ftp
+        return True
+    return False
+
+
+def resolve_lane_ports(capabilities=None, is_radius=False):
+    """Resolve Show/Setup/Watch ports from advertised caps with legacy fallbacks.
+
+    Missing MGMT → Setup sends fall back to Show (pre-lane-split firmware).
+    Missing AUD on Radius → Show stays 6454 (legacy V5 Radius on discovery port).
+    """
+    caps = capabilities or {}
+    if is_radius:
+        show = caps.get("port_show")
+        if show is None:
+            show = PORT_DISCOVERY  # legacy Radius ArtAudio on 6454
+        setup = caps.get("port_setup")
+        if setup is None:
+            setup = show
+        watch = caps.get("port_watch")
+        if watch is None:
+            watch = PORT_WATCH
+        ftp = caps.get("ftp_port")
+        if ftp is None:
+            ftp = 21
+        return {
+            "port_show": int(show),
+            "port_setup": int(setup),
+            "port_watch": int(watch),
+            "ftp_port": int(ftp),
+        }
+
+    show = caps.get("port_show")
+    if show is None:
+        show = ARTNET_PORT
+    setup = caps.get("port_setup")
+    if setup is None:
+        setup = show  # legacy Primus management on Show port
+    watch = caps.get("port_watch")
+    if watch is None:
+        watch = PORT_WATCH
+    return {
+        "port_show": int(show),
+        "port_setup": int(setup),
+        "port_watch": int(watch),
+        "ftp_port": None,
+    }
 
 
 def _looks_like_ipv4(value):
@@ -1454,7 +1545,8 @@ def _udp_route_retryable(error):
     )
 
 
-def _send_udp_packet(ip, packet, source_ip=None):
+def _send_udp_packet(ip, packet, source_ip=None, dest_port=None):
+    dest_port = int(dest_port or ARTNET_PORT)
     bind_attempts = [True, False] if source_ip else [False]
     last_error = None
     for bind_source in bind_attempts:
@@ -1468,7 +1560,7 @@ def _send_udp_packet(ip, packet, source_ip=None):
                 except OSError:
                     continue
             try:
-                sock.sendto(bytes(packet), (ip, ARTNET_PORT))
+                sock.sendto(bytes(packet), (ip, dest_port))
                 return
             except OSError as exc:
                 last_error = exc
@@ -1480,6 +1572,22 @@ def _send_udp_packet(ip, packet, source_ip=None):
     if last_error:
         raise last_error
     raise OSError("UDP send failed")
+
+
+def device_show_port(device=None, is_radius=False):
+    """Show-lane destination for ArtDmx / ArtAudioCmd."""
+    if isinstance(device, dict) and device.get("port_show") is not None:
+        return int(device["port_show"])
+    if is_radius or (isinstance(device, dict) and device.get("is_radius")):
+        return PORT_SHOW_RADIUS
+    return ARTNET_PORT
+
+
+def device_setup_port(device=None, is_radius=False):
+    """Setup-lane destination; falls back to Show when MGMT was not advertised."""
+    if isinstance(device, dict) and device.get("port_setup") is not None:
+        return int(device["port_setup"])
+    return device_show_port(device, is_radius=is_radius)
 
 
 def build_output_config_packet(output_types, type_to_id_map):
@@ -1495,13 +1603,13 @@ def build_output_config_packet(output_types, type_to_id_map):
     return bytes(pkt)
 
 
-def send_output_config(ip, output_types, type_to_id_map, source_ip=None):
+def send_output_config(ip, output_types, type_to_id_map, source_ip=None, dest_port=None):
     """Send ArtOutputConfig packet.
     output_types: list of type key strings.
     type_to_id_map: dict mapping type key -> firmware enum int.
     """
     pkt = build_output_config_packet(output_types, type_to_id_map)
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
 
 
 def build_virtual_resolution_packet(virtual_counts):
@@ -1517,10 +1625,10 @@ def build_virtual_resolution_packet(virtual_counts):
     return bytes(pkt)
 
 
-def send_virtual_resolution(ip, virtual_counts, source_ip=None):
+def send_virtual_resolution(ip, virtual_counts, source_ip=None, dest_port=None):
     """Send ArtVirtualResolution packet."""
     pkt = build_virtual_resolution_packet(virtual_counts)
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
 
 
 def build_receive_config_packet(receive_mode, base_universe):
@@ -1546,10 +1654,10 @@ def build_receive_config_packet(receive_mode, base_universe):
     return bytes(pkt)
 
 
-def send_receive_config(ip, receive_mode, base_universe, source_ip=None):
+def send_receive_config(ip, receive_mode, base_universe, source_ip=None, dest_port=None):
     """Send ArtReceiveConfig packet."""
     pkt = build_receive_config_packet(receive_mode, base_universe)
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
 
 
 # ======================================================================
@@ -1557,7 +1665,7 @@ def send_receive_config(ip, receive_mode, base_universe, source_ip=None):
 # ======================================================================
 
 
-def send_art_address(ip, short_name, source_ip=None):
+def send_art_address(ip, short_name, source_ip=None, dest_port=None):
     pkt = bytearray(107)
     pkt[0:8] = ARTNET_HEADER
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_ADDRESS)
@@ -1570,14 +1678,14 @@ def send_art_address(ip, short_name, source_ip=None):
         pkt[i] = 0x7F
     pkt[104] = 0x7F
     pkt[106] = 0x00
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
 
 
 # ======================================================================
 #  ART-NET IP CONFIG — ArtIPConfig (opcode 0x8200)
 # ======================================================================
 
-def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None):
+def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None, dest_port=None):
     """Send ArtIPConfig packet.
     mode: 0 = DHCP, 1 = static.
     static_ip/gateway/subnet: dotted-quad strings (required when mode=1).
@@ -1596,7 +1704,7 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_i
             pkt[21 + i] = octet
     elif mode == 1:
         raise ValueError("static IP mode requires ip, gateway, and subnet")
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
 
 
 # ======================================================================
@@ -1643,13 +1751,13 @@ def parse_show_info_packet(raw):
     }
 
 
-def send_show_info(ip, character_name="", performer_name="", source_ip=None):
+def send_show_info(ip, character_name="", performer_name="", source_ip=None, dest_port=None):
     pkt = build_show_info_packet(
         SHOW_INFO_MODE_WRITE,
         character_name=character_name,
         performer_name=performer_name,
     )
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
 
 
 def _normalize_show_info_compare(value):
@@ -1662,6 +1770,7 @@ def sync_show_info_to_device(
     performer_name="",
     source_ip=None,
     timeout=0.5,
+    dest_port=None,
 ):
     """Write show info and verify the receiver stored the expected values."""
     send_show_info(
@@ -1669,6 +1778,7 @@ def sync_show_info_to_device(
         character_name=character_name,
         performer_name=performer_name,
         source_ip=source_ip,
+        dest_port=dest_port,
     )
     result = query_show_info(ip, timeout=timeout, source_ip=source_ip)
     if not result:
@@ -1875,6 +1985,7 @@ def request_primus_management(
     payload=b"",
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -1885,6 +1996,7 @@ def request_primus_management(
             operation,
             payload,
             source_ip=source_ip,
+            dest_port=dest_port,
             timeout=timeout,
             retries=retries,
             request_id=request_id,
@@ -1897,6 +2009,7 @@ def _request_primus_management_unlocked(
     payload=b"",
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -1917,6 +2030,7 @@ def _request_primus_management_unlocked(
             raise ValueError("request_id must fit uint16")
 
     packet = build_management_request(request_id, operation, payload)
+    dest_port = int(dest_port or ARTNET_PORT)
     prefer_unbound = False
     attempts = retries + 1
     receive_timeout = min(0.1, max(0.05, timeout))
@@ -1929,7 +2043,7 @@ def _request_primus_management_unlocked(
             try:
                 sock.settimeout(receive_timeout)
                 try:
-                    sock.sendto(packet, (ip, ARTNET_PORT))
+                    sock.sendto(packet, (ip, dest_port))
                 except OSError as exc:
                     last_send_error = exc
                     if bind_source and source_ip and _udp_route_retryable(exc):
@@ -1970,11 +2084,12 @@ def _request_primus_management_unlocked(
     )
 
 
-def get_primus_config(ip, *, source_ip=None, timeout=0.35, retries=2, request_id=None):
+def get_primus_config(ip, *, source_ip=None, dest_port=None, timeout=0.35, retries=2, request_id=None):
     return request_primus_management(
         ip,
         Operation.GET_CONFIG,
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -1986,6 +2101,7 @@ def set_primus_output_descriptors(
     descriptors,
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -1995,6 +2111,7 @@ def set_primus_output_descriptors(
         Operation.SET_OUTPUT_DESCRIPTORS,
         pack_output_descriptors(descriptors),
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2006,6 +2123,7 @@ def set_primus_telemetry_target(
     address,
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -2015,6 +2133,7 @@ def set_primus_telemetry_target(
         Operation.SET_TELEMETRY_TARGET,
         pack_telemetry_target(address),
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2026,6 +2145,7 @@ def set_primus_operating_mode(
     mode,
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -2035,6 +2155,7 @@ def set_primus_operating_mode(
         Operation.SET_OPERATING_MODE,
         pack_operating_mode(mode),
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2047,6 +2168,7 @@ def set_primus_receive_config(
     base_universe,
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -2056,6 +2178,7 @@ def set_primus_receive_config(
         Operation.SET_RECEIVE_CONFIG,
         pack_receive_config(mode, base_universe),
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2070,6 +2193,7 @@ def set_primus_ip_config(
     subnet="0.0.0.0",
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -2079,6 +2203,7 @@ def set_primus_ip_config(
         Operation.SET_IP_CONFIG,
         pack_ip_config(mode, static_ip, gateway, subnet),
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2092,6 +2217,7 @@ def set_primus_identity(
     performer_name,
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -2101,6 +2227,7 @@ def set_primus_identity(
         Operation.SET_IDENTITY,
         pack_identity(technical_name, character_name, performer_name),
         source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2111,6 +2238,7 @@ def unlock_primus_boot_window(
     ip,
     *,
     source_ip=None,
+    dest_port=None,
     timeout=0.35,
     retries=2,
     request_id=None,
@@ -2119,6 +2247,31 @@ def unlock_primus_boot_window(
         ip,
         Operation.BOOT_WINDOW_UNLOCK,
         source_ip=source_ip,
+        dest_port=dest_port,
+        timeout=timeout,
+        retries=retries,
+        request_id=request_id,
+    )
+
+
+def set_primus_lane_ports(
+    ip,
+    port_show,
+    port_setup,
+    port_watch,
+    *,
+    source_ip=None,
+    dest_port=None,
+    timeout=0.35,
+    retries=2,
+    request_id=None,
+):
+    return request_primus_management(
+        ip,
+        Operation.SET_LANE_PORTS,
+        pack_lane_ports(port_show, port_setup, port_watch),
+        source_ip=source_ip,
+        dest_port=dest_port,
         timeout=timeout,
         retries=retries,
         request_id=request_id,
@@ -2163,9 +2316,9 @@ def _query_node_short_name_unlocked(ip, timeout=0.5, source_ip=None):
     return None
 
 
-def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5):
+def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5, dest_port=None):
     """Send ArtAddress and verify the receiver advertised the new short name."""
-    send_art_address(ip, short_name, source_ip=source_ip)
+    send_art_address(ip, short_name, source_ip=source_ip, dest_port=dest_port)
     expected = str(short_name or "").strip()[:17]
     # Radius nodes may still be finishing NVS/display updates when the first
     # ArtPollReply arrives; retry briefly before reporting failure.
@@ -2228,7 +2381,7 @@ def _query_show_info_unlocked(ip, timeout=0.35, sock=None, source_ip=None):
 #  AUDIO COMMAND — ArtAudioCmd (opcode 0x8300)
 # ======================================================================
 
-def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None):
+def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None, dest_port=None):
     name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
     if duration and duration > 0:
         name_bytes += struct.pack("<H", min(int(duration), 65535))
@@ -2239,7 +2392,8 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None)
     pkt[12] = cmd & 0xFF
     pkt[13] = max(0, min(100, volume)) & 0xFF
     pkt[14:14 + len(name_bytes)] = name_bytes
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    # Callers with device records should pass device_show_port(dev).
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
     cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
     dur_str = f" [{duration}s]" if duration else ""
     file_str = f" \"{filename}\"" if filename else ""
@@ -2251,19 +2405,29 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None)
 #  FTP CONTROL — ArtFtpCmd (opcode 0x8301)
 # ======================================================================
 
-def send_ftp_cmd(ip, start, source_ip=None):
+def send_ftp_cmd(ip, start, source_ip=None, dest_port=None):
     pkt = bytearray(13)
     pkt[0:8] = ARTNET_HEADER
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_FTP_CMD)
     struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
     pkt[12] = 1 if start else 0
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
     netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")
 
 
-def list_audio_files(ip, source_ip=None):
+def send_lane_ports(ip, port_show, port_setup, port_watch, source_ip=None, dest_port=None):
+    """Send ArtLanePorts (0x8220) — Radius Setup-lane port map write."""
+    pkt = bytearray(18)
+    pkt[0:8] = ARTNET_HEADER
+    struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_LANE_PORTS)
+    struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
+    struct.pack_into(">HHH", pkt, 12, int(port_show), int(port_setup), int(port_watch))
+    _send_udp_packet(ip, pkt, source_ip=source_ip, dest_port=dest_port)
+
+
+def list_audio_files(ip, source_ip=None, dest_port=None):
     try:
-        entries = ftp_list_dir(ip, "/", source_ip=source_ip)
+        entries = ftp_list_dir(ip, "/", source_ip=source_ip, dest_port=dest_port)
         return sorted(e["name"] for e in entries if e["name"].lower().endswith(".wav"))
     except Exception as exc:
         print(f"[audio] FTP list failed for {ip}: {exc}")
@@ -2275,9 +2439,9 @@ import io as _io
 
 
 @_contextlib.contextmanager
-def _ftp_session(ip, source_ip=None, timeout=8.0):
+def _ftp_session(ip, source_ip=None, timeout=8.0, dest_port=None):
     import ftplib
-    send_ftp_cmd(ip, start=True, source_ip=source_ip)
+    send_ftp_cmd(ip, start=True, source_ip=source_ip, dest_port=dest_port)
     time.sleep(0.5)
     ftp = ftplib.FTP()
     try:
@@ -2295,7 +2459,7 @@ def _ftp_session(ip, source_ip=None, timeout=8.0):
             pass
         raise
     finally:
-        send_ftp_cmd(ip, start=False, source_ip=source_ip)
+        send_ftp_cmd(ip, start=False, source_ip=source_ip, dest_port=dest_port)
 
 
 def _parse_list_line(line):
@@ -2309,9 +2473,9 @@ def _parse_list_line(line):
     return {"name": parts[8], "is_dir": parts[0].startswith("d"), "size": size}
 
 
-def ftp_list_dir(ip, path="/", source_ip=None):
+def ftp_list_dir(ip, path="/", source_ip=None, dest_port=None):
     entries = []
-    with _ftp_session(ip, source_ip=source_ip) as ftp:
+    with _ftp_session(ip, source_ip=source_ip, dest_port=dest_port) as ftp:
         lines = []
         try:
             ftp.retrlines(f"LIST {path}", lines.append)
@@ -2324,16 +2488,16 @@ def ftp_list_dir(ip, path="/", source_ip=None):
     return sorted(entries, key=lambda e: (not e["is_dir"], e["name"].lower()))
 
 
-def ftp_download(ip, path, source_ip=None):
+def ftp_download(ip, path, source_ip=None, dest_port=None):
     buf = _io.BytesIO()
-    with _ftp_session(ip, source_ip=source_ip) as ftp:
+    with _ftp_session(ip, source_ip=source_ip, dest_port=dest_port) as ftp:
         ftp.retrbinary(f"RETR {path}", buf.write)
     return buf.getvalue()
 
 
-def ftp_upload(ip, path, data, source_ip=None, progress_callback=None):
+def ftp_upload(ip, path, data, source_ip=None, progress_callback=None, dest_port=None):
     total = len(data)
-    with _ftp_session(ip, source_ip=source_ip) as ftp:
+    with _ftp_session(ip, source_ip=source_ip, dest_port=dest_port) as ftp:
         if progress_callback:
             transferred = [0]
 
@@ -2347,14 +2511,14 @@ def ftp_upload(ip, path, data, source_ip=None, progress_callback=None):
     netlog.log("OUT", "ftp_upload", f"FTP upload {path} ({total} bytes) → {ip}")
 
 
-def ftp_rename(ip, src, dst, source_ip=None):
-    with _ftp_session(ip, source_ip=source_ip) as ftp:
+def ftp_rename(ip, src, dst, source_ip=None, dest_port=None):
+    with _ftp_session(ip, source_ip=source_ip, dest_port=dest_port) as ftp:
         ftp.rename(src, dst)
     netlog.log("OUT", "ftp_rename", f"FTP rename {src} → {dst} on {ip}")
 
 
-def ftp_delete(ip, path, is_dir=False, source_ip=None):
-    with _ftp_session(ip, source_ip=source_ip) as ftp:
+def ftp_delete(ip, path, is_dir=False, source_ip=None, dest_port=None):
+    with _ftp_session(ip, source_ip=source_ip, dest_port=dest_port) as ftp:
         if is_dir:
             ftp.rmd(path)
         else:
@@ -2362,7 +2526,7 @@ def ftp_delete(ip, path, is_dir=False, source_ip=None):
     netlog.log("OUT", "ftp_delete", f"FTP delete {path} on {ip}")
 
 
-def ftp_mkdir(ip, path, source_ip=None):
-    with _ftp_session(ip, source_ip=source_ip) as ftp:
+def ftp_mkdir(ip, path, source_ip=None, dest_port=None):
+    with _ftp_session(ip, source_ip=source_ip, dest_port=dest_port) as ftp:
         ftp.mkd(path)
     netlog.log("OUT", "ftp_mkdir", f"FTP mkdir {path} on {ip}")

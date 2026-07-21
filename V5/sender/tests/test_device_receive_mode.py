@@ -126,7 +126,7 @@ class SetDeviceReceiveModeTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["applied_to_device"])
         send_receive_config.assert_called_once_with(
-            "192.168.1.10", "split", 9, source_ip=None)
+            "192.168.1.10", "split", 9, source_ip=None, dest_port=6454)
 
     @patch("state.send_receive_config")
     @patch("state._save_devices")

@@ -227,7 +227,7 @@ class ManagementStateTests(StateScratchMixin, unittest.TestCase):
         self.assertFalse(controller.devices[0]["connected"])
         controller.devices[0]["sender"].connect.assert_not_called()
         set_descriptors.assert_called_once()
-        get_config.assert_called_once_with("192.168.1.90", source_ip=None)
+        get_config.assert_called_once_with("192.168.1.90", source_ip=None, dest_port=6454)
         save_devices.assert_called_once()
 
     @patch("state.get_primus_config", side_effect=state.PrimusManagementTimeout("timed out"))
@@ -470,10 +470,10 @@ class ManagementStateTests(StateScratchMixin, unittest.TestCase):
         release_first_readback = threading.Event()
         results = {}
 
-        def send_side_effect(ip, descriptors, source_ip=None):
+        def send_side_effect(ip, descriptors, source_ip=None, dest_port=None):
             sent_descriptors.append(tuple(descriptors))
 
-        def readback_side_effect(ip, source_ip=None):
+        def readback_side_effect(ip, source_ip=None, dest_port=None):
             if len(sent_descriptors) == 1:
                 readback_entered.set()
                 self.assertTrue(release_first_readback.wait(1.0))
@@ -524,7 +524,7 @@ class ManagementStateTests(StateScratchMixin, unittest.TestCase):
         results = {}
         sent = {}
 
-        def send_side_effect(ip, descriptors, source_ip=None):
+        def send_side_effect(ip, descriptors, source_ip=None, dest_port=None):
             nonlocal active, max_active
             sent[ip] = tuple(descriptors)
             with active_lock:
@@ -538,7 +538,7 @@ class ManagementStateTests(StateScratchMixin, unittest.TestCase):
             with active_lock:
                 active -= 1
 
-        def readback_side_effect(ip, source_ip=None):
+        def readback_side_effect(ip, source_ip=None, dest_port=None):
             return SimpleNamespace(config=self.make_config(
                 technical_name="Badge-A" if ip.endswith(".90") else "Badge-B",
                 outputs=sent[ip],

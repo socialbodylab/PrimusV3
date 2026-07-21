@@ -107,6 +107,7 @@ class DeviceShowInfoPersistenceTests(unittest.TestCase):
             "Chorus",
             "Taylor",
             source_ip=None,
+            dest_port=6454,
         )
         self.assertIsNotNone(controller.devices[0].get("show_info_edited_at"))
         save_devices.assert_called_once()

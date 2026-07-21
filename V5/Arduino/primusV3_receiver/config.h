@@ -416,6 +416,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_MANAGEMENT_REPLY   0x8141 // Versioned Primus management reply
 #define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
 #define ARTNET_OPCODE_SHOW_INFO    0x8210  // Vendor-defined: read/write show metadata
+#define ARTNET_OPCODE_LANE_PORTS   0x8220  // Vendor-defined: set Show/Setup/Watch ports (Radius; Primus uses mgmt 0x17)
 #define SHOW_INFO_FIELD_LEN        64
 #define SHOW_INFO_MODE_READ        0
 #define SHOW_INFO_MODE_WRITE       1

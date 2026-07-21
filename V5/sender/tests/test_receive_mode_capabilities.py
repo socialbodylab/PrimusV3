@@ -69,7 +69,7 @@ class ArtReceiveConfigPacketTests(unittest.TestCase):
     def test_send_receive_config_calls_udp(self):
         sent = []
 
-        def fake_send(ip, packet, source_ip=None):
+        def fake_send(ip, packet, source_ip=None, dest_port=None):
             sent.append((ip, bytes(packet), source_ip))
 
         import artnet as artnet_module
