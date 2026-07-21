@@ -395,9 +395,16 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEFAULT_SUBNET         255, 255, 255, 0
 
 // =====================================================================
-//  Art-Net
+//  Art-Net / UDP lane ports (Show / Setup / Watch)
+//  See docs/systems/PORT_ORGANIZATION.md
 // =====================================================================
-#define ARTNET_PORT            6454
+#define PORT_SHOW_DEFAULT      6454
+#define PORT_SETUP_DEFAULT     6457
+#define PORT_WATCH_DEFAULT     6455
+#ifndef PORT_DUAL_LISTEN
+#define PORT_DUAL_LISTEN       1   // accept Setup opcodes on Show during migrate
+#endif
+#define ARTNET_PORT            PORT_SHOW_DEFAULT
 #define ARTNET_OPCODE_DMX      0x5000
 #define ARTNET_OPCODE_POLL     0x2000
 #define ARTNET_OPCODE_POLLREPLY 0x2100
@@ -438,8 +445,8 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // and output assignments already stored on deployed receivers.
 #define PERSISTENCE_NAMESPACE "primus35"
 
-// Explicit-target unified status back-channel.
-#define STATUS_REPORT_PORT       6455
+// Explicit-target unified status back-channel (Watch lane).
+#define STATUS_REPORT_PORT       PORT_WATCH_DEFAULT
 #define STATUS_PROTOCOL_VERSION  1
 #define STATUS_PACKET_LEN        28
 #define MANAGEMENT_PROTOCOL_VERSION 1
