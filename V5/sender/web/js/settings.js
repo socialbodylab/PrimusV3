@@ -11,9 +11,13 @@ document.addEventListener("alpine:init", () => {
         subnet: "255.255.255.0",
         scope: "service",
         controllerSsid: "",
+        lanePorts: { port_show_primus: 6454, port_show_radius: 6456, port_setup: 6457, port_watch: 6455 },
+        lanePortsLoading: false,
+        lanePortsSaving: false,
 
         init() {
             this.refresh();
+            this.loadLanePorts();
             document.addEventListener("primus:mode-changed", event => {
                 if (event.detail?.mode === "settings") this.refresh();
             });
@@ -354,6 +358,55 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("app").showApiError("DHCP revert failed", e);
             } finally {
                 this.applying = false;
+            }
+        },
+
+        async loadLanePorts() {
+            this.lanePortsLoading = true;
+            try {
+                this.lanePorts = await api("GET", "/api/network/lane_ports");
+            } catch (e) {
+                Alpine.store("app").showApiError("UDP lane ports unavailable", e);
+            } finally {
+                this.lanePortsLoading = false;
+            }
+        },
+
+        get lanePortsValidationMessage() {
+            const keys = ["port_show_primus", "port_show_radius", "port_setup", "port_watch"];
+            const values = keys.map(key => Number(this.lanePorts?.[key]));
+            if (values.some(v => !Number.isInteger(v) || v < 1024 || v > 65535)) {
+                return "Ports must be whole numbers from 1024-65535.";
+            }
+            const [showPrimus, showRadius, setup, watch] = values;
+            if (setup === showPrimus || setup === showRadius || setup === watch) {
+                return "Setup must differ from both Show ports and from Watch.";
+            }
+            if (watch === setup) {
+                return "Watch must differ from Setup.";
+            }
+            return "";
+        },
+
+        get canSaveLanePorts() {
+            return !this.lanePortsSaving && !this.lanePortsLoading && !this.lanePortsValidationMessage;
+        },
+
+        async saveLanePorts() {
+            if (!this.canSaveLanePorts) return;
+            this.lanePortsSaving = true;
+            try {
+                this.lanePorts = await api("POST", "/api/network/lane_ports", {
+                    port_show_primus: Number(this.lanePorts.port_show_primus),
+                    port_show_radius: Number(this.lanePorts.port_show_radius),
+                    port_setup: Number(this.lanePorts.port_setup),
+                    port_watch: Number(this.lanePorts.port_watch),
+                });
+                Alpine.store("app").showNotice("UDP lane port defaults saved.", "success");
+            } catch (e) {
+                Alpine.store("app").showApiError("UDP lane ports save failed", e);
+            } finally {
+                this.lanePortsSaving = false;
             }
         },
 

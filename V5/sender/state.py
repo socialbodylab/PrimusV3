@@ -22,6 +22,8 @@ from artnet import (
     resolve_lane_ports,
     device_show_port,
     device_setup_port,
+    FPS_LISTEN_PORT,
+    send_lane_ports,
     set_primus_lane_ports,
     get_primus_config,
     set_primus_output_descriptors,
@@ -474,6 +476,18 @@ def _apply_lane_ports_to_device(dev, capabilities=None):
         if value is not None:
             dev[key] = int(value)
     dev["capabilities"] = caps
+
+
+def _validate_device_lane_ports(port_show, port_setup, port_watch):
+    """Raise ValueError if the requested per-device lane ports are unusable."""
+    ports = {"port_show": port_show, "port_setup": port_setup, "port_watch": port_watch}
+    for name, value in ports.items():
+        if value < 1 or value > 65535:
+            raise ValueError(f"{name} must be 1-65535")
+    if port_setup == port_show:
+        raise ValueError("port_setup must differ from port_show")
+    if port_setup == port_watch:
+        raise ValueError("port_setup must differ from port_watch")
 
 
 def _management_state_defaults(capabilities=None):
@@ -3630,6 +3644,106 @@ class ControllerState:
                     skip_readback=True,
                     success_extra={"pending_reconnect": True},
                 )
+
+    def _apply_lane_ports_result_unlocked(self, dev, prepared, persist=False):
+        dev["port_show"] = int(prepared["port_show"])
+        dev["port_setup"] = int(prepared["port_setup"])
+        dev["port_watch"] = int(prepared["port_watch"])
+        caps = _normalize_device_capabilities(dev.get("capabilities"))
+        caps["port_show"] = dev["port_show"]
+        caps["port_setup"] = dev["port_setup"]
+        caps["port_watch"] = dev["port_watch"]
+        dev["capabilities"] = caps
+        sender = dev.get("sender")
+        if sender is not None and hasattr(sender, "set_dest_port"):
+            sender.set_dest_port(device_show_port(dev))
+
+    def get_device_lane_ports(self, di):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            return {
+                "ok": True,
+                "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+                "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+                "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
+                "ftp_port": dev.get("ftp_port"),
+                "is_radius": bool(dev.get("is_radius")),
+                "management_capable": self._device_supports_management_unlocked(dev),
+            }
+
+    def set_device_lane_ports(self, di, port_show, port_setup, port_watch):
+        try:
+            port_show = int(port_show)
+            port_setup = int(port_setup)
+            port_watch = int(port_watch)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "ports must be integers", "http_status": 400}
+        try:
+            _validate_device_lane_ports(port_show, port_setup, port_watch)
+        except ValueError as error:
+            return {"ok": False, "error": str(error), "http_status": 400}
+
+        device_ref = None
+        device_lock = None
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            if dev.get("is_radius"):
+                try:
+                    send_lane_ports(
+                        dev["ip"], port_show, port_setup, port_watch,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
+                    )
+                except OSError as error:
+                    dev["transport_error"] = str(error)
+                    return {"ok": False, "error": dev.get("transport_error")}
+                self._apply_lane_ports_result_unlocked(
+                    dev,
+                    {"port_show": port_show, "port_setup": port_setup, "port_watch": port_watch},
+                    persist=True,
+                )
+                self._clear_transport_error_unlocked(dev)
+                _save_devices(self.devices)
+                return {
+                    "ok": True,
+                    "port_show": port_show,
+                    "port_setup": port_setup,
+                    "port_watch": port_watch,
+                }
+            if not self._device_supports_management_unlocked(dev):
+                return {
+                    "ok": False,
+                    "error": f'{dev.get("name", "Device")} does not advertise Primus management support.',
+                    "error_code": "UnsupportedOperation",
+                    "http_status": 409,
+                }
+            device_ref = dev
+            device_lock = self._ensure_device_management_lock_unlocked(dev)
+
+        with device_lock:
+            return self._run_management_mutation_for_locked_device(
+                device_ref,
+                lambda idx: self._device_management_status_unlocked(idx),
+                lambda current_dev: {
+                    "port_show": port_show,
+                    "port_setup": port_setup,
+                    "port_watch": port_watch,
+                },
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_lane_ports(
+                    ip,
+                    prepared["port_show"],
+                    prepared["port_setup"],
+                    prepared["port_watch"],
+                    source_ip=source_ip,
+                    dest_port=dest_port,
+                ),
+                self._apply_lane_ports_result_unlocked,
+                skip_readback=True,
+                success_extra={"pending_reconnect": True},
+            )
 
     def connect_all(self, only_ips=None):
         results = []

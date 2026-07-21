@@ -18,8 +18,9 @@ import sys
 import threading
 import time
 
-from artnet import RadiusTelemetryListener
+from artnet import RadiusTelemetryListener, FPS_LISTEN_PORT
 from paths import ensure_runtime_data, is_bundled, log_path, sender_product
+from network_settings import get_lane_ports
 from radius_state import RadiusState
 from central_launcher import (
     CentralPortInUseByCentral,
@@ -204,7 +205,11 @@ def main():
     if args.replace:
         _kill_existing()
 
-    telemetry_listener = RadiusTelemetryListener()
+    try:
+        watch_port = int(get_lane_ports().get("port_watch") or FPS_LISTEN_PORT)
+    except Exception:
+        watch_port = FPS_LISTEN_PORT
+    telemetry_listener = RadiusTelemetryListener(listen_port=watch_port)
     telemetry_thread = threading.Thread(target=telemetry_listener.run, daemon=True)
     telemetry_thread.start()
 

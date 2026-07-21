@@ -42,10 +42,12 @@ from network_settings import (
     NetworkSettingsError,
     apply_static_ip,
     get_artnet_interface,
+    get_lane_ports,
     get_network_status,
     save_profile,
     set_controller_connection,
     set_dhcp,
+    set_lane_ports,
     set_preferred_interface,
 )
 from paths import web_dir, frontend_index_path, default_frontend_path, sender_product, app_version
@@ -303,6 +305,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/network/status":
             self._json_response(get_network_status())
+            return
+        if path == "/api/network/lane_ports":
+            self._json_response(get_lane_ports())
+            return
+        if path == "/api/device_lane_ports":
+            params = self._query_params()
+            try:
+                di = self._parse_int_field(params.get("device"), "device", location="query")
+            except ValueError as exc:
+                self._json_error(400, str(exc))
+                return
+            self._json_state_result(self._device_state().get_device_lane_ports(di))
             return
         if path == "/api/firmware/status":
             params = self._query_params()
@@ -939,6 +953,30 @@ class Handler(BaseHTTPRequestHandler):
                     error_code=result.get("error_code"),
                 )
 
+        elif path == "/api/device_lane_ports":
+            self._sync_artnet_source()
+            di = data.get("device", -1)
+            try:
+                di = int(di)
+                port_show = self._parse_int_field(data.get("port_show"), "port_show")
+                port_setup = self._parse_int_field(data.get("port_setup"), "port_setup")
+                port_watch = self._parse_int_field(data.get("port_watch"), "port_watch")
+            except (TypeError, ValueError) as exc:
+                self._json_error(400, str(exc) or "invalid device or port value")
+                return
+            result = self._device_state().set_device_lane_ports(
+                di, port_show, port_setup, port_watch)
+            if result.get("ok"):
+                self._json_response(result)
+            else:
+                error = result.get("error", "lane port update failed")
+                self._json_error_with_details(
+                    result.get("http_status")
+                    or (400 if "invalid" in error.lower() or "must" in error.lower() else 409),
+                    error,
+                    error_code=result.get("error_code"),
+                )
+
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
             try:
@@ -1288,6 +1326,12 @@ class Handler(BaseHTTPRequestHandler):
                 source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
                 self._device_state().set_artnet_source(source_ip)
                 self._json_response(result)
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
+
+        elif path == "/api/network/lane_ports":
+            try:
+                self._json_response(set_lane_ports(data))
             except NetworkSettingsError as exc:
                 self._json_network_error(exc)
 

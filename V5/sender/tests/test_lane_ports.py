@@ -1,5 +1,7 @@
 """Tests for Show/Setup/Watch lane port advertisement and resolution."""
 
+import os
+import tempfile
 import unittest
 
 from artnet import (
@@ -13,6 +15,7 @@ from artnet import (
     parse_node_capabilities,
     resolve_lane_ports,
 )
+import network_settings
 from primus_protocol import (
     CONFIG_VERSION_V1,
     CONFIG_VERSION_V2,
@@ -150,6 +153,83 @@ class GetConfigLanePortsTests(unittest.TestCase):
         self.assertEqual(unpacked.config_version, CONFIG_VERSION_V1)
         self.assertEqual(unpacked.port_show, 6454)
         self.assertEqual(unpacked.port_setup, 6457)
+
+
+class NetworkSettingsLanePortTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._prior_env = os.environ.get("PRIMUSV3_DATA_DIR")
+        os.environ["PRIMUSV3_DATA_DIR"] = self._tmpdir.name
+
+    def tearDown(self):
+        if self._prior_env is None:
+            os.environ.pop("PRIMUSV3_DATA_DIR", None)
+        else:
+            os.environ["PRIMUSV3_DATA_DIR"] = self._prior_env
+        self._tmpdir.cleanup()
+
+    def test_get_lane_ports_defaults(self):
+        ports = network_settings.get_lane_ports()
+        self.assertEqual(ports, {
+            "port_show_primus": 6454,
+            "port_show_radius": 6456,
+            "port_setup": 6457,
+            "port_watch": 6455,
+        })
+
+    def test_set_lane_ports_round_trip(self):
+        saved = network_settings.set_lane_ports({
+            "port_show_primus": 6454,
+            "port_show_radius": 6460,
+            "port_setup": 6461,
+            "port_watch": 6462,
+        })
+        self.assertEqual(saved["port_show_radius"], 6460)
+        self.assertEqual(network_settings.get_lane_ports(), saved)
+
+    def test_set_lane_ports_rejects_missing_field(self):
+        with self.assertRaises(network_settings.NetworkSettingsError):
+            network_settings.set_lane_ports({
+                "port_show_primus": 6454,
+                "port_show_radius": 6456,
+                "port_setup": 6457,
+            })
+
+    def test_set_lane_ports_rejects_below_min(self):
+        with self.assertRaises(network_settings.NetworkSettingsError):
+            network_settings.set_lane_ports({
+                "port_show_primus": 80,
+                "port_show_radius": 6456,
+                "port_setup": 6457,
+                "port_watch": 6455,
+            })
+
+    def test_set_lane_ports_rejects_setup_colliding_with_show(self):
+        with self.assertRaises(network_settings.NetworkSettingsError):
+            network_settings.set_lane_ports({
+                "port_show_primus": 6454,
+                "port_show_radius": 6456,
+                "port_setup": 6454,
+                "port_watch": 6455,
+            })
+
+    def test_set_lane_ports_rejects_setup_colliding_with_watch(self):
+        with self.assertRaises(network_settings.NetworkSettingsError):
+            network_settings.set_lane_ports({
+                "port_show_primus": 6454,
+                "port_show_radius": 6456,
+                "port_setup": 6455,
+                "port_watch": 6455,
+            })
+
+    def test_set_lane_ports_allows_show_primus_and_show_radius_equal(self):
+        saved = network_settings.set_lane_ports({
+            "port_show_primus": 6454,
+            "port_show_radius": 6454,
+            "port_setup": 6457,
+            "port_watch": 6455,
+        })
+        self.assertEqual(saved["port_show_primus"], saved["port_show_radius"])
 
 
 if __name__ == "__main__":

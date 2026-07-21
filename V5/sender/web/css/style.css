@@ -4632,6 +4632,12 @@ input[type="color"] {
     border-top: 1px solid var(--border);
 }
 
+.dm-row-lanes {
+    flex-wrap: wrap;
+    padding: 4px 0;
+    border-top: 1px solid var(--border);
+}
+
 .dm-outputs-table {
     padding-top: 4px;
 }

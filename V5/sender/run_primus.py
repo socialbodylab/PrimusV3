@@ -26,7 +26,7 @@ from mixer import load_look, compute_look_frame
 from effects import blend_pixels
 from osc_control import OscControlServer
 from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path, sender_product
-from network_settings import get_artnet_interface
+from network_settings import get_artnet_interface, get_lane_ports
 from central_launcher import (
     CentralPortInUseByCentral,
     frontend_path_for,
@@ -147,24 +147,32 @@ def _kill_existing():
             except ProcessLookupError:
                 break
     if killed:
-        _wait_for_telemetry_port()
+        _wait_for_telemetry_port(_watch_port())
 
 
-def _wait_for_telemetry_port(timeout=3.0):
-    """Wait until UDP 6455 is free for PrimusTelemetryListener."""
+def _watch_port():
+    try:
+        return int(get_lane_ports().get("port_watch") or FPS_LISTEN_PORT)
+    except Exception:
+        return FPS_LISTEN_PORT
+
+
+def _wait_for_telemetry_port(port=None, timeout=3.0):
+    """Wait until the Watch-lane UDP port is free for PrimusTelemetryListener."""
     import socket
+    port = int(port or FPS_LISTEN_PORT)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            probe.bind(("0.0.0.0", FPS_LISTEN_PORT))
+            probe.bind(("0.0.0.0", port))
             probe.close()
             return True
         except OSError:
             probe.close()
             time.sleep(0.1)
-    print(f"WARNING: telemetry port {FPS_LISTEN_PORT} still busy after replacing prior sender.")
+    print(f"WARNING: telemetry port {port} still busy after replacing prior sender.")
     return False
 
 
@@ -467,7 +475,7 @@ def main():
     if args.replace:
         _kill_existing()
 
-    fps_listener = PrimusTelemetryListener()
+    fps_listener = PrimusTelemetryListener(listen_port=_watch_port())
     fps_thread = threading.Thread(target=fps_listener.run, daemon=True)
     fps_thread.start()
 

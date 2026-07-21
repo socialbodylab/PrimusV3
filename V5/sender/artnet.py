@@ -332,16 +332,17 @@ class PrimusTelemetryListener:
     _PST_REBOOT_CONFIRM_MAX_GAP = 64
     _PST_REBOOT_GENERATION_GUARD_SECONDS = 30.0
 
-    def __init__(self):
+    def __init__(self, listen_port=None):
         self.lock = threading.Lock()
         self.data = {}
         self.running = True
+        self.listen_port = int(listen_port) if listen_port else FPS_LISTEN_PORT
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         bound = False
         for attempt in range(10):
             try:
-                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                self._sock.bind(("0.0.0.0", self.listen_port))
                 bound = True
                 break
             except OSError:
@@ -351,7 +352,7 @@ class PrimusTelemetryListener:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                self._sock.bind(("0.0.0.0", self.listen_port))
                 bound = True
             except OSError:
                 pass
@@ -359,7 +360,7 @@ class PrimusTelemetryListener:
             self._sock.bind(("0.0.0.0", 0))
             fallback_port = self._sock.getsockname()[1]
             print(
-                f"ERROR: telemetry port {FPS_LISTEN_PORT} in use "
+                f"ERROR: telemetry port {self.listen_port} in use "
                 f"(listening on {fallback_port} instead) — receiver telemetry will not display. "
                 f"Stop other PrimusCentral/RadiusCentral instances."
             )
@@ -811,23 +812,24 @@ class FpsListener(PrimusTelemetryListener):
 class RadiusTelemetryListener:
     """Listens on UDP 6455 for PTR track-name telemetry from Radius nodes."""
 
-    def __init__(self):
+    def __init__(self, listen_port=None):
         self.lock = threading.Lock()
         self.data = {}
         self.running = True
+        self.listen_port = int(listen_port) if listen_port else FPS_LISTEN_PORT
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         bound = False
         for attempt in range(10):
             try:
-                self._sock.bind(("0.0.0.0", FPS_LISTEN_PORT))
+                self._sock.bind(("0.0.0.0", self.listen_port))
                 bound = True
                 break
             except OSError:
                 time.sleep(0.2)
         if not bound:
             self._sock.bind(("0.0.0.0", 0))
-            print(f"WARNING: telemetry port {FPS_LISTEN_PORT} in use — track telemetry may not display.")
+            print(f"WARNING: telemetry port {self.listen_port} in use — track telemetry may not display.")
         self._sock.settimeout(1.0)
 
     def run(self):

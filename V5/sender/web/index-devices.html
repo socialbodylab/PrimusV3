@@ -391,6 +391,43 @@
                             <div class="device-ip-config-note" x-text="$store.conn.networkModeTitle(entry.dev)"></div>
                         </div>
 
+                        <!-- UDP Lanes (Show/Setup/Watch) -->
+                        <div class="dm-row dm-row-lanes" x-show="$store.app.isCardExpanded(entry._index)">
+                            <button class="device-ip-button"
+                                    :class="{ active: $store.conn.lanePortsConfigDevice === entry._index }"
+                                    :disabled="!$store.conn.canConfigureLanePorts(entry.dev) || $store.app.mobileView"
+                                    :title="$store.conn.lanePortsHint(entry.dev)"
+                                    @click="$store.conn.lanePortsConfigDevice === entry._index ? $store.conn.closeLanePortsConfig() : $store.conn.openLanePortsConfig(entry._index)">Lanes <span x-text="$store.conn.devicePortShow(entry.dev) + '/' + $store.conn.devicePortSetup(entry.dev) + '/' + $store.conn.devicePortWatch(entry.dev)"></span></button>
+                            <span class="settings-status-pill settings-pill-warning"
+                                  x-show="$store.conn.lanePortsWarning(entry.dev)"
+                                  :title="$store.conn.lanePortsWarning(entry.dev)"
+                                  x-text="$store.conn.lanePortsWarning(entry.dev)"></span>
+                        </div>
+
+                        <div class="device-ip-config"
+                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index) && $store.conn.lanePortsConfigDevice === entry._index"
+                             x-cloak>
+                            <div class="form-group compact">
+                                <label class="form-label">Show</label>
+                                <input class="form-input form-input-sm" type="number" min="1" max="65535"
+                                       x-model.number="$store.conn.lanePortsShow">
+                            </div>
+                            <div class="form-group compact">
+                                <label class="form-label">Setup</label>
+                                <input class="form-input form-input-sm" type="number" min="1" max="65535"
+                                       x-model.number="$store.conn.lanePortsSetup">
+                            </div>
+                            <div class="form-group compact">
+                                <label class="form-label">Watch</label>
+                                <input class="form-input form-input-sm" type="number" min="1" max="65535"
+                                       x-model.number="$store.conn.lanePortsWatch">
+                            </div>
+                            <div class="btn-group" style="margin-top:4px">
+                                <button class="btn btn-sm btn-primary" @click="$store.conn.setDeviceLanePorts(entry._index)">Set Lane Ports</button>
+                                <button class="btn btn-sm" @click="$store.conn.closeLanePortsConfig()">Cancel</button>
+                            </div>
+                        </div>
+
                         <!-- Receive Mode -->
                         <div class="dm-row dm-row-receive"
                              x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
@@ -1183,6 +1220,36 @@
                         <button class="btn" @click="useCurrentWifiAsController()" :disabled="!currentWifi?.ssid || applying">Use Current WiFi</button>
                         <button class="btn btn-danger" @click="clearControllerWifi()" x-show="controllerConnection.ssid" :disabled="applying">Clear</button>
                     </div>
+                </div>
+            </details>
+
+            <details class="output-section settings-section settings-lane-ports-section">
+                <summary class="settings-advanced-summary">
+                    <span class="output-name">UDP Lanes (Art-Net Ports)</span>
+                    <span class="settings-status-pill" :class="{ 'settings-pill-warning': !!lanePortsValidationMessage, 'settings-pill-muted': lanePortsLoading }" x-text="lanePortsLoading ? 'Loading...' : (lanePortsValidationMessage || 'OK')"></span>
+                </summary>
+                <div class="settings-current-meta">Default Show/Setup/Watch UDP ports advertised to newly configured receivers. Changing these does not move already-configured devices &mdash; use each device's own lane port fields for that.</div>
+                <div class="firmware-form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Show (Primus)</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_show_primus" :disabled="lanePortsSaving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Show (Radius)</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_show_radius" :disabled="lanePortsSaving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Setup</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_setup" :disabled="lanePortsSaving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Watch</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_watch" :disabled="lanePortsSaving">
+                    </div>
+                </div>
+                <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!lanePortsValidationMessage }" x-text="lanePortsValidationMessage || 'Setup must differ from both Show ports and from Watch.'"></div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-primary" @click="saveLanePorts()" :disabled="!canSaveLanePorts" x-text="lanePortsSaving ? 'Saving...' : 'Save UDP Lane Defaults'"></button>
                 </div>
             </details>
         </div>

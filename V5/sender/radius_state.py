@@ -12,8 +12,11 @@ from artnet import (
     resolve_lane_ports,
     device_show_port,
     device_setup_port,
+    FPS_LISTEN_PORT,
     send_art_address,
     send_ip_config,
+    send_lane_ports,
+    set_primus_lane_ports,
     send_show_info,
     sync_show_info_to_device,
     sync_device_name_to_receiver,
@@ -569,6 +572,72 @@ class RadiusState:
             dev["subnet"] = None
             _save_devices(self.devices)
             return True
+
+    def get_device_lane_ports(self, di):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            return {
+                "ok": True,
+                "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+                "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+                "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
+                "ftp_port": dev.get("ftp_port"),
+                "is_radius": bool(dev.get("is_radius")),
+            }
+
+    def set_device_lane_ports(self, di, port_show, port_setup, port_watch):
+        try:
+            port_show = int(port_show)
+            port_setup = int(port_setup)
+            port_watch = int(port_watch)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "ports must be integers", "http_status": 400}
+        for name, value in (
+            ("port_show", port_show), ("port_setup", port_setup), ("port_watch", port_watch)
+        ):
+            if value < 1 or value > 65535:
+                return {"ok": False, "error": f"{name} must be 1-65535", "http_status": 400}
+        if port_setup in (port_show, port_watch):
+            return {
+                "ok": False,
+                "error": "port_setup must differ from port_show and port_watch",
+                "http_status": 400,
+            }
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            try:
+                if dev.get("is_radius"):
+                    send_lane_ports(
+                        dev["ip"], port_show, port_setup, port_watch,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
+                    )
+                else:
+                    set_primus_lane_ports(
+                        dev["ip"], port_show, port_setup, port_watch,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
+                    )
+            except Exception as error:
+                dev["transport_error"] = str(error)
+                return {"ok": False, "error": dev.get("transport_error")}
+            dev["port_show"] = port_show
+            dev["port_setup"] = port_setup
+            dev["port_watch"] = port_watch
+            caps = _normalize_capabilities(dev.get("capabilities"))
+            caps["port_show"] = port_show
+            caps["port_setup"] = port_setup
+            caps["port_watch"] = port_watch
+            dev["capabilities"] = caps
+            _save_devices(self.devices)
+            return {
+                "ok": True,
+                "port_show": port_show,
+                "port_setup": port_setup,
+                "port_watch": port_watch,
+            }
 
     def device_capability_status(self, di, capability):
         with self.lock:
