@@ -11,6 +11,11 @@ did regress when the code was ported from V3.6 to V4):
 - db64bed: _audioLooping must be set AFTER audioPlay(), which resets it
 - a51b8f9 + July 2026: the AudioStatus packet carries a 64-char filename
   and must be transmitted at full length (write(buf, 46) truncated names)
+- 6bb5750: no setVolume()/sciWrite() after sineTest() at runtime — sciWrite
+  does not gate on DREQ, so a write while DREQ is low corrupts SCI state and
+  silences the chip until power cycle
+- 695f078: no bare softReset() / no setVolume(254) analog-powerdown writes;
+  every reset() and hard mute must invalidate the volume cache
 """
 
 import os
@@ -198,6 +203,29 @@ class AudioHeaderContracts(unittest.TestCase):
         self.assertIn("VS1053_MAX_SAFE_ATTENUATION", body,
                       "_applyVolume must clamp — volume 0 maps to 254 "
                       "otherwise, entering analog powerdown from the UI")
+
+    def test_no_sci_write_after_sinetest_in_test_tone(self):
+        # sciWrite() in the Adafruit VS1053 library does NOT gate on DREQ.
+        # After sineTest() the chip is leaving SM_TEST with DREQ still low /
+        # transitioning, so any setVolume()/sciWrite() issued before DREQ goes
+        # high can be dropped or corrupt SCI state — silencing ALL later
+        # playback until a power cycle (the original test-tone regression).
+        # The runtime test tone must end on sineTest() with no volume/SCI write
+        # after it. audioBootTest() may write volume BEFORE sineTest() (safe:
+        # sineTest's internal reset() overrides it), which is why this pins the
+        # runtime path only. If a future version must set volume here, it has
+        # to poll MM_DREQ_PIN high first — and update this test to require that
+        # guard, rather than deleting it.
+        body = function_body(self.audio, "void audioTestTone(")
+        self.assertIn("sineTest(", body)
+        after = body[body.index("sineTest("):]
+        for hazard in ("setVolume(", "sciWrite(", "_applyVolume(",
+                       "audioSetVolume(", "_muteChip("):
+            self.assertNotIn(
+                hazard, after,
+                f"{hazard} after sineTest() in audioTestTone() — DREQ may be "
+                f"low; this SCI write can silence the chip until power cycle",
+            )
 
 
 if __name__ == "__main__":
