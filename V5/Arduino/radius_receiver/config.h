@@ -73,7 +73,7 @@
 #define DEFAULT_GATEWAY        192, 168, 1, 1
 #define DEFAULT_SUBNET         255, 255, 255, 0
 
-#define ARTNET_PORT              6454
+#define ARTNET_PORT              6456   // Radius on its own port — keeps LED/3rd-party 6454 traffic off Radius nodes
 #define ARTNET_OPCODE_POLL       0x2000
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000

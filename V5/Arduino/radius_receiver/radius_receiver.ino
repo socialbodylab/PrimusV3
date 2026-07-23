@@ -550,7 +550,7 @@ void handleArtFtpCmd(uint8_t* data, uint16_t len) {
 
 void sendAudioStatus(uint8_t status, const char* filename) {
   if (!senderKnown || !wifiConnected) return;
-  uint8_t buf[46];
+  uint8_t buf[78];
   memset(buf, 0, sizeof(buf));
   memcpy(buf, ARTNET_MAGIC, 8);
   buf[8]  = ARTNET_OPCODE_AUDIO_STATUS & 0xFF;
@@ -558,9 +558,9 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   buf[10] = 0x00;
   buf[11] = 0x0E;
   buf[12] = status;
-  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 32);
+  if (filename && filename[0]) strncpy((char*)&buf[13], filename, 64);
   udpFps.beginPacket(senderIP, AUDIO_REPORT_PORT);
-  udpFps.write(buf, 46);
+  udpFps.write(buf, sizeof(buf));  // full 78 bytes — write(buf,46) truncated names at 33 chars
   udpFps.endPacket();
 }
 
@@ -853,7 +853,9 @@ void loop() {
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1 = false; handleD1Press(); }
 
-  telemetryHeartbeat();
+  // Telemetry is event-driven now: 0x8302 ArtAudioStatus fires on every playback
+  // state change (see _notifyTrack in audio.h). The periodic PTR heartbeat poll is
+  // removed; sendTrackTelemetry() is retained as a fallback ability but not polled.
 
   unsigned long now = millis();
   if (now - lastFpsTime >= FPS_INTERVAL) {

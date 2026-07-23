@@ -7,8 +7,9 @@
 
 #include "config.h"
 
-void sendTrackTelemetry(uint8_t state, const char* filename);
+void sendTrackTelemetry(uint8_t state, const char* filename);  // PTR — retained (fallback)
 void sendFpsTelemetry(uint16_t pktRate);
+void sendAudioStatus(uint8_t status, const char* filename);    // 0x8302 — primary, event-driven
 void telemetryHeartbeat();
 
 #endif // TELEMETRY_H

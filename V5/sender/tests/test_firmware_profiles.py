@@ -60,7 +60,7 @@ class FirmwareProfileTests(unittest.TestCase):
                 "profile": "radius_v2",
                 "scope": "mixed",
             })
-            self.assertIn("radius_upload.sh", cmd.command[1])
+            self.assertIn("upload.sh", cmd.command[1])
             self.assertIn("radius_v2", cmd.command)
         finally:
             os.environ.pop("PRIMUSV3_SENDER_PRODUCT", None)
@@ -79,15 +79,15 @@ class FirmwareProfileTests(unittest.TestCase):
         radius = firmware.upload_script_path("radius_v1")
         radius_v2 = firmware.upload_script_path("radius_v2")
         self.assertTrue(primus.endswith(os.path.join("Arduino", "upload.sh")))
-        self.assertTrue(radius.endswith(os.path.join("Arduino", "radius_upload.sh")))
-        self.assertTrue(radius_v2.endswith(os.path.join("Arduino", "radius_upload.sh")))
+        self.assertTrue(radius.endswith(os.path.join("Arduino", "upload.sh")))
+        self.assertTrue(radius_v2.endswith(os.path.join("Arduino", "upload.sh")))
         self.assertTrue(os.path.isfile(primus))
         self.assertTrue(os.path.isfile(radius))
 
     def test_build_command_uses_profile_script(self):
         manager = firmware.FirmwareJobManager()
         cmd_radius = manager.build_command({"action": "compile", "profile": "radius_v1"})
-        self.assertIn("radius_upload.sh", cmd_radius.command[1])
+        self.assertIn("upload.sh", cmd_radius.command[1])
 
     def test_primus_profile_rejected_on_radius_product(self):
         manager = firmware.FirmwareJobManager()
@@ -187,7 +187,7 @@ class FirmwareProfileTests(unittest.TestCase):
                 "character_name": "Narrator",
                 "performer_name": "Jordan",
             })
-            self.assertIn("radius_upload.sh", cmd.command[1])
+            self.assertIn("upload.sh", cmd.command[1])
             self.assertIn("--character-name", cmd.command)
             self.assertIn("Narrator", cmd.command)
             self.assertIn("--performer-name", cmd.command)

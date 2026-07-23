@@ -28,6 +28,7 @@ from artnet import (
     ftp_delete,
     ftp_mkdir,
     discover_artnet_nodes,
+    RADIUS_ARTNET_PORT,
 )
 from paths import state_file
 import show_info_store
@@ -194,6 +195,7 @@ class RadiusState:
             known_ips=known_ips,
             timeout=2.0,
             interface=self._discovery_interface(),
+            port=RADIUS_ARTNET_PORT,
         )
         node_map = {n["ip"]: n for n in nodes}
         nodes_by_name = {}
@@ -279,6 +281,7 @@ class RadiusState:
             known_ips=known_ips,
             timeout=3.0,
             interface=interface,
+            port=RADIUS_ARTNET_PORT,
         )
         online_ips = {node.get("ip") for node in nodes if node.get("ip")}
         self.refresh_devices_from_nodes(nodes)

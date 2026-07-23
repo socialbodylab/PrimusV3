@@ -140,6 +140,14 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -rv1)
+      BOARD_PROFILE="rv1"
+      shift
+      ;;
+    -rv2|-radius)
+      BOARD_PROFILE="rv2"
+      shift
+      ;;
     -v1)
       BOARD_PROFILE="v1"
       shift
@@ -154,7 +162,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --board)
       if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        err "--board requires a value: v1, v2, or v3"
+        err "--board requires a value: v1, v2, v3, rv1, or rv2"
         exit 1
       fi
       BOARD_PROFILE="${2:-}"
@@ -323,6 +331,35 @@ if [[ "$ALL_PORTS" == true && ${#EXPLICIT_PORTS[@]} -gt 0 ]]; then
 fi
 
 case "$BOARD_PROFILE" in
+  rv1|rv1_huzzah|radius_v1)
+    BOARD_PROFILE="rv1"
+    SKETCH_DIR="$SCRIPT_DIR/radius_receiver"
+    FQBN="esp32:esp32:featheresp32"
+    EXTRA_FLAGS="-DTARGET_BOARD=2 -DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
+    DEFAULT_BAUD=460800
+    REQUIRED_LIBS=(
+      "Adafruit VS1053 Library"
+      "SimpleFTPServer"
+      "ArduinoJson"
+      "NimBLE-Arduino"
+    )
+    ;;
+  rv2|rv2_s3|radius|radius_v2)
+    BOARD_PROFILE="rv2"
+    SKETCH_DIR="$SCRIPT_DIR/radius_receiver"
+    FQBN="esp32:esp32:adafruit_feather_esp32s3_reversetft"
+    EXTRA_FLAGS="-DTARGET_BOARD=1 -DDEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32=6 -DDEFAULT_STORAGE_TYPE_ESP32=5"
+    DEFAULT_BAUD=921600
+    REQUIRED_LIBS=(
+      "Adafruit ST7735 and ST7789 Library"
+      "Adafruit GFX Library"
+      "Adafruit NeoPixel"
+      "Adafruit VS1053 Library"
+      "SimpleFTPServer"
+      "ArduinoJson"
+      "NimBLE-Arduino"
+    )
+    ;;
   v1|v1_huzzah)
     BOARD_PROFILE="v1"
     FQBN="esp32:esp32:featheresp32"

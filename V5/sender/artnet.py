@@ -59,8 +59,10 @@ ARTNET_OPCODE_IP_CONFIG = 0x8200
 ARTNET_OPCODE_SHOW_INFO = 0x8210
 ARTNET_OPCODE_AUDIO_CMD = 0x8300
 ARTNET_OPCODE_FTP_CMD = 0x8301
+ARTNET_OPCODE_AUDIO_STATUS = 0x8302
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
+RADIUS_ARTNET_PORT = 6456  # Radius on its own Art-Net port — keeps LED/3rd-party 6454 traffic off Radius nodes
 _artnet_query_lock = threading.RLock()
 NODE_CAPS_PREFIX = "PV3CAP1"
 NODE_CAPS_PREFIX_RADIUS = "PVRAD1"
@@ -791,8 +793,36 @@ class FpsListener(PrimusTelemetryListener):
     """Backward-compatible alias for Primus telemetry listener."""
 
 
+def parse_audio_status_packet(raw):
+    """Parse an ArtAudioStatus (0x8302) packet. Returns dict or None.
+
+    Layout: Art-Net header (8) + opcode LE (2) + protocol version (2) +
+    status byte (1) + null-terminated ASCII filename (up to 64 bytes).
+    """
+    if len(raw) < 13 or raw[:8] != ARTNET_HEADER:
+        return None
+    opcode = struct.unpack("<H", raw[8:10])[0]
+    if opcode != ARTNET_OPCODE_AUDIO_STATUS:
+        return None
+    name = raw[13:77].split(b'\x00')[0].decode("ascii", errors="replace")
+    return {"playback_state": raw[12], "current_track": name}
+
+
+def parse_track_packet(raw):
+    """Parse a legacy PTR track telemetry packet (fallback). Returns dict or None."""
+    if len(raw) < 5 or raw[:3] != TRACK_MAGIC:
+        return None
+    name_len = raw[4]
+    name = raw[5:5 + name_len].decode("utf-8", errors="replace") if name_len else ""
+    return {"playback_state": raw[3], "current_track": name}
+
+
 class RadiusTelemetryListener:
-    """Listens on UDP 6455 for PTR track-name telemetry from Radius nodes."""
+    """Listens on UDP 6455 for Radius telemetry: 0x8302 ArtAudioStatus (primary,
+    event-driven), legacy PTR track telemetry (fallback), PBT battery, and PFP
+    packet rate. Merges keys so a status update never wipes battery/FPS. No
+    staleness window — playback state is event-driven and persists until the
+    next state-change packet (the periodic PTR heartbeat was removed)."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -819,16 +849,27 @@ class RadiusTelemetryListener:
                 raw, addr = self._sock.recvfrom(256)
             except socket.timeout:
                 continue
-            if len(raw) >= 5 and raw[:3] == TRACK_MAGIC:
-                state = raw[3]
-                name_len = raw[4]
-                name = raw[5:5 + name_len].decode("utf-8", errors="replace") if name_len else ""
+            status = parse_audio_status_packet(raw) or parse_track_packet(raw)
+            if status is not None:
                 with self.lock:
-                    self.data[addr[0]] = {
-                        "playback_state": state,
-                        "current_track": name,
-                        "ts": time.monotonic(),
-                    }
+                    entry = self.data.setdefault(addr[0], {})
+                    entry.update(status)
+                    entry["ts"] = time.monotonic()
+                state = status["playback_state"]
+                name = status["current_track"]
+                state_str = "playing" if state == 1 else ("paused" if state == 2 else "stopped")
+                file_str = f" \"{name}\"" if name else ""
+                netlog.log("IN", "audio_status", f"AudioStatus {state_str}{file_str} ← {addr[0]}")
+                continue
+            if len(raw) >= 13 and raw[:8] == ARTNET_HEADER:
+                continue  # other Art-Net traffic on the telemetry port — ignore
+            if len(raw) >= 9 and raw[:3] == BATTERY_MAGIC:
+                parsed = parse_pbt_packet(raw)
+                if parsed:
+                    with self.lock:
+                        entry = self.data.setdefault(addr[0], {})
+                        entry.update(parsed)
+                        entry["ts"] = time.monotonic()
                 continue
             if len(raw) >= 7 and raw[:3] == FPS_MAGIC:
                 fps = (raw[3] << 8) | raw[4]
@@ -841,7 +882,7 @@ class RadiusTelemetryListener:
     def get(self, ip):
         with self.lock:
             entry = self.data.get(ip)
-            if entry and (time.monotonic() - entry.get("ts", 0)) < 5.0:
+            if entry:
                 return dict(entry)
         return None
 
@@ -897,9 +938,9 @@ def _get_all_broadcast_addresses():
     return addrs
 
 
-def _discovery_bind_addr(interface=None):
+def _discovery_bind_addr(interface=None, port=ARTNET_PORT):
     source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
-    return (source_ip or "", ARTNET_PORT)
+    return (source_ip or "", port)
 
 
 def _discovery_destinations(known_ips=None, interface=None):
@@ -923,16 +964,17 @@ def _discovery_destinations(known_ips=None, interface=None):
     return destinations
 
 
-def discover_artnet_nodes(known_ips=None, timeout=3.5, interface=None):
+def discover_artnet_nodes(known_ips=None, timeout=3.5, interface=None, port=ARTNET_PORT):
     with _artnet_query_lock:
         return _discover_artnet_nodes_unlocked(
             known_ips=known_ips,
             timeout=timeout,
             interface=interface,
+            port=port,
         )
 
 
-def _discover_artnet_nodes_unlocked(known_ips=None, timeout=3.5, interface=None):
+def _discover_artnet_nodes_unlocked(known_ips=None, timeout=3.5, interface=None, port=ARTNET_PORT):
     """Send ArtPoll and collect ArtPollReply responses.
 
     known_ips: list of IP strings to unicast to in addition to broadcast.
@@ -944,9 +986,9 @@ def _discover_artnet_nodes_unlocked(known_ips=None, timeout=3.5, interface=None)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(0.25)
         try:
-            sock.bind(_discovery_bind_addr(interface))
+            sock.bind(_discovery_bind_addr(interface, port))
         except OSError:
-            sock.bind(("", ARTNET_PORT))
+            sock.bind(("", port))
 
         poll = bytearray()
         poll += ARTNET_HEADER
@@ -957,7 +999,7 @@ def _discover_artnet_nodes_unlocked(known_ips=None, timeout=3.5, interface=None)
         destinations = _discovery_destinations(known_ips, interface)
         for dest in destinations:
             try:
-                sock.sendto(bytes(poll), (dest, ARTNET_PORT))
+                sock.sendto(bytes(poll), (dest, port))
             except OSError:
                 pass
 
@@ -1442,7 +1484,7 @@ def _udp_route_retryable(error):
     )
 
 
-def _send_udp_packet(ip, packet, source_ip=None):
+def _send_udp_packet(ip, packet, source_ip=None, port=ARTNET_PORT):
     bind_attempts = [True, False] if source_ip else [False]
     last_error = None
     for bind_source in bind_attempts:
@@ -1456,7 +1498,7 @@ def _send_udp_packet(ip, packet, source_ip=None):
                 except OSError:
                     continue
             try:
-                sock.sendto(bytes(packet), (ip, ARTNET_PORT))
+                sock.sendto(bytes(packet), (ip, port))
                 return
             except OSError as exc:
                 last_error = exc
@@ -2227,7 +2269,7 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None)
     pkt[12] = cmd & 0xFF
     pkt[13] = max(0, min(100, volume)) & 0xFF
     pkt[14:14 + len(name_bytes)] = name_bytes
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=RADIUS_ARTNET_PORT)
     cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
     dur_str = f" [{duration}s]" if duration else ""
     file_str = f" \"{filename}\"" if filename else ""
@@ -2245,7 +2287,7 @@ def send_ftp_cmd(ip, start, source_ip=None):
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_FTP_CMD)
     struct.pack_into(">H", pkt, 10, ARTNET_VERSION)
     pkt[12] = 1 if start else 0
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=RADIUS_ARTNET_PORT)
     netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")
 
 

@@ -47,13 +47,13 @@ FIRMWARE_PROFILES = {
     },
     "radius_v1": {
         "family": "radius",
-        "script": "radius_upload.sh",
+        "script": "upload.sh",
         "label": "Radius V1",
         "detail": "Feather HUZZAH32 + Music Maker FeatherWing",
     },
     "radius_v2": {
         "family": "radius",
-        "script": "radius_upload.sh",
+        "script": "upload.sh",
         "label": "Radius V2",
         "detail": "ESP32-S3 Reverse TFT Feather + Music Maker FeatherWing",
     },
