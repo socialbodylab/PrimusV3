@@ -1587,7 +1587,7 @@ def send_receive_config(ip, receive_mode, base_universe, source_ip=None):
 # ======================================================================
 
 
-def send_art_address(ip, short_name, source_ip=None):
+def send_art_address(ip, short_name, source_ip=None, port=ARTNET_PORT):
     pkt = bytearray(107)
     pkt[0:8] = ARTNET_HEADER
     struct.pack_into("<H", pkt, 8, ARTNET_OPCODE_ADDRESS)
@@ -1600,14 +1600,14 @@ def send_art_address(ip, short_name, source_ip=None):
         pkt[i] = 0x7F
     pkt[104] = 0x7F
     pkt[106] = 0x00
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
 
 
 # ======================================================================
 #  ART-NET IP CONFIG — ArtIPConfig (opcode 0x8200)
 # ======================================================================
 
-def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None):
+def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_ip=None, port=ARTNET_PORT):
     """Send ArtIPConfig packet.
     mode: 0 = DHCP, 1 = static.
     static_ip/gateway/subnet: dotted-quad strings (required when mode=1).
@@ -1626,7 +1626,7 @@ def send_ip_config(ip, mode, static_ip=None, gateway=None, subnet=None, source_i
             pkt[21 + i] = octet
     elif mode == 1:
         raise ValueError("static IP mode requires ip, gateway, and subnet")
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
 
 
 # ======================================================================
@@ -1673,13 +1673,13 @@ def parse_show_info_packet(raw):
     }
 
 
-def send_show_info(ip, character_name="", performer_name="", source_ip=None):
+def send_show_info(ip, character_name="", performer_name="", source_ip=None, port=ARTNET_PORT):
     pkt = build_show_info_packet(
         SHOW_INFO_MODE_WRITE,
         character_name=character_name,
         performer_name=performer_name,
     )
-    _send_udp_packet(ip, pkt, source_ip=source_ip)
+    _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
 
 
 def _normalize_show_info_compare(value):
@@ -1692,6 +1692,7 @@ def sync_show_info_to_device(
     performer_name="",
     source_ip=None,
     timeout=0.5,
+    port=ARTNET_PORT,
 ):
     """Write show info and verify the receiver stored the expected values."""
     send_show_info(
@@ -1699,8 +1700,9 @@ def sync_show_info_to_device(
         character_name=character_name,
         performer_name=performer_name,
         source_ip=source_ip,
+        port=port,
     )
-    result = query_show_info(ip, timeout=timeout, source_ip=source_ip)
+    result = query_show_info(ip, timeout=timeout, source_ip=source_ip, port=port)
     if not result:
         return False, "receiver did not respond to show info read"
     expected_char = _normalize_show_info_compare(character_name)
@@ -1712,7 +1714,7 @@ def sync_show_info_to_device(
     return True, ""
 
 
-def _bind_artnet_query_socket(source_ip=None):
+def _bind_artnet_query_socket(source_ip=None, port=ARTNET_PORT):
     """Bind a UDP socket for Art-Net request/response pairs.
 
     Receivers reply to UDP 6454 (controller port), not the ephemeral source port.
@@ -1721,8 +1723,8 @@ def _bind_artnet_query_socket(source_ip=None):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     bind_addrs = []
     if source_ip:
-        bind_addrs.append((source_ip, ARTNET_PORT))
-    bind_addrs.append(("", ARTNET_PORT))
+        bind_addrs.append((source_ip, port))
+    bind_addrs.append(("", port))
     for addr in bind_addrs:
         try:
             sock.bind(addr)
@@ -2155,15 +2157,15 @@ def unlock_primus_boot_window(
     )
 
 
-def query_node_short_name(ip, timeout=0.5, source_ip=None):
+def query_node_short_name(ip, timeout=0.5, source_ip=None, port=ARTNET_PORT):
     with _artnet_query_lock:
         return _query_node_short_name_unlocked(
-            ip, timeout=timeout, source_ip=source_ip)
+            ip, timeout=timeout, source_ip=source_ip, port=port)
 
 
-def _query_node_short_name_unlocked(ip, timeout=0.5, source_ip=None):
+def _query_node_short_name_unlocked(ip, timeout=0.5, source_ip=None, port=ARTNET_PORT):
     """Read the short name advertised by a single receiver."""
-    sock = _bind_artnet_query_socket(source_ip=source_ip)
+    sock = _bind_artnet_query_socket(source_ip=source_ip, port=port)
     recv_timeout = min(0.25, max(0.05, timeout))
     sock.settimeout(recv_timeout)
     try:
@@ -2172,7 +2174,7 @@ def _query_node_short_name_unlocked(ip, timeout=0.5, source_ip=None):
         poll += struct.pack("<H", ARTNET_OPCODE_POLL)
         poll += struct.pack(">H", ARTNET_VERSION)
         poll += bytes([0x00, 0x00])
-        sock.sendto(bytes(poll), (ip, ARTNET_PORT))
+        sock.sendto(bytes(poll), (ip, port))
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -2193,9 +2195,9 @@ def _query_node_short_name_unlocked(ip, timeout=0.5, source_ip=None):
     return None
 
 
-def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5):
+def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5, port=ARTNET_PORT):
     """Send ArtAddress and verify the receiver advertised the new short name."""
-    send_art_address(ip, short_name, source_ip=source_ip)
+    send_art_address(ip, short_name, source_ip=source_ip, port=port)
     expected = str(short_name or "").strip()[:17]
     # Radius nodes may still be finishing NVS/display updates when the first
     # ArtPollReply arrives; retry briefly before reporting failure.
@@ -2209,6 +2211,7 @@ def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5):
             ip,
             timeout=min(0.5, remaining),
             source_ip=source_ip,
+            port=port,
         )
         if actual and actual.strip()[:17] == expected:
             return True, ""
@@ -2216,27 +2219,27 @@ def sync_device_name_to_receiver(ip, short_name, source_ip=None, timeout=1.5):
     return False, "receiver did not confirm name save"
 
 
-def query_show_info(ip, timeout=0.35, sock=None, source_ip=None):
+def query_show_info(ip, timeout=0.35, sock=None, source_ip=None, port=ARTNET_PORT):
     if sock is not None:
         return _query_show_info_unlocked(
-            ip, timeout=timeout, sock=sock, source_ip=source_ip)
+            ip, timeout=timeout, sock=sock, source_ip=source_ip, port=port)
     with _artnet_query_lock:
         return _query_show_info_unlocked(
-            ip, timeout=timeout, source_ip=source_ip)
+            ip, timeout=timeout, source_ip=source_ip, port=port)
 
 
-def _query_show_info_unlocked(ip, timeout=0.35, sock=None, source_ip=None):
+def _query_show_info_unlocked(ip, timeout=0.35, sock=None, source_ip=None, port=ARTNET_PORT):
     """Read character/performer strings stored on a receiver."""
     owns_sock = sock is None
     if owns_sock:
-        sock = _bind_artnet_query_socket(source_ip=source_ip)
+        sock = _bind_artnet_query_socket(source_ip=source_ip, port=port)
         sock.settimeout(max(0.05, timeout))
     else:
         sock.settimeout(max(0.05, timeout))
 
     try:
         pkt = build_show_info_packet(SHOW_INFO_MODE_READ)
-        sock.sendto(pkt, (ip, ARTNET_PORT))
+        sock.sendto(pkt, (ip, port))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:

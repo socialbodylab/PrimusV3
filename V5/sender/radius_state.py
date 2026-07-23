@@ -296,7 +296,8 @@ class RadiusState:
                     continue
                 if device_name:
                     sync_device_name_to_receiver(
-                        ip, device_name, source_ip=self.artnet_source_ip)
+                        ip, device_name, source_ip=self.artnet_source_ip,
+                        port=RADIUS_ARTNET_PORT)
                     dev["name"] = str(device_name)[:17]
                 char = dev.get("character_name", "")
                 perf = dev.get("performer_name", "")
@@ -308,7 +309,8 @@ class RadiusState:
                     dev["performer_name"] = perf
                 if character_name is not None or performer_name is not None:
                     sync_show_info_to_device(
-                        ip, char, perf, source_ip=self.artnet_source_ip)
+                        ip, char, perf, source_ip=self.artnet_source_ip,
+                        port=RADIUS_ARTNET_PORT)
                 show_info_store.persist_device_show_info(
                     show_info_store.radius_state_path(),
                     ip,
@@ -493,7 +495,8 @@ class RadiusState:
                 return {"ok": False, "error": f'{dev["name"]} does not advertise rename support.'}
             try:
                 ok, error = sync_device_name_to_receiver(
-                    dev["ip"], new_name, source_ip=self.artnet_source_ip)
+                    dev["ip"], new_name, source_ip=self.artnet_source_ip,
+                    port=RADIUS_ARTNET_PORT)
             except OSError as error:
                 dev["transport_error"] = str(error)
                 return {"ok": False, "error": dev.get("transport_error")}
@@ -520,6 +523,7 @@ class RadiusState:
             send_ip_config(
                 dev["ip"], 1, static_ip=static_ip, gateway=gateway, subnet=subnet,
                 source_ip=self.artnet_source_ip,
+                port=RADIUS_ARTNET_PORT,
             )
             dev["ip_mode"] = "static"
             dev["static_ip"] = static_ip
@@ -533,7 +537,7 @@ class RadiusState:
             if not (0 <= di < len(self.devices)):
                 return False
             dev = self.devices[di]
-            send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip)
+            send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip, port=RADIUS_ARTNET_PORT)
             dev["ip_mode"] = "dhcp"
             dev["static_ip"] = None
             dev["gateway"] = None
@@ -579,6 +583,7 @@ class RadiusState:
                 dev.get("character_name", ""),
                 dev.get("performer_name", ""),
                 source_ip=self.artnet_source_ip,
+                port=RADIUS_ARTNET_PORT,
             )
         except OSError as error:
             dev["transport_error"] = str(error)
