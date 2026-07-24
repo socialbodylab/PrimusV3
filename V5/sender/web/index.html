@@ -421,6 +421,7 @@
                 <button class="btn btn-sm" @click="exportCueSheet()">↓ Export</button>
                 <button class="btn btn-sm" @click="triggerCueImport()">↑ Import</button>
                 <button class="btn btn-sm btn-primary" @click="startSync()">⟳ Sync All</button>
+                <button class="btn btn-sm" @click="openCueMaps()" title="Push this cue sheet to each device's SD /cues.json">⇪ Cue Maps</button>
             </div>
         </div>
 
@@ -598,6 +599,107 @@
                     </div>
                     <div class="modal-actions">
                         <button class="btn" @click="closeSyncModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Cue Maps modal (push this sheet → each device's SD /cues.json) -->
+        <template x-teleport="body">
+            <div class="modal-overlay" x-show="cueMapsModal" @click.self="closeCueMaps()" style="z-index:200">
+                <div class="modal" style="max-width:520px;width:95vw">
+                    <div class="modal-title">Cue Maps</div>
+
+                    <template x-if="cueMapsLoading">
+                        <p class="text-muted text-sm" style="padding:12px 0">Loading preview…</p>
+                    </template>
+
+                    <template x-if="cueMapsError && !cueMapsLoading">
+                        <p style="color:var(--danger);font-size:13px;padding:8px 0" x-text="cueMapsError"></p>
+                    </template>
+
+                    <template x-if="!cueMapsLoading && cueMapsPreview">
+                        <div style="max-height:60vh;overflow-y:auto">
+                            <p class="text-muted text-sm" style="margin-bottom:12px">
+                                Preview of <code>cues.json</code> that will be written to each device SD card,
+                                derived from this cue sheet. Uploading overwrites any hand-edited cue map
+                                on the device.
+                            </p>
+                            <template x-if="cueMapsPreview.length === 0">
+                                <p class="text-muted text-sm">No Radius devices found.</p>
+                            </template>
+                            <template x-for="dev in cueMapsPreview" :key="dev.ip">
+                                <div style="margin-bottom:10px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+                                    <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-secondary)">
+                                        <span class="text-sm" style="font-weight:500"
+                                              :class="dev.connected ? '' : 'text-muted'"
+                                              x-text="dev.name"></span>
+                                        <span class="device-ip" x-text="dev.ip"></span>
+                                        <span style="flex:1"></span>
+                                        <template x-if="!dev.connected">
+                                            <span class="text-muted" style="font-size:11px">offline — will skip</span>
+                                        </template>
+                                        <template x-if="dev.cue_count > 64">
+                                            <span style="font-size:11px;color:var(--danger)"
+                                                  title="Firmware loads a maximum of 64 cues — entries beyond 64 are dropped on the device">
+                                                over 64-cue limit</span>
+                                        </template>
+                                        <span class="text-muted" style="font-size:11px"
+                                              x-text="dev.cue_count + ' cue' + (dev.cue_count !== 1 ? 's' : '')"></span>
+                                        <template x-if="cueMapsResults && cueMapsResults[dev.ip]">
+                                            <span style="font-size:13px"
+                                                  :style="cueMapsResults[dev.ip].status === 'ok' ? 'color:var(--success,#4caf50)' : 'color:var(--danger)'"
+                                                  :title="cueMapsResults[dev.ip].error || ''"
+                                                  x-text="cueMapsResults[dev.ip].status === 'ok' ? '✓ uploaded' : '✗ failed'"></span>
+                                        </template>
+                                    </div>
+                                    <template x-if="dev.cue_count === 0">
+                                        <p class="text-muted" style="font-size:11px;padding:6px 10px;margin:0">
+                                            No actions assigned for this device on this sheet.
+                                        </p>
+                                    </template>
+                                    <template x-if="dev.cue_count > 0">
+                                        <table style="width:100%;font-size:11px;border-collapse:collapse">
+                                            <thead>
+                                                <tr class="text-muted">
+                                                    <th style="padding:3px 10px;text-align:left;font-weight:500">#</th>
+                                                    <th style="padding:3px 10px;text-align:left;font-weight:500">Cmd</th>
+                                                    <th style="padding:3px 10px;text-align:left;font-weight:500">File</th>
+                                                    <th style="padding:3px 10px;text-align:right;font-weight:500">Vol</th>
+                                                    <th style="padding:3px 10px;text-align:right;font-weight:500">Dur</th>
+                                                    <th style="padding:3px 10px;text-align:right;font-weight:500">Dly</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <template x-for="[num, entry] in Object.entries(dev.cues).sort((a,b) => parseInt(a[0])-parseInt(b[0]))" :key="num">
+                                                    <tr style="border-top:1px solid var(--border)">
+                                                        <td style="padding:4px 10px;font-family:monospace" x-text="num"></td>
+                                                        <td style="padding:4px 10px" x-text="entry.cmd"></td>
+                                                        <td style="padding:4px 10px" class="text-muted" x-text="entry.file || '—'"></td>
+                                                        <td style="padding:4px 10px;text-align:right" class="text-muted"
+                                                            x-text="entry.volume != null ? entry.volume : '—'"></td>
+                                                        <td style="padding:4px 10px;text-align:right" class="text-muted"
+                                                            x-text="entry.duration ? entry.duration + 's' : '—'"></td>
+                                                        <td style="padding:4px 10px;text-align:right" class="text-muted"
+                                                            x-text="entry.delay ? entry.delay + 'ms' : '—'"></td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <div class="modal-actions">
+                        <button class="btn" @click="closeCueMaps()">Close</button>
+                        <template x-if="!cueMapsLoading && cueMapsConnectedCount() > 0">
+                            <button class="btn btn-primary"
+                                    :disabled="cueMapsUploading"
+                                    @click="uploadCueMaps()"
+                                    x-text="cueMapsUploading ? 'Uploading…' : 'Upload to ' + cueMapsConnectedCount() + ' device' + (cueMapsConnectedCount() !== 1 ? 's' : '')"></button>
+                        </template>
                     </div>
                 </div>
             </div>

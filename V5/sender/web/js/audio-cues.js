@@ -24,6 +24,14 @@ document.addEventListener("alpine:init", () => {
         fireResults:   {},
         _fireFadeTimers: {},
 
+        // Cue Maps (push this sheet to each device's on-SD /cues.json)
+        cueMapsModal:      false,
+        cueMapsPreview:    null,   // [{ip, name, connected, cue_count, cues}]
+        cueMapsLoading:    false,
+        cueMapsUploading:  false,
+        cueMapsResults:    null,   // {ip: {status, cue_count, name, error}}
+        cueMapsError:      null,
+
         // Import
         _importInput:  null,
 
@@ -120,6 +128,48 @@ document.addEventListener("alpine:init", () => {
 
         actionIsActive(cueIdx, ip) {
             return this.getAction(cueIdx, ip).cmd !== "none";
+        },
+
+        // ── Cue Maps (push sheet → each device's SD /cues.json) ───────
+
+        async openCueMaps() {
+            this.cueMapsModal     = true;
+            this.cueMapsPreview   = null;
+            this.cueMapsResults   = null;
+            this.cueMapsError     = null;
+            this.cueMapsLoading   = true;
+            this.cueMapsUploading = false;
+            try {
+                const data = await api("POST", "/api/audio_cues/preview_cue_maps");
+                this.cueMapsPreview = data.devices || [];
+            } catch (e) {
+                this.cueMapsError = e.message;
+            } finally {
+                this.cueMapsLoading = false;
+            }
+        },
+
+        closeCueMaps() {
+            this.cueMapsModal = false;
+        },
+
+        async uploadCueMaps() {
+            this.cueMapsUploading = true;
+            this.cueMapsResults   = null;
+            this.cueMapsError     = null;
+            try {
+                const data = await api("POST", "/api/audio_cues/push_cue_maps");
+                this.cueMapsResults = data.results || {};
+                if (data.message) this.cueMapsError = data.message;
+            } catch (e) {
+                this.cueMapsError = e.message;
+            } finally {
+                this.cueMapsUploading = false;
+            }
+        },
+
+        cueMapsConnectedCount() {
+            return (this.cueMapsPreview || []).filter(d => d.connected).length;
         },
 
         // ── Fire ──────────────────────────────────────────────────────
