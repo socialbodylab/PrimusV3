@@ -43,9 +43,15 @@ def function_body(source, signature):
 
 
 class ConfigContracts(unittest.TestCase):
-    # NOTE: rv1-battery and show-info-caps contracts are intentionally
-    # omitted for V5 — battery telemetry is not yet forward-ported, and the
-    # caps-string format (RIHAS) is npuckett's. Re-add them when battery lands.
+    # (show-info-caps opcode/len contract omitted — that caps format is npuckett's.)
+
+    def test_battery_monitor_and_caps_for_rv1(self):
+        # HUZZAH32 (rv1) has the A13 half-divider; the define gates battery.h
+        # and adds B to the capability feature string.
+        config = read_source("config.h")
+        self.assertRegex(config, r"#define\s+BOARD_BATTERY_MONITOR\s+1")
+        self.assertRegex(config, r"#define\s+BOARD_BATTERY_PIN\s+A13")
+        self.assertIn('"RIHASB"', config)  # V1 caps advertise battery (B)
 
     def test_artnet_port_matches_sender(self):
         # Radius nodes listen on their own Art-Net port (off 6454 so LED
@@ -88,9 +94,27 @@ class ReceiverSketchContracts(unittest.TestCase):
         self.assertIn('prefs.putString("characterName"', self.ino)
         self.assertIn('prefs.putString("performerName"', self.ino)
 
+    def test_battery_tick_skips_active_playback(self):
+        # Battery sampling blocks ~16 ms and Radius audio is main-loop fed
+        # (no DREQ interrupt) — sampling mid-track underruns the VS1053.
+        self.assertIn('#include "battery.h"', self.ino)
+        self.assertRegex(
+            self.ino,
+            r"if\s*\(!audioIsPlaying\(\)\)\s*\{\s*\n\s*batteryTelemetryTick")
 
-# NOTE: FtpHeaderContracts (cue-map live reload) is omitted for V5 — the
-# cue-map reload pipeline is not yet forward-ported. Re-add when it lands.
+
+class FtpHeaderContracts(unittest.TestCase):
+    def test_cue_map_reloads_after_ftp_upload(self):
+        # A pushed /cues.json must take effect without a reboot: ftp.h flags a
+        # reload on FTP_UPLOAD_START (the library skips the completion callback
+        # for 0 ms transfers) and the loop runs cuesLoad() once the SD bus is free.
+        ftp = read_source("ftp.h")
+        self.assertIn("setTransferCallback", ftp)
+        self.assertIn("FTP_UPLOAD_START", ftp)
+        self.assertIn("cuesReloadPending = true", ftp)
+        self.assertIn("CUES_RELOAD_QUIET_MS", ftp)
+        ino = read_source("radius_receiver.ino")
+        self.assertIn("ftpCuesReloadDue() && !sdBusy", ino)
 
 
 class AudioHeaderContracts(unittest.TestCase):
