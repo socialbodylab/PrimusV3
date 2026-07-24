@@ -95,6 +95,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
             known_ips=["192.168.1.10"],
             timeout=3.5,
             interface="en0",
+            port=6454,  # primus product → 6454 (radius product → 6456 via _discovery_port)
         )
         state.refresh_devices_from_nodes.assert_called_once()
         self.assertEqual(state.add_device_from_node.call_count, 2)
