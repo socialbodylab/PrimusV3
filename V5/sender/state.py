@@ -44,6 +44,8 @@ from artnet import (
     sync_show_info_to_device,
     sync_device_name_to_receiver,
     send_audio_cmd,
+    ARTNET_PORT,
+    RADIUS_ARTNET_PORT,
     AUDIO_CMD_TEST_TONE,
     ipv4_octets,
 )
@@ -736,6 +738,12 @@ def _management_error_result(error):
             "http_status": 502,
         }
     raise TypeError(f"unsupported management error type: {type(error).__name__}")
+
+
+def _device_port(dev):
+    """Art-Net management port for a device — Radius nodes on 6456, Primus on 6454.
+    Lets DeviceManager (product=primus) manage both device families correctly."""
+    return RADIUS_ARTNET_PORT if (dev or {}).get("is_radius") else ARTNET_PORT
 
 
 def _normalize_show_info_value(value):
@@ -1532,7 +1540,8 @@ class ControllerState:
                     continue
                 if device_name:
                     sync_device_name_to_receiver(
-                        ip, device_name, source_ip=self.artnet_source_ip)
+                        ip, device_name, source_ip=self.artnet_source_ip,
+                        port=_device_port(dev))
                     dev["name"] = str(device_name)[:17]
                 char = dev.get("character_name", "")
                 perf = dev.get("performer_name", "")
@@ -1544,7 +1553,8 @@ class ControllerState:
                     dev["performer_name"] = perf
                 if character_name is not None or performer_name is not None:
                     sync_show_info_to_device(
-                        ip, char, perf, source_ip=self.artnet_source_ip)
+                        ip, char, perf, source_ip=self.artnet_source_ip,
+                        port=_device_port(dev))
                 _persist_device_show_info(
                     ip,
                     dev.get("name"),
@@ -3201,7 +3211,8 @@ class ControllerState:
             else:
                 try:
                     ok, error = sync_device_name_to_receiver(
-                        dev["ip"], new_name, source_ip=self.artnet_source_ip)
+                        dev["ip"], new_name, source_ip=self.artnet_source_ip,
+                        port=_device_port(dev))
                 except OSError as error:
                     if dev.get("is_radius"):
                         dev["transport_error"] = str(error)
@@ -3261,6 +3272,7 @@ class ControllerState:
                 dev.get("character_name", ""),
                 dev.get("performer_name", ""),
                 source_ip=self.artnet_source_ip,
+                port=_device_port(dev),
             )
         except OSError as error:
             self._mark_transport_error_unlocked(dev, error)
@@ -3477,7 +3489,7 @@ class ControllerState:
                     ipv4_octets(static_ip, "ip")
                     ipv4_octets(gateway, "gateway")
                     ipv4_octets(subnet, "subnet")
-                    send_ip_config(dev["ip"], 1, static_ip, gateway, subnet, source_ip=self.artnet_source_ip)
+                    send_ip_config(dev["ip"], 1, static_ip, gateway, subnet, source_ip=self.artnet_source_ip, port=_device_port(dev))
                 except (OSError, ValueError) as error:
                     if dev.get("is_radius"):
                         dev["transport_error"] = str(error)
@@ -3529,7 +3541,7 @@ class ControllerState:
                 device_lock = self._ensure_device_management_lock_unlocked(dev)
             else:
                 try:
-                    send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip)
+                    send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip, port=_device_port(dev))
                 except (OSError, ValueError) as error:
                     if dev.get("is_radius"):
                         dev["transport_error"] = str(error)

@@ -64,7 +64,7 @@ class IsCompatibleNodeTests(unittest.TestCase):
 
 
 class SyncNetworkDevicesTests(unittest.TestCase):
-    @patch("server.discover_artnet_nodes")
+    @patch("server.discover_artnet_nodes_multi")
     @patch("server.sender_product")
     def test_sync_adds_compatible_nodes_and_connects_online(self, mock_product, mock_discover):
         mock_product.return_value = "primus"
@@ -95,7 +95,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
             known_ips=["192.168.1.10"],
             timeout=3.5,
             interface="en0",
-            port=6454,  # primus product → 6454 (radius product → 6456 via _discovery_port)
+            ports=(6454, 6456),  # primus/DeviceManager scans both; radius product → (6456,)
         )
         state.refresh_devices_from_nodes.assert_called_once()
         self.assertEqual(state.add_device_from_node.call_count, 2)
@@ -107,7 +107,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
         self.assertEqual(added_ips, {"192.168.1.10", "192.168.1.11"})
         self.assertEqual(result["skipped"], [])
 
-    @patch("server.discover_artnet_nodes")
+    @patch("server.discover_artnet_nodes_multi")
     @patch("server.sender_product")
     def test_sync_skips_existing_compatible_nodes(self, mock_product, mock_discover):
         mock_product.return_value = "radius"
@@ -132,7 +132,7 @@ class SyncNetworkDevicesTests(unittest.TestCase):
         state.add_device_from_node.assert_called_once()
         self.assertEqual(result["added"], [])
 
-    @patch("server.discover_artnet_nodes")
+    @patch("server.discover_artnet_nodes_multi")
     @patch("server.sender_product")
     def test_sync_never_connects_when_monitor_only(self, mock_product, mock_discover):
         mock_product.return_value = "primus"

@@ -975,6 +975,21 @@ def discover_artnet_nodes(known_ips=None, timeout=3.5, interface=None, port=ARTN
         )
 
 
+def discover_artnet_nodes_multi(known_ips=None, timeout=3.5, interface=None, ports=(ARTNET_PORT,)):
+    """Discover on several Art-Net ports (e.g. 6454 Primus + 6456 Radius) and
+    merge by IP — used for DeviceManager mixed monitoring. A node replies only on
+    the port it was polled on, so there is no overlap; the per-port timeout is
+    split so total latency matches a single-port scan."""
+    ports = list(dict.fromkeys(ports)) or [ARTNET_PORT]
+    per_port = max(0.8, timeout / len(ports))
+    merged = {}
+    for p in ports:
+        for node in discover_artnet_nodes(known_ips=known_ips, timeout=per_port,
+                                          interface=interface, port=p):
+            merged[node["ip"]] = node
+    return list(merged.values())
+
+
 def _discover_artnet_nodes_unlocked(known_ips=None, timeout=3.5, interface=None, port=ARTNET_PORT):
     """Send ArtPoll and collect ArtPollReply responses.
 

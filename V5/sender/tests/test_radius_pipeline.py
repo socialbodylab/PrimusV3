@@ -131,5 +131,33 @@ class DeviceCueMapDerivation(unittest.TestCase):
             {"cmd": "play", "file": "a.wav", "volume": 0})
 
 
+class MixedPortDiscovery(unittest.TestCase):
+    def test_multi_polls_each_port_and_merges(self):
+        seen = []
+        orig = artnet.discover_artnet_nodes
+
+        def fake(known_ips=None, timeout=3.5, interface=None, port=artnet.ARTNET_PORT):
+            seen.append(port)
+            return [{"ip": f"10.0.0.{port}", "port": port}]
+
+        artnet.discover_artnet_nodes = fake
+        try:
+            res = artnet.discover_artnet_nodes_multi(
+                ports=(artnet.ARTNET_PORT, artnet.RADIUS_ARTNET_PORT), timeout=3.0)
+        finally:
+            artnet.discover_artnet_nodes = orig
+        self.assertEqual(seen, [artnet.ARTNET_PORT, artnet.RADIUS_ARTNET_PORT])
+        self.assertEqual(sorted(n["ip"] for n in res),
+                         ["10.0.0.6454", "10.0.0.6456"])
+
+    def test_multi_dedupes_and_defaults_to_6454(self):
+        orig = artnet.discover_artnet_nodes
+        artnet.discover_artnet_nodes = lambda **k: []
+        try:
+            self.assertEqual(artnet.discover_artnet_nodes_multi(ports=()), [])
+        finally:
+            artnet.discover_artnet_nodes = orig
+
+
 if __name__ == "__main__":
     unittest.main()
