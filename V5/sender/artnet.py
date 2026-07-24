@@ -2262,9 +2262,15 @@ def _query_show_info_unlocked(ip, timeout=0.35, sock=None, source_ip=None, port=
 #  AUDIO COMMAND — ArtAudioCmd (opcode 0x8300)
 # ======================================================================
 
-def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None):
-    name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
-    if duration and duration > 0:
+def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, delay_ms=0, source_ip=None):
+    name_bytes = filename.encode("ascii", errors="replace")[:64] + b'\x00'
+    # Trailing u16s after the filename null: [duration][delay]. When delay is
+    # present both are emitted (duration 0 if unset) so the offset is fixed;
+    # old firmware ignores extra bytes, new firmware treats missing fields as 0.
+    if delay_ms and delay_ms > 0:
+        name_bytes += struct.pack("<H", min(int(duration), 65535) if duration else 0)
+        name_bytes += struct.pack("<H", min(int(delay_ms), 65535))
+    elif duration and duration > 0:
         name_bytes += struct.pack("<H", min(int(duration), 65535))
     pkt = bytearray(14 + len(name_bytes))
     pkt[0:8] = ARTNET_HEADER
@@ -2275,10 +2281,11 @@ def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None)
     pkt[14:14 + len(name_bytes)] = name_bytes
     _send_udp_packet(ip, pkt, source_ip=source_ip, port=RADIUS_ARTNET_PORT)
     cmd_name = _AUDIO_CMD_NAMES.get(cmd, str(cmd))
-    dur_str = f" [{duration}s]" if duration else ""
-    file_str = f" \"{filename}\"" if filename else ""
+    dur_str  = f" [{duration}s]"      if duration else ""
+    dly_str  = f" delay={delay_ms}ms" if delay_ms else ""
+    file_str = f" \"{filename}\""     if filename else ""
     netlog.log("OUT", "audio_cmd",
-               f"AudioCmd {cmd_name}{file_str} vol={volume}{dur_str} → {ip}")
+               f"AudioCmd {cmd_name}{file_str} vol={volume}{dur_str}{dly_str} → {ip}")
 
 
 # ======================================================================

@@ -550,6 +550,17 @@
                             </div>
                         </template>
 
+                        <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
+                            <div class="flex items-center gap-1">
+                                <span class="text-muted" style="font-size:11px">Dly</span>
+                                <input type="number" class="form-input" min="0" max="65535" step="50" style="width:64px"
+                                       :value="getAction(idx, dev.ip).delay_ms"
+                                       @input="setActionField(idx, dev.ip, 'delay_ms', parseInt($event.target.value) || 0)"
+                                       placeholder="0" title="Device-side delay before this cue fires (ms)">
+                                <span class="text-muted" style="font-size:11px">ms</span>
+                            </div>
+                        </template>
+
                     </div>
                 </template>
 

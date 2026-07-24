@@ -675,6 +675,9 @@ class RadiusState:
                 if cmd_str in ("play", "loop"):
                     kwargs["filename"] = filename
                     kwargs["duration"] = int(duration)
+                delay = action.get("delay_ms") or 0
+                if delay:
+                    kwargs["delay_ms"] = int(delay)
                 send_audio_cmd(ip, cmd_code, **kwargs)
                 results[ip] = {"status": "sent", "reason": None}
                 self.performance.increment("audio_commands")

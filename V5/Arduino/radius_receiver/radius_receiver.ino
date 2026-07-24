@@ -575,21 +575,58 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   udpFps.endPacket();
 }
 
+// ── Pending cue (non-blocking device-side delay) ─────────────────────
+static struct {
+  bool          active;
+  unsigned long fireAt;  // millis() target
+  AudioCue      cue;
+} _pendingCue = { false, 0, {} };
+
+void executeCue(const AudioCue* cue) {
+  uint8_t vol = (cue->volume != CUE_VOLUME_UNSET) ? cue->volume : _audioVolume;
+  switch (cue->cmd) {
+    case AUDIO_CUE_CMD_PLAY:   audioPlay(cue->filename, vol, cue->duration); break;
+    case AUDIO_CUE_CMD_LOOP:   audioLoop(cue->filename, vol, cue->duration); break;
+    case AUDIO_CUE_CMD_STOP:   audioStop();              break;
+    case AUDIO_CUE_CMD_VOLUME: audioSetVolume(vol);      break;
+  }
+  sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
+  if (infoScreenIndex == 2)
+    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+}
+
+void dispatchCue(const AudioCue* cue) {
+  if (cue->delay > 0) {
+    _pendingCue.cue       = *cue;
+    _pendingCue.cue.delay = 0;  // clear so executeCue doesn't re-schedule
+    _pendingCue.fireAt    = millis() + (unsigned long)cue->delay;
+    _pendingCue.active    = true;
+    Serial.printf("[Cue] Scheduled in %dms\n", cue->delay);
+    return;
+  }
+  executeCue(cue);
+}
+
 void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (len < 15) return;
 
   uint8_t cmd = data[12];
   uint8_t volume = data[13];
-  char filename[33] = {0};
+  char filename[65] = {0};
   uint16_t fnLen = len - 14;
-  if (fnLen > 32) fnLen = 32;
+  if (fnLen > 64) fnLen = 64;
   memcpy(filename, data + 14, fnLen);
 
+  // Trailing u16s after the filename null: [duration][delay] (both LE).
   uint16_t duration = 0;
+  uint16_t delay_ms = 0;
   uint16_t nullPos = 14;
   while (nullPos < len && data[nullPos] != 0) nullPos++;
   if (len >= nullPos + 3) {
     duration = (uint16_t)data[nullPos + 1] | ((uint16_t)data[nullPos + 2] << 8);
+  }
+  if (len >= nullPos + 5) {
+    delay_ms = (uint16_t)data[nullPos + 3] | ((uint16_t)data[nullPos + 4] << 8);
   }
 
   if (ftpIsRunning()) {
@@ -599,21 +636,38 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   }
 
   switch (cmd) {
-    case 1:  audioPlay(filename, volume, duration); break;
-    case 2:  audioLoop(filename, volume, duration); break;
-    case 3:  audioPause(); break;
-    case 4:  audioSetVolume(volume); break;
+    case 1:
+    case 2: {
+      if (delay_ms > 0) {
+        AudioCue cue;
+        cue.cmd      = (cmd == 2) ? AUDIO_CUE_CMD_LOOP : AUDIO_CUE_CMD_PLAY;
+        strncpy(cue.filename, filename, 64); cue.filename[64] = '\0';
+        cue.volume   = volume;
+        cue.duration = duration;
+        cue.delay    = delay_ms;
+        dispatchCue(&cue);
+      } else if (cmd == 1) {
+        audioPlay(filename, volume, duration);
+      } else {
+        audioLoop(filename, volume, duration);
+      }
+      break;
+    }
+    case 3:  audioPause();                            break;
+    case 4:  audioSetVolume(volume);                  break;
     case 5:  audioSetVolume(volume); audioTestTone(); break;
     case 6:
     case 7: {
       AudioCue cue;
-      if (cueLookup(volume, &cue)) {
-        if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
-        else          audioLoop(cue.filename, _audioVolume, cue.duration);
+      if (cueLookup(volume, &cue)) {   // byte 13 = cue number for cmd 6/7
+        if (cmd == 7) cue.cmd = AUDIO_CUE_CMD_LOOP;
+        dispatchCue(&cue);             // respects the cue's stored delay
+      } else {
+        Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
       break;
     }
-    default: audioStop(); break;
+    default: _pendingCue.active = false; audioStop(); break;
   }
 
   sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
@@ -624,10 +678,7 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
 void dispatchOscCue(uint8_t cueNum) {
   AudioCue cue;
   if (!cueLookup(cueNum, &cue)) return;
-  audioPlay(cue.filename, _audioVolume, cue.duration);
-  sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
-  if (infoScreenIndex == 2)
-    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  dispatchCue(&cue);  // honour the cue's stored cmd / volume / delay
 }
 
 void handleOscPacket() {
@@ -826,6 +877,11 @@ void setup() {
 
 void loop() {
   audioUpdate();
+  // Fire a delayed cue when its scheduled time arrives (non-blocking).
+  if (_pendingCue.active && millis() >= _pendingCue.fireAt) {
+    _pendingCue.active = false;
+    executeCue(&_pendingCue.cue);
+  }
   ftpUpdate();
   // Reload the cue map after a pushed cues.json upload settles (no reboot).
   if (ftpCuesReloadDue() && !sdBusy) {
