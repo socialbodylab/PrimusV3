@@ -2,6 +2,12 @@
 
 Compared June 2026. Branch tip: `origin/radius-central` → `V3_6/Arduino/radiusV2/`. V4 track: `V4/Arduino/radius_receiver/`.
 
+> **Status (July 2026):** this was the June *pre-implementation* audit. The
+> `radius-central` July work — including the items marked **Deferred** below —
+> has since been forward-ported onto V5. See
+> [RADIUS_INTEGRATION.md](RADIUS_INTEGRATION.md) § *Status & Roadmap* for the
+> current state.
+
 ## Feature matrix
 
 | Feature | Branch `radiusV2` | V4 before port | Port decision |
@@ -38,10 +44,15 @@ Static IP uses full `IP:S:a.b.c.d:g.w.x.y:s.u.b.n` triple (V4 format). Marius `M
 | `radius_v1` / `rv1` | HUZZAH32 | `--board radius_v1` |
 | `radius_v2` / `rv2` | ESP32-S3 Reverse TFT | `--board radius_v2` |
 
-## Deferred (not in this port)
+## Deferred at the June audit — now RESOLVED (July forward-port onto V5)
 
-- Sender ingestion of `0x8302` ArtAudioStatus (PTR remains primary)
-- Battery telemetry on Radius hardware
+Both were deferred in the June port and have since been forward-ported:
+
+- ~~Sender ingestion of `0x8302` ArtAudioStatus (PTR remains primary)~~ —
+  **done.** 0x8302 is now the primary, event-driven playback signal; the
+  periodic PTR heartbeat was dropped (PTR retained as a fallback).
+- ~~Battery telemetry on Radius hardware~~ — **done for rv1** (HUZZAH32 A13 →
+  `PBT`, `F:…B` capability). rv2 battery still pending (needs a MAX17048).
 
 ## Safety
 

@@ -54,9 +54,8 @@ V5/
     osc_cue_sender/  OSC cue test sender (PrimusCentral external control)
   Arduino/
     primusV3_receiver/   Primus LED firmware (profiles v1, v2, v3)
-    upload.sh            Primus compile/upload script
     radius_receiver/     Radius audio firmware (unified V1 + V2 sketch)
-    radius_upload.sh     Radius compile/upload script (-rv1 / -rv2)
+    upload.sh            Compile/upload script — all profiles (v1/v2/v3, rv1/rv2)
   build_sender_app.py  PyInstaller packaging (--product primus|radius)
   ARCHITECTURE.md      Unified backend roadmap
   assets/              App icon
@@ -203,9 +202,9 @@ Firmware **3.11+** adds per-output **virtual send resolution** (ArtVirtualResolu
 **Radius audio** (VS1053 + SD, unified V1/V2 sketch):
 
 ```bash
-./V5/Arduino/radius_upload.sh -rv1 --compile
-./V5/Arduino/radius_upload.sh -rv2 --compile
-./V5/Arduino/radius_upload.sh --board radius_v1 -ssid "MyRouter" -pw "secret" --auto
+./V5/Arduino/upload.sh -rv1 --compile
+./V5/Arduino/upload.sh -rv2 --compile
+./V5/Arduino/upload.sh -rv1 -ssid "MyRouter" -pw "secret" --auto
 ```
 
 DeviceManager mixed firmware upload uses `GET /api/firmware/status?scope=mixed` and `POST /api/firmware/jobs` with `"scope": "mixed"` to access all Primus and Radius board profiles from one panel. PrimusCentral and RadiusCentral keep product-scoped firmware panels unchanged.

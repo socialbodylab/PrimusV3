@@ -223,12 +223,12 @@ UDP 6455 back-channel:
 
 ## Compile-time overrides
 
-[`radius_upload.sh`](radius_upload.sh) supports the same `-include` override header as Primus:
+[`upload.sh`](upload.sh) supports the same `-include` override header as Primus:
 
 ```bash
-./radius_upload.sh --board radius_v1 -ssid "MyRouter" -pw "secret" --name "StageLeft" --compile
-./radius_upload.sh --board radius_v1 --static-ip 192.168.1.50 --gateway 192.168.1.1 --subnet 255.255.255.0 --compile
-./radius_upload.sh --board radius_v1 --dhcp --compile
+./upload.sh --board radius_v1 -ssid "MyRouter" -pw "secret" --name "StageLeft" --compile
+./upload.sh --board radius_v1 --static-ip 192.168.1.50 --gateway 192.168.1.1 --subnet 255.255.255.0 --compile
+./upload.sh --board radius_v1 --dhcp --compile
 ```
 
 ## Diagnostics

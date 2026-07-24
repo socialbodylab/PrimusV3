@@ -1,6 +1,12 @@
 # Radius Central — `origin/radius-central` Feature Inventory
 
-This document summarizes features found on the **`origin/radius-central`** branch (fetched June 2026) and compares them to the current **V4** Radius Central track at `V4/sender/`.
+> **Historical (July 2026).** This is a June inventory comparing the
+> `radius-central` branch to the old **V4** track. It is kept for reference
+> only — V4 is superseded by **V5**, and the branch's features (including the
+> gaps this doc notes) are now forward-ported onto V5. For current state see
+> [RADIUS_INTEGRATION.md](RADIUS_INTEGRATION.md) § *Status & Roadmap*.
+
+This document summarizes features found on the **`origin/radius-central`** branch (fetched June 2026) and compares them to the (now superseded) **V4** Radius Central track at `V4/sender/`.
 
 The branch integrates Radius into **V3_6 Primus Central** (`run.py --mode radius` → `/radius` SPA). V4 is a **standalone** sender with its own app bundle, V1-only firmware, and a Primus-styled UI at `/`.
 

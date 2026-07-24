@@ -212,7 +212,7 @@ PyInstaller `_data_files()` includes:
 python3 -m unittest discover -s V5/sender/tests
 python3 -m py_compile V5/sender/*.py
 ./V5/Arduino/upload.sh --board v3 --compile
-./V5/Arduino/radius_upload.sh --board radius_v1 --compile
+./V5/Arduino/upload.sh --board radius_v1 --compile
 ```
 
 Source smoke tests:

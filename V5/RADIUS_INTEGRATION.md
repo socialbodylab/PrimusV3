@@ -25,28 +25,33 @@ flowchart LR
   - Primus devices → `.primus_state.json` `device_show_info`
   - Radius devices in mixed monitoring → `.radius_state.json` `device_show_info`
 - **RadiusCentral** continues to use `RadiusState` for its own device list; show-info edits there also persist in `.radius_state.json`.
-- **PTR track telemetry** (UDP 6455) is handled by `PrimusTelemetryListener` on the primus-product server so DeviceManager can show `current_track` on Radius cards without a second listener.
+- **Playback telemetry (RadiusCentral)** is now event-driven **`0x8302` ArtAudioStatus** (UDP 6455): `RadiusTelemetryListener` ingests it (plus `PBT` battery), exposing `current_track`/`playback_state` on the device. The periodic PTR heartbeat was removed from firmware (PTR functions retained as a fallback). **DeviceManager still reads PTR** via `PrimusTelemetryListener` — see the roadmap note on reconciling its Radius now-playing with 0x8302.
 
 ## Firmware (`V5/Arduino/radius_receiver/`)
 
-Unified **V1 + V2** sketch with board selection via `radius_upload.sh`:
+Unified **V1 + V2** sketch, built through the consolidated `upload.sh`
+(`radius_upload.sh` was removed):
 
-| Profile | Board | Upload flag |
-|---------|-------|-------------|
-| `radius_v1` | HUZZAH32 + Music Maker | `-rv1` |
-| `radius_v2` | ESP32-S3 Reverse TFT + Music Maker | `-rv2` |
+| Profile | Board | Upload flag | BLE (Marius) |
+|---------|-------|-------------|--------------|
+| `radius_v1` | HUZZAH32 + Music Maker | `-rv1` | no — stubbed; NimBLE off (−264 KB flash) |
+| `radius_v2` | ESP32-S3 Reverse TFT + Music Maker | `-rv2` | yes |
 
 **Identity:** Node Report uses `PVRAD1|B:v1` or `B:v2` (not `PV3CAP1`), so senders can sort product type reliably.
 
 **Show info:** ArtShowInfo opcode `0x8210` with NVS `characterName` / `performerName`, matching Primus firmware pattern. Feature flag `S` is advertised in `F:RIHAS` (rename, IP, hello/test-tone, show-info).
 
-**Branch extras ported:** OSC listener, Marius BLE (`marius.h`), ArtAudioStatus `0x8302`, ST7789 display on V2, PTR + PFP telemetry, FTP creds `radius`/`radius`.
+**Branch extras ported:** OSC listener + cue-map test-fire, Marius BLE
+(`marius.h`, **V2-only**), event-driven ArtAudioStatus `0x8302`, ST7789 display
+on V2, cue-map **live-reload**, **device-side cue delay**, **rv1 battery
+telemetry**, dedicated Art-Net **port 6456**, PFP telemetry, FTP creds
+`radius`/`radius`. Capability tag is `F:RIHAS` on V2 and `F:RIHASB` on V1 (`B` = battery).
 
 **Compile check:**
 
 ```bash
-./V5/Arduino/radius_upload.sh -rv1 --compile
-./V5/Arduino/radius_upload.sh -rv2 --compile
+./V5/Arduino/upload.sh -rv1 --compile
+./V5/Arduino/upload.sh -rv2 --compile
 ```
 
 Primus firmware (`primusV3_receiver/`) is unchanged in behavior aside from the independent 3.13.0 show-info default seeding constants used as the Radius port reference.
@@ -62,7 +67,7 @@ Primus firmware (`primusV3_receiver/`) is unchanged in behavior aside from the i
   - `monitorProductLabel(dev)` → `"Primus"` / `"Radius"`
   - `showInfoEnabled(dev)` → Radius devices or Primus nodes with `capabilities.show_info`
   - `helloDevice()` → identify flash for Primus, test tone (+ volume) for Radius
-- **Radius cards** hide universe, receive mode, outputs, virtual resolution, and battery. They still show character/performer/device name, IP, status/FPS, Hello, firmware version, and static IP config when expanded.
+- **Radius cards** hide universe, receive mode, outputs, and virtual resolution. They show character/performer/device name, IP, status/FPS, Hello, firmware version, static IP config when expanded, and — on **rv1 (HUZZAH32)** — a **battery** chip (rv2 battery not yet available).
 
 **Firmware tab** — mixed upload panel:
 
@@ -113,4 +118,48 @@ Key new/extended coverage:
 2. Confirm Primus and Radius nodes appear in separate Monitor sections without DMX side effects.
 3. Edit character/performer on a Radius card — restart sender; names should restore from `.radius_state.json`.
 4. RadiusCentral sidebar: same identity fields editable for connected Radius nodes.
-5. DeviceManager Firmware tab: toggle Primus vs Radius, compile/upload with the expected `upload.sh` / `radius_upload.sh` routing.
+5. DeviceManager Firmware tab: toggle Primus vs Radius, compile/upload — all profiles now route through the single `upload.sh`.
+
+## Status & Roadmap (V5 forward-port — July 2026)
+
+The `radius-central` July work is now forward-ported onto V5 (branch
+`radius-v5-forwardport`), additive w.r.t. the Primus/DeviceManager side. Both
+`radius_v1` and `radius_v2` compile; the V5 sender suite is green.
+
+### Completed
+- **Event-driven telemetry** — `0x8302` ArtAudioStatus is the primary playback
+  signal; periodic PTR heartbeat removed (PTR retained as fallback).
+  `RadiusTelemetryListener` merges 0x8302 + PBT with no staleness window.
+- **Dedicated Art-Net port 6456** — Radius listens/replies/receives on 6456;
+  sender routes discovery, audio, FTP, rename, IP-config, and show-info there
+  (Primus stays 6454). **Breaking: devices must be reflashed.**
+- **VS1053 hardening** — 254-powerdown clamp, `_muteChip` cache invalidation,
+  full `reset()` + sample-rate detection, delay-after-stop, audioLoop ordering,
+  no-write-after-sineTest — pinned by `test_firmware_source_contracts.py`.
+- **Cue-map push pipeline** — derive per-device `/cues.json` from the sheet,
+  preview + push to the fleet (⇪ Cue Maps modal), OSC test-fire; firmware
+  **live-reload** applies pushed maps without a reboot.
+- **Device-side cue delay** — non-blocking per-cue delay scheduled on the device
+  (`delay_ms` wire field + `dispatchCue`), authored via the "Dly" cue field.
+- **rv1 battery telemetry** — HUZZAH32 A13, `PBT` on UDP 6455, `F:…B`, tick gated
+  on `!audioIsPlaying()`; battery chip on Radius cards.
+- **Build consolidation** — one `upload.sh` (`-rv1`/`-rv2`); `radius_upload.sh` removed.
+- **NimBLE off V1** — Marius is V2-only, stubbed on V1 → ~264 KB flash reclaimed
+  (V1 now 79% used).
+
+### Future todos (post-merge)
+- **DeviceManager Radius now-playing on 0x8302** — DeviceManager reads PTR via
+  `PrimusTelemetryListener`; with the firmware PTR heartbeat gone, its Radius
+  `current_track` needs the 0x8302 path (or firmware should emit PTR on play).
+  **Reconcile as part of the merge.**
+- **DeviceManager mixed discovery on 6456** — DeviceManager polls 6454; Radius is
+  now on 6456, so the mixed scan must poll both ports.
+- **rv2 battery** — needs a MAX17048 fuel gauge over I2C (hardware first).
+- **Audio cue fade in/out** — designed (schema-first firmware ramp), not built.
+- **Per-project file structure** — scope `audio_cues.json` + device listing per
+  project instead of global.
+
+### Merge
+PR `radius-v5-forwardport` → `main` with npuckett. Port 6456 is **breaking**
+(fleet reflash). Validate on hardware first: discovery on 6456, 0x8302
+now-playing, VS1053 sample-rate/`reset()`, cue delay, live-reload, rv1 battery.
