@@ -21,7 +21,7 @@ Compared June 2026. Branch tip: `origin/radius-central` → `V3_6/Arduino/radius
 | ArtAudioCmd `0x8300` | Yes | Yes | **Keep** |
 | ArtFtpCmd `0x8301` | Yes | Yes | **Keep** |
 | ArtAudioStatus `0x8302` | Yes (UDP 6455) | No | **Port** (supplemental) |
-| PTR track telemetry | No | Yes (UDP 6455) | **Keep V4** as primary sender path |
+| PTR track telemetry | No | Yes (UDP 6455) | ~~Keep V4 as primary~~ — **superseded (July):** 0x8302 is now primary; PTR retained as fallback |
 | PFP packet rate | Serial only | Yes (UDP 6455) | **Keep V4** |
 | OSC `/cue/N`, `/stop`, `/hello` | Yes (53001) | No | **Port** |
 | Marius BLE puck | Yes (`marius.h`) | No | **Port** |
