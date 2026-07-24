@@ -39,6 +39,7 @@
 #define BOARD_STATUS_NEOPIXEL_PIN 45
 #define BOARD_STATUS_NEOPIXEL_POWER_PIN -1
 #define BOARD_STATUS_NEOPIXEL_BRIGHTNESS 40
+#define MARIUS_ENABLED   // Marius (Puck.js BLE) is V2-only — keeps NimBLE off the V1 build
 #endif
 
 #if TARGET_BOARD == BOARD_FEATHER_ESP32

@@ -341,7 +341,7 @@ case "$BOARD_PROFILE" in
       "Adafruit VS1053 Library"
       "SimpleFTPServer"
       "ArduinoJson"
-      "NimBLE-Arduino"
+      # NimBLE-Arduino intentionally omitted — Marius (BLE) is V2-only, stubbed on V1.
     )
     ;;
   rv2|rv2_s3|radius|radius_v2)

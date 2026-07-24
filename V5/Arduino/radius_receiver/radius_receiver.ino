@@ -21,7 +21,18 @@
 #include "cues.h"
 #include "ftp.h"
 #include "telemetry.h"
+#ifdef MARIUS_ENABLED
 #include "marius.h"
+#else
+// Marius (Puck.js BLE) is a V2-only feature. On V1 (HUZZAH32) stub the API so
+// the shared sketch compiles without pulling in NimBLE — a large flash saving.
+static inline void        mariusLoad() {}
+static inline void        mariusInit() {}
+static inline void        mariusUpdate() {}
+static inline bool        mariusIsConfigured() { return false; }
+static inline bool        mariusIsConnected() { return false; }
+static inline const char* mariusPuckName() { return ""; }
+#endif
 
 #if BOARD_HAS_STATUS_NEOPIXEL
 #include <Adafruit_NeoPixel.h>
@@ -816,6 +827,11 @@ void setup() {
 void loop() {
   audioUpdate();
   ftpUpdate();
+  // Reload the cue map after a pushed cues.json upload settles (no reboot).
+  if (ftpCuesReloadDue() && !sdBusy) {
+    cuesLoad();
+    cuesReloadPending = false;
+  }
   mariusUpdate();
 
   {
