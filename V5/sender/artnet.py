@@ -63,6 +63,7 @@ ARTNET_OPCODE_AUDIO_STATUS = 0x8302
 ARTNET_VERSION = 14
 ARTNET_PORT = 6454
 RADIUS_ARTNET_PORT = 6456  # Radius on its own Art-Net port — keeps LED/3rd-party 6454 traffic off Radius nodes
+RADIUS_OSC_PORT = 53001    # firmware OSC_PORT — device /cue/N listener (cue-map test-fire)
 _artnet_query_lock = threading.RLock()
 NODE_CAPS_PREFIX = "PV3CAP1"
 NODE_CAPS_PREFIX_RADIUS = "PVRAD1"
@@ -2292,6 +2293,20 @@ def send_ftp_cmd(ip, start, source_ip=None):
     pkt[12] = 1 if start else 0
     _send_udp_packet(ip, pkt, source_ip=source_ip, port=RADIUS_ARTNET_PORT)
     netlog.log("OUT", "ftp_cmd", f"FTP {'start' if start else 'stop'} → {ip}")
+
+
+def _osc_pad(data):
+    """Null-pad to a 4-byte boundary (OSC spec: 1-4 trailing nulls)."""
+    return data + b"\x00" * (4 - len(data) % 4)
+
+
+def send_osc_cue(ip, number, source_ip=None):
+    """Fire a device cue over OSC (/cue/N) — the same path an external OSC
+    controller uses, so it tests the device's boot-loaded cue map directly."""
+    address = f"/cue/{int(number)}".encode("ascii")
+    packet = _osc_pad(address) + _osc_pad(b",")
+    _send_udp_packet(ip, packet, source_ip=source_ip, port=RADIUS_OSC_PORT)
+    netlog.log("OUT", "osc_cmd", f"OSC /cue/{int(number)} → {ip}")
 
 
 def list_audio_files(ip, source_ip=None):
