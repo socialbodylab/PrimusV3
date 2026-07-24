@@ -32,6 +32,8 @@
 #define BOARD_HAS_STATUS_LED    1
 #define BOARD_STATUS_LED_PIN    LED_BUILTIN
 #define BOARD_STATUS_LED_ACTIVE_HIGH 1
+#define BOARD_BATTERY_MONITOR   1       // HUZZAH32 A13 half-divider — V1 LiPo monitoring
+#define BOARD_BATTERY_PIN       A13
 #else
 #define FIRMWARE_NAME "Radius V2"
 #define NODE_CAPS_BOARD "v2"
@@ -110,8 +112,17 @@
 #define OEM_CODE           0xFFFF
 #define ESTA_CODE          0x0000
 
+#ifndef BOARD_BATTERY_MONITOR
+#define BOARD_BATTERY_MONITOR 0
+#endif
+
 #define NODE_CAPS_PREFIX   "PVRAD1"
+// F: R rename, I ip-config, H hello/identify, A audio (implies FTP), S show info, B battery
+#if BOARD_BATTERY_MONITOR
+#define NODE_CAPS_FEATURES "RIHASB"
+#else
 #define NODE_CAPS_FEATURES "RIHAS"
+#endif
 
 #define FPS_REPORT_PORT         6455
 #define AUDIO_REPORT_PORT       6455

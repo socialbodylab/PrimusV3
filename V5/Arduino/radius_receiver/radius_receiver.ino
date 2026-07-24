@@ -21,6 +21,7 @@
 #include "cues.h"
 #include "ftp.h"
 #include "telemetry.h"
+#include "battery.h"       // V1-only (self-guards on BOARD_BATTERY_MONITOR)
 #ifdef MARIUS_ENABLED
 #include "marius.h"
 #else
@@ -940,4 +941,12 @@ void loop() {
     packetCount = 0;
     lastFpsTime = now;
   }
+
+#if BOARD_BATTERY_MONITOR
+  // Battery sampling blocks ~16 ms (8 ADC reads with settle delays); audio is
+  // main-loop fed (no DREQ interrupt), so skip while a track plays.
+  if (!audioIsPlaying()) {
+    batteryTelemetryTick(udpFps, senderIP, senderKnown, wifiConnected);
+  }
+#endif
 }

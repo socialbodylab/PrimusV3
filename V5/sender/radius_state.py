@@ -737,6 +737,10 @@ class RadiusState:
             dev["fps"] = telemetry.get("fps")
         if "pkt_rate" in telemetry:
             dev["pkt_rate"] = telemetry.get("pkt_rate")
+        for k in ("battery_pct", "battery_mv", "battery_power_mode",
+                  "battery_warning", "live_firmware_version"):
+            if k in telemetry:
+                dev[k] = telemetry.get(k)
 
     def get_json(self):
         with self.lock:
