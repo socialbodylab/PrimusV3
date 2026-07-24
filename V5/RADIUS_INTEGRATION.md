@@ -19,7 +19,7 @@ flowchart LR
   RC --> RS
 ```
 
-- **DeviceManager** always runs `product: primus` with `ControllerState`; its discovery accepts **both** `PV3CAP1` Primus nodes and `PVRAD1` Radius nodes. **⚠ Since Radius moved to Art-Net 6456, DeviceManager (which polls 6454) no longer reaches Radius nodes** — restoring its mixed monitoring needs a dual 6454+6456 scan (see roadmap).
+- **DeviceManager** always runs `product: primus` with `ControllerState`; its discovery accepts **both** `PV3CAP1` Primus nodes and `PVRAD1` Radius nodes. It scans **both 6454 + 6456** (`_discovery_ports()` → `discover_artnet_nodes_multi`) and routes per-device management to each device's port (`_device_port(dev)`), so it discovers and manages both families after the 6456 move. **Remaining gap:** Radius **now-playing** still reads PTR — pending 0x8302 ingestion (see roadmap).
 - Radius records in `ControllerState` carry `is_radius: true` and **never** get an `ArtNetSender` — no DMX is streamed to them, including under `monitor_only`.
 - **Show info** (character/performer names) routes through `show_info_store.py`:
   - Primus devices → `.primus_state.json` `device_show_info`
@@ -147,16 +147,18 @@ The `radius-central` July work is now forward-ported onto V5 (branch
 - **Build consolidation** — one `upload.sh` (`-rv1`/`-rv2`); `radius_upload.sh` removed.
 - **NimBLE off V1** — Marius is V2-only, stubbed on V1 → ~264 KB flash reclaimed
   (V1 now 79% used).
+- **DeviceManager mixed-port support** — `_discovery_ports()` scans both 6454 +
+  6456 for the primus product (`discover_artnet_nodes_multi` merges by IP), and
+  `_device_port(dev)` routes per-device management (rename / show-info / IP) to
+  6456 for Radius, 6454 for Primus. Restores DeviceManager finding *and*
+  managing both families after the 6456 move.
 
 ### Future todos (post-merge)
-- **⚠ DeviceManager Radius support — REQUIRED to restore after this branch's
-  changes.** Our 6456 move + PTR-heartbeat removal regressed a *shipped* V5
-  DeviceManager feature; coordinate with npuckett:
-  - **Discovery:** DeviceManager polls 6454, so it no longer finds Radius on
-    6456 — needs a dual 6454+6456 scan.
-  - **Now-playing:** it reads PTR via `PrimusTelemetryListener`; with the
-    firmware PTR heartbeat gone it needs the 0x8302 path (or firmware must emit
-    PTR on play too).
+- **DeviceManager Radius now-playing (0x8302)** — discovery + management are
+  restored (mixed-port scan + per-device port routing — done). Remaining gap:
+  DeviceManager reads PTR via `PrimusTelemetryListener`, and with the firmware
+  PTR heartbeat gone its Radius `current_track` needs 0x8302 ingestion in the
+  primus-product listener (or firmware must emit PTR on play). Coordinate with npuckett.
 - **rv2 battery** — needs a MAX17048 fuel gauge over I2C (hardware first).
 - **Audio cue fade in/out** — designed (schema-first firmware ramp), not built.
 - **Per-project file structure** — scope `audio_cues.json` + device listing per
