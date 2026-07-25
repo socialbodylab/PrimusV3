@@ -51,6 +51,42 @@ class AudioStatusTelemetry(unittest.TestCase):
             {"playback_state": 2, "current_track": name})
 
 
+class PrimusListenerAudioStatus(unittest.TestCase):
+    """DeviceManager's primus-product listener must ingest 0x8302 so Radius
+    now-playing works after the firmware PTR heartbeat was removed."""
+
+    def _listener(self):
+        import threading
+        lst = artnet.PrimusTelemetryListener.__new__(artnet.PrimusTelemetryListener)
+        lst.lock = threading.Lock()
+        lst.data = {}
+        lst._now = lambda: 1000.0
+        return lst
+
+    def _status_packet(self, state, name):
+        buf = bytearray(78)
+        buf[0:8] = artnet.ARTNET_HEADER
+        buf[8:10] = struct.pack("<H", artnet.ARTNET_OPCODE_AUDIO_STATUS)
+        buf[12] = state
+        buf[13:13 + len(name)] = name.encode()
+        return bytes(buf)
+
+    def test_0x8302_populates_now_playing(self):
+        lst = self._listener()
+        lst._handle_packet(self._status_packet(1, "show1.wav"), "10.0.0.7")
+        pub = lst.get("10.0.0.7")
+        self.assertEqual(pub["current_track"], "show1.wav")
+        self.assertEqual(pub["playback_state"], 1)
+
+    def test_ptr_still_ingested_as_fallback(self):
+        lst = self._listener()
+        name = "clip.wav"
+        lst._handle_packet(b"PTR" + bytes([2, len(name)]) + name.encode(), "10.0.0.8")
+        pub = lst.get("10.0.0.8")
+        self.assertEqual(pub["current_track"], name)
+        self.assertEqual(pub["playback_state"], 2)
+
+
 class Port6456Routing(unittest.TestCase):
     def setUp(self):
         self._orig = artnet._send_udp_packet

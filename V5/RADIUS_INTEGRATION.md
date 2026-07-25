@@ -19,13 +19,13 @@ flowchart LR
   RC --> RS
 ```
 
-- **DeviceManager** always runs `product: primus` with `ControllerState`; its discovery accepts **both** `PV3CAP1` Primus nodes and `PVRAD1` Radius nodes. It scans **both 6454 + 6456** (`_discovery_ports()` → `discover_artnet_nodes_multi`) and routes per-device management to each device's port (`_device_port(dev)`), so it discovers and manages both families after the 6456 move. **Remaining gap:** Radius **now-playing** still reads PTR — pending 0x8302 ingestion (see roadmap).
+- **DeviceManager** always runs `product: primus` with `ControllerState`; its discovery accepts **both** `PV3CAP1` Primus nodes and `PVRAD1` Radius nodes. It scans **both 6454 + 6456** (`_discovery_ports()` → `discover_artnet_nodes_multi`) and routes per-device management to each device's port (`_device_port(dev)`), so it discovers and manages both families after the 6456 move, and its `PrimusTelemetryListener` now ingests **0x8302** (plus PTR fallback) so Radius **now-playing** works event-driven.
 - Radius records in `ControllerState` carry `is_radius: true` and **never** get an `ArtNetSender` — no DMX is streamed to them, including under `monitor_only`.
 - **Show info** (character/performer names) routes through `show_info_store.py`:
   - Primus devices → `.primus_state.json` `device_show_info`
   - Radius devices in mixed monitoring → `.radius_state.json` `device_show_info`
 - **RadiusCentral** continues to use `RadiusState` for its own device list; show-info edits there also persist in `.radius_state.json`.
-- **Playback telemetry (RadiusCentral)** is now event-driven **`0x8302` ArtAudioStatus** (UDP 6455): `RadiusTelemetryListener` ingests it (plus `PBT` battery), exposing `current_track`/`playback_state` on the device. The periodic PTR heartbeat was removed from firmware (PTR functions retained as a fallback). **DeviceManager still reads PTR** via `PrimusTelemetryListener` — see the roadmap note on reconciling its Radius now-playing with 0x8302.
+- **Playback telemetry (RadiusCentral)** is now event-driven **`0x8302` ArtAudioStatus** (UDP 6455): `RadiusTelemetryListener` ingests it (plus `PBT` battery), exposing `current_track`/`playback_state` on the device. The periodic PTR heartbeat was removed from firmware (PTR functions retained as a fallback). **DeviceManager** ingests the same `0x8302` in `PrimusTelemetryListener` (with a PTR fallback branch), so its Radius now-playing is event-driven too.
 
 ## Firmware (`V5/Arduino/radius_receiver/`)
 
@@ -152,13 +152,13 @@ The `radius-central` July work is now forward-ported onto V5 (branch
   `_device_port(dev)` routes per-device management (rename / show-info / IP) to
   6456 for Radius, 6454 for Primus. Restores DeviceManager finding *and*
   managing both families after the 6456 move.
+- **DeviceManager Radius now-playing (0x8302)** — `PrimusTelemetryListener`
+  now parses `0x8302` ArtAudioStatus (reusing the `_record_ptr` path) with a PTR
+  fallback branch, so DeviceManager shows event-driven Radius `current_track` /
+  `playback_state` after the firmware heartbeat was removed. Pinned by
+  `test_radius_pipeline.py::PrimusListenerAudioStatus`.
 
 ### Future todos (post-merge)
-- **DeviceManager Radius now-playing (0x8302)** — discovery + management are
-  restored (mixed-port scan + per-device port routing — done). Remaining gap:
-  DeviceManager reads PTR via `PrimusTelemetryListener`, and with the firmware
-  PTR heartbeat gone its Radius `current_track` needs 0x8302 ingestion in the
-  primus-product listener (or firmware must emit PTR on play). Coordinate with npuckett.
 - **rv2 battery** — needs a MAX17048 fuel gauge over I2C (hardware first).
 - **Audio cue fade in/out** — designed (schema-first firmware ramp), not built.
 - **Per-project file structure** — scope `audio_cues.json` + device listing per

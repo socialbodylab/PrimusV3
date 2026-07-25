@@ -732,6 +732,13 @@ class PrimusTelemetryListener:
                 return
             self._record_pbt(ip, parsed, timestamp)
             return
+        status = parse_audio_status_packet(raw)
+        if status is not None:
+            # 0x8302 ArtAudioStatus from Radius — event-driven now-playing for
+            # DeviceManager (the firmware PTR heartbeat was removed). Same
+            # playback_state/current_track shape as PTR, so reuse that path.
+            self._record_ptr(ip, status["playback_state"], status["current_track"], timestamp)
+            return
         if len(raw) >= 3 and raw[:3] == TRACK_MAGIC:
             if len(raw) < 5:
                 self._record_malformed_packet(ip)
