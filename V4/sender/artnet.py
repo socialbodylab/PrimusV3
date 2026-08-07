@@ -1337,7 +1337,11 @@ def send_show_info(ip, character_name="", performer_name="", source_ip=None,
         performer_name=performer_name,
     )
     _send_udp_packet(ip, pkt, source_ip=source_ip, port=port)
-    netlog.log("OUT", "show_info", f"ArtShowInfo write to {ip}")
+    netlog.log(
+        "OUT", "show_info",
+        f"ArtShowInfo write → {ip}: "
+        f"char={character_name!r} perf={performer_name!r}",
+    )
 
 
 def _bind_artnet_query_socket(source_ip=None, port=ARTNET_PORT):
@@ -1414,11 +1418,24 @@ def sync_show_info_to_device(
     )
     result = query_show_info(ip, timeout=timeout, source_ip=source_ip, port=port)
     if not result:
-        return False, "receiver did not respond to show info read"
+        reason = "receiver did not respond to show info read"
+        netlog.log("IN", "show_info", f"ArtShowInfo NOT confirmed ← {ip}: {reason}")
+        return False, reason
     expected_char = _normalize_show_info_compare(character_name)
     expected_perf = _normalize_show_info_compare(performer_name)
     actual_char = _normalize_show_info_compare(result.get("character_name"))
     actual_perf = _normalize_show_info_compare(result.get("performer_name"))
     if actual_char != expected_char or actual_perf != expected_perf:
-        return False, "receiver did not confirm show info save"
+        reason = "receiver did not confirm show info save"
+        netlog.log(
+            "IN", "show_info",
+            f"ArtShowInfo NOT confirmed ← {ip}: {reason} "
+            f"(got char={actual_char!r} perf={actual_perf!r})",
+        )
+        return False, reason
+    netlog.log(
+        "IN", "show_info",
+        f"ArtShowInfo confirmed ← {ip}: "
+        f"char={actual_char!r} perf={actual_perf!r}",
+    )
     return True, ""

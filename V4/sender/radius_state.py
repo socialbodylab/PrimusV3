@@ -30,6 +30,7 @@ from artnet import (
 )
 from paths import state_file
 
+import netlog
 import show_info_store
 
 
@@ -438,6 +439,15 @@ class RadiusState:
                 if not ok:
                     return {"ok": False, "error": error}
                 applied_to_device = True
+            if not applied_to_device:
+                label = dev.get("name") or dev.get("ip") or f"device {di}"
+                netlog.log(
+                    "OUT", "show_info",
+                    f"Show info saved locally for {label}: "
+                    f"char={dev.get('character_name', '')!r} "
+                    f"perf={dev.get('performer_name', '')!r} "
+                    f"(no show_info capability — not sent to device)",
+                )
             show_info_store.persist_device_show_info(
                 state_file(),
                 dev["ip"],
