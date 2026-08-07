@@ -1,13 +1,22 @@
 # V5 Packaging
 
-V5 packages the **unified sender tree** into two macOS/Windows apps from the same codebase:
+V5 packages the **unified sender tree** into three macOS apps (and Windows PrimusCentral) from the same codebase:
 
-| App | Build flag | Bundle ID |
-|-----|------------|-----------|
-| **RadiusCentral** | `--product radius` (default) | `com.socialbodylab.RadiusCentral` |
-| **PrimusCentral** | `--product primus` | `com.socialbodylab.PrimusCentral` |
+| App | Build flag | Bundle ID | Entry |
+|-----|------------|-----------|-------|
+| **RadiusCentral** | `--product radius` (default) | `com.socialbodylab.RadiusCentral` | `run.py` |
+| **PrimusCentral** | `--product primus` | `com.socialbodylab.PrimusCentral` | `run.py` |
+| **DeviceManager** | `--product devices` | `com.socialbodylab.DeviceManager` | `run_devices.py` |
 
-Both bundle `V5/Arduino/` (Primus + Radius firmware) and the static web UI. PrimusCentral additionally bundles starter `clips/`, `looks/`, and `cues.json`.
+All three bundle `V5/Arduino/` (Primus + Radius firmware) and the static web UI. PrimusCentral and DeviceManager additionally bundle starter `clips/`, `looks/`, and `cues.json`. RadiusCentral does not. RadiusCentral uses `V5/assets/radiusIcon.png` (converted to `.icns` at build time); PrimusCentral and DeviceManager use `V5/assets/appIcon.png`.
+
+Signing identity and Apple notary credentials are shared across products:
+
+- Developer ID: `Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)`
+- Notary keychain profile: `PrimusCentral Notary` (team profile; reuse for RadiusCentral and DeviceManager)
+- Entitlements: `V5/macos/PrimusCentral.entitlements` (`network.client` + `network.server`)
+
+Environment overrides: `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, `PRIMUSV3_NOTARY_TIMEOUT`, `PRIMUSV3_APP_VERSION`.
 
 ## Runtime paths
 
@@ -18,7 +27,7 @@ Packaged apps use product-specific app data:
 | Product | macOS | Windows |
 |---------|-------|---------|
 | **Radius** | `~/Library/Application Support/RadiusV3/V5/sender/` | `%APPDATA%\RadiusV3\V5\sender\` |
-| **Primus** | `~/Library/Application Support/PrimusV3/V5/sender/` | `%APPDATA%\PrimusV3\V5\sender\` |
+| **Primus** / **DeviceManager** | `~/Library/Application Support/PrimusV3/V5/sender/` | `%APPDATA%\PrimusV3\V5\sender\` |
 
 Firmware tools install on demand to the matching product root under `…/V5/tools/`.
 
@@ -44,35 +53,144 @@ Overrides: `RADIUSV5_DATA_DIR`, `PRIMUSV3_DATA_DIR`, `RADIUSV5_USE_APP_DATA`, `P
 
 Set product at runtime with `PRIMUSV3_SENDER_PRODUCT=primus|radius` (packaged apps set this from the executable name).
 
-## Build RadiusCentral
+## Local (unsigned) builds
 
 ```bash
 python3 -m pip install -r V5/requirements-build.txt
 python3 V5/build_sender_app.py --target macos --product radius --name RadiusCentral
+python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py --target macos --product devices --name DeviceManager
 ```
 
-Output: `V5/dist/macos/RadiusCentral.app`
+Outputs land under `V5/dist/macos/<AppName>.app`.
 
-## Build PrimusCentral
+## macOS release DMG pipeline
+
+Release builds run on a Developer ID Mac with the `PrimusCentral Notary` keychain profile already configured. There is no GitHub Actions release workflow; the local builder produces GitHub-ready assets.
+
+The builder:
+
+1. Builds the windowed `.app` with PyInstaller
+2. Codesigns with hardened runtime + network entitlements
+3. Notarizes and staples the `.app`
+4. With `--dmg`: creates a clean staging DMG (app + `/Applications` symlink only), signs/notarizes/staples the DMG, runs `hdiutil verify`, then writes `.sha256` **after** staple (stapling mutates the DMG)
+
+### RadiusCentral (canonical one-liner)
 
 ```bash
-python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py \
+  --target macos \
+  --product radius \
+  --name RadiusCentral \
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h \
+  --dmg
 ```
 
-Output: `V5/dist/macos/PrimusCentral.app`
+Outputs:
 
-## Signing (optional)
+```text
+V5/dist/macos/RadiusCentral.app
+V5/dist/macos/RadiusCentral-<version>-macOS-arm64.dmg
+V5/dist/macos/RadiusCentral-<version>-macOS-arm64.dmg.sha256
+```
+
+### PrimusCentral
 
 ```bash
 python3 V5/build_sender_app.py \
   --target macos \
   --product primus \
   --name PrimusCentral \
-  --sign-identity "Developer ID Application: …" \
-  --notary-profile "PrimusCentral Notary"
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h \
+  --dmg
 ```
 
-Environment overrides: `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`.
+### DeviceManager
+
+```bash
+python3 V5/build_sender_app.py \
+  --target macos \
+  --product devices \
+  --name DeviceManager \
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h \
+  --dmg
+```
+
+### Retries when notary wait times out
+
+Apple may still accept the submission after a local `--notary-timeout`. Staple the existing app, then build the DMG without rebuilding:
+
+```bash
+python3 V5/build_sender_app.py \
+  --target macos \
+  --product radius \
+  --name RadiusCentral \
+  --staple-existing
+
+python3 V5/build_sender_app.py \
+  --target macos \
+  --product radius \
+  --name RadiusCentral \
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h \
+  --dmg-only
+```
+
+Or staple and DMG in one step: `--staple-existing --dmg` with the same identity/profile flags.
+
+### LaunchServices smoke check (required)
+
+Do **not** validate packaged apps by running `…/Contents/MacOS/<Name>` directly. Launch through Finder or LaunchServices:
+
+```bash
+open -n V5/dist/macos/RadiusCentral.app --args --port 8098 --no-browser
+curl -s http://127.0.0.1:8098/api/runtime
+
+# Primus / DeviceManager performance check
+open -n V5/dist/macos/PrimusCentral.app --args --port 8097 --no-browser
+curl -s http://127.0.0.1:8097/api/performance
+```
+
+Preserve packaged timing protections (`caffeinate`, user-interactive QoS, low-latency pacing). Do not reintroduce the old Objective-C `objc_msgSend` activity bridge.
+
+### GitHub release upload
+
+Dedicated RadiusCentral release (recommended for the first ship):
+
+```bash
+# Fill V5/<version>RadiusReleaseNotes.md from V5/RadiusCentral-ReleaseNotes.template.md first.
+gh release create "RadiusCentral-v<version>" \
+  --title "RadiusCentral v<version>" \
+  --notes-file V5/<version>RadiusReleaseNotes.md \
+  V5/dist/macos/RadiusCentral-<version>-macOS-arm64.dmg \
+  V5/dist/macos/RadiusCentral-<version>-macOS-arm64.dmg.sha256
+```
+
+When co-shipping on an existing Primus/DeviceManager tag (`v<version>`), upload instead of creating a new tag:
+
+```bash
+gh release upload "v<version>" \
+  V5/dist/macos/RadiusCentral-<version>-macOS-arm64.dmg \
+  V5/dist/macos/RadiusCentral-<version>-macOS-arm64.dmg.sha256
+```
+
+GitHub assets for each app are only the DMG and matching `.dmg.sha256` sidecar.
+
+### First RadiusCentral ship checklist
+
+1. Set version with `--app-version` / `PRIMUSV3_APP_VERSION` (must match release notes and asset names).
+2. Run the RadiusCentral `--dmg` one-liner above on the signing Mac.
+3. LaunchServices smoke check (`/api/runtime`).
+4. Copy `V5/RadiusCentral-ReleaseNotes.template.md` → `V5/<version>RadiusReleaseNotes.md` and fill SHA-256.
+5. `gh release create` with the DMG + `.sha256` assets.
+6. Confirm the release page lists both assets and Gatekeeper opens the stapled DMG on a clean Mac.
 
 ## Windows PrimusCentral 0.9
 
@@ -106,6 +224,8 @@ The installer includes `README-Windows.txt`, generated from the tracked
 `V5/PrimusCentral-Windows-README.txt` template. The installer remains
 user-local under `%LOCALAPPDATA%\Programs\PrimusCentral` and does not create
 firewall rules.
+
+Windows RadiusCentral / DeviceManager installers are out of scope for this packaging track.
 
 ### Azure Artifact Signing
 
@@ -194,23 +314,23 @@ Validate these paths before publishing:
 - Cue Controller network log shows active sockets and packet receipts for the
   OSC test.
 
-## Legacy V3_6 PrimusCentral
+## Legacy V3_6 / V4 builders
 
-`V3_6/build_sender_app.py` and `V4/build_sender_app.py` remain historical references. **New PrimusCentral builds should use V5** with `--product primus`.
+`V3_6/build_sender_app.py` and `V4/build_sender_app.py` remain historical references. **New releases should use V5.** The `radius-central` branch’s V4 RadiusCentral packaging is superseded by `V5/build_sender_app.py --product radius` (app data under `RadiusV3/V5/`).
 
 ## Bundled assets
 
 PyInstaller `_data_files()` includes:
 
 - `V5/Arduino/` — `primusV3_receiver/`, `radius_receiver/`, upload scripts
-- `V5/sender/web/` — static UI (`index.html` + `index-primus.html`)
-- **Primus only:** `clips/`, `looks/`, `cues.json`
+- `V5/sender/web/` — static UI (`index.html`, `index-primus.html`, `index-devices.html`)
+- **Primus + DeviceManager only:** `clips/`, `looks/`, `cues.json`
 
 ## Validation
 
 ```bash
 python3 -m unittest discover -s V5/sender/tests
-python3 -m py_compile V5/sender/*.py
+python3 -m py_compile V5/sender/*.py V5/build_sender_app.py
 ./V5/Arduino/upload.sh --board v3 --compile
 ./V5/Arduino/radius_upload.sh --board radius_v1 --compile
 ```
@@ -220,6 +340,7 @@ Source smoke tests:
 ```bash
 python3 V5/sender/run.py --product primus --no-browser --port 8090
 python3 V5/sender/run.py --product radius --no-browser --port 8098
+python3 V5/sender/run_devices.py --no-browser --port 8099
 ```
 
-For packaged macOS FPS validation of PrimusCentral, launch through Finder/LaunchServices — see root `CLAUDE.md` v0.65 notes.
+For packaged macOS validation, launch through Finder/LaunchServices — see the LaunchServices section above and root `CLAUDE.md` v0.65 notes.

@@ -261,7 +261,7 @@ Requires [arduino-cli](https://arduino.cc/pro/cli). The script installs/checks r
 
 The v0.65 release is the baseline for packaged macOS performance. It fixed a macOS app-bundle FPS drop that only reproduced when `PrimusCentral.app` was launched through Finder or LaunchServices. Do not validate packaged FPS by directly running `V3_6/dist/macos/PrimusCentral.app/Contents/MacOS/PrimusCentral`; that bypasses the scheduling path that caused the issue.
 
-Build, sign, notarize, staple, and verify the macOS app with the V5 builder:
+Build, sign, notarize, staple the macOS app, and produce a GitHub-ready DMG with the V5 builder (`--dmg` encodes clean staging, DMG notarization, and sha256-after-staple):
 
 ```bash
 python3 V5/build_sender_app.py \
@@ -270,10 +270,19 @@ python3 V5/build_sender_app.py \
     --name PrimusCentral \
     --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
     --notary-profile "PrimusCentral Notary" \
-    --notary-timeout 1h
+    --notary-timeout 1h \
+    --dmg
 ```
 
-The bundle identifier is `com.socialbodylab.PrimusCentral`; the signed app is written to `V5/dist/macos/PrimusCentral.app`. The same signing settings can be supplied as `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime path overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`.
+The same pipeline works for RadiusCentral (`--product radius`) and DeviceManager (`--product devices`). The shared notary keychain profile is `PrimusCentral Notary`. Bundle IDs and outputs:
+
+| App | Bundle ID | App output | Release assets |
+|-----|-----------|------------|----------------|
+| PrimusCentral | `com.socialbodylab.PrimusCentral` | `V5/dist/macos/PrimusCentral.app` | `PrimusCentral-<ver>-macOS-arm64.dmg` + `.sha256` |
+| RadiusCentral | `com.socialbodylab.RadiusCentral` | `V5/dist/macos/RadiusCentral.app` | `RadiusCentral-<ver>-macOS-arm64.dmg` + `.sha256` |
+| DeviceManager | `com.socialbodylab.DeviceManager` | `V5/dist/macos/DeviceManager.app` | `DeviceManager-<ver>-macOS-arm64.dmg` + `.sha256` |
+
+Signing settings can also be supplied as `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime path overrides are `PRIMUSV3_DATA_DIR` / `RADIUSV5_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1` / `RADIUSV5_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR` / `RADIUSV5_TOOLS_DIR`.
 
 Packaged macOS builds intentionally enable these live-output timing protections:
 
@@ -281,26 +290,14 @@ Packaged macOS builds intentionally enable these live-output timing protections:
 - `pthread_set_qos_class_self_np` user-interactive QoS on the animation and mixer/controller threads.
 - Low-latency frame pacing with short sleep slices and a final spin tail.
 
-Use LaunchServices for packaged FPS validation, optionally with a fixed test port:
+Use LaunchServices for packaged validation, optionally with a fixed test port — never run `Contents/MacOS/<Name>` directly:
 
 ```bash
 open -n V5/dist/macos/PrimusCentral.app --args --port 8097
 curl -s http://127.0.0.1:8097/api/performance
 ```
 
-For GitHub release DMGs, create a fresh staging directory containing only `PrimusCentral.app` and an `/Applications` symlink, then build and notarize the DMG. Regenerate the SHA-256 checksum after the final stapling step.
-
-```bash
-rm -rf V5/build/macos/dmg-staging
-mkdir -p V5/build/macos/dmg-staging
-ditto V5/dist/macos/PrimusCentral.app V5/build/macos/dmg-staging/PrimusCentral.app
-ln -s /Applications V5/build/macos/dmg-staging/Applications
-hdiutil create -volname "PrimusCentral 0.86" \
-    -srcfolder V5/build/macos/dmg-staging \
-    -ov -format UDZO V5/dist/macos/PrimusCentral-0.86-macOS-arm64.dmg
-```
-
-Full packaging notes live in [V5/PACKAGING.md](V5/PACKAGING.md). The historical V3.6 builder remains in [V3_6/PACKAGING.md](V3_6/PACKAGING.md) for reference.
+Full packaging, DMG retry (`--dmg-only`), and GitHub release upload notes live in [V5/PACKAGING.md](V5/PACKAGING.md). The historical V3.6 builder remains in [V3_6/PACKAGING.md](V3_6/PACKAGING.md) for reference.
 
 ## Hardware
 

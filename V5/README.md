@@ -57,7 +57,7 @@ V5/
     upload.sh            Primus compile/upload script
     radius_receiver/     Radius audio firmware (unified V1 + V2 sketch)
     radius_upload.sh     Radius compile/upload script (-rv1 / -rv2)
-  build_sender_app.py  PyInstaller packaging (--product primus|radius)
+  build_sender_app.py  PyInstaller packaging (--product radius|primus|devices, --dmg)
   ARCHITECTURE.md      Unified backend roadmap
   assets/              App icon
   dist/                Build output
@@ -145,28 +145,35 @@ Pull sync and conflict resolution are **not** implemented in V5 (push-only).
 
 ## Packaging
 
-**RadiusCentral:**
+Local unsigned builds:
 
 ```bash
 python3 V5/build_sender_app.py --target macos --product radius --name RadiusCentral
+python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py --target macos --product devices --name DeviceManager
 ```
 
-**PrimusCentral (from V5 unified codebase):**
+Signed macOS release with GitHub-ready DMG (add `--dmg`; reuse the shared `PrimusCentral Notary` profile for all three apps):
 
 ```bash
-python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py \
+  --target macos --product radius --name RadiusCentral \
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h \
+  --dmg
 ```
 
-Windows release build:
+Windows PrimusCentral release build:
 
 ```powershell
 py V5\build_sender_app.py --target windows --product primus --windows-installer
 ```
 
-Output: `V5/dist/macos/PrimusCentral.app`, `RadiusCentral.app`, or `V5\dist\windows\PrimusCentral.exe`
-Bundle IDs: `com.socialbodylab.PrimusCentral` / `com.socialbodylab.RadiusCentral`
+Outputs: `V5/dist/macos/<App>.app`, `<App>-<ver>-macOS-arm64.dmg` + `.sha256`, or `V5\dist\windows\PrimusCentral.exe`.
+Bundle IDs: `com.socialbodylab.RadiusCentral` / `PrimusCentral` / `DeviceManager`.
 
-See [PACKAGING.md](PACKAGING.md) for signing and release details.
+See [PACKAGING.md](PACKAGING.md) for DMG retries, LaunchServices validation, and GitHub release upload.
 
 ## Protocol
 

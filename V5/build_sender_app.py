@@ -6,8 +6,10 @@ PyInstaller does not reliably cross-compile desktop apps between macOS and Windo
 """
 
 import argparse
+import hashlib
 import importlib.util
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -32,6 +34,12 @@ PRODUCT_DEFAULTS = {
     },
 }
 APP_ICON_SOURCE = Path("assets") / "appIcon.png"
+RADIUS_ICON_SOURCE = Path("assets") / "radiusIcon.png"
+PRODUCT_ICON_SOURCES = {
+    "radius": RADIUS_ICON_SOURCE,
+    "primus": APP_ICON_SOURCE,
+    "devices": APP_ICON_SOURCE,
+}
 MACOS_ICON_SOURCE = APP_ICON_SOURCE
 MACOS_ICON_SPECS = (
     (16, 1),
@@ -50,8 +58,12 @@ WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 WINDOWS_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
 WINDOWS_INSTALLER_APP_ID = "{{E8573E10-0D2C-4C6E-91C8-D1F5927A9328}"
 WINDOWS_README_SOURCE = Path("PrimusCentral-Windows-README.txt")
-DEFAULT_APP_VERSION = "0.92"
+DEFAULT_APP_VERSION = "0.93"
 DEFAULT_MACOS_ENTITLEMENTS = Path(__file__).resolve().parent / "macos" / "PrimusCentral.entitlements"
+
+
+def _icon_source_for_product(product):
+    return PRODUCT_ICON_SOURCES.get(product, APP_ICON_SOURCE)
 
 
 def _write_sender_version(sender_dir, version):
@@ -85,10 +97,13 @@ def _data_files(v5_dir, sender_dir, product="radius"):
     return files
 
 
-def _prepare_macos_icon(v5_dir, build_dir, app_name):
-    source = v5_dir / MACOS_ICON_SOURCE
+def _prepare_macos_icon(v5_dir, build_dir, app_name, product="radius"):
+    source = v5_dir / _icon_source_for_product(product)
     if not source.exists():
-        return None
+        fallback = v5_dir / APP_ICON_SOURCE
+        if not fallback.exists():
+            return None
+        source = fallback
     if shutil.which("sips") is None or shutil.which("iconutil") is None:
         raise RuntimeError("macOS icon tools sips and iconutil are required to build the app icon")
 
@@ -117,15 +132,18 @@ def _prepare_macos_icon(v5_dir, build_dir, app_name):
     return icon_path
 
 
-def _prepare_windows_icon(v5_dir, build_dir, app_name):
-    source = v5_dir / WINDOWS_ICON_SOURCE
+def _prepare_windows_icon(v5_dir, build_dir, app_name, product="primus"):
+    source = v5_dir / _icon_source_for_product(product)
     if not source.exists():
-        return None
+        fallback = v5_dir / APP_ICON_SOURCE
+        if not fallback.exists():
+            return None
+        source = fallback
     try:
         from PIL import Image
     except ImportError as exc:
         raise RuntimeError(
-            "Pillow is required to build the Windows app icon from appIcon.png. "
+            "Pillow is required to build the Windows app icon from the product PNG. "
             "Install it with: py -m pip install pillow"
         ) from exc
 
@@ -136,7 +154,6 @@ def _prepare_windows_icon(v5_dir, build_dir, app_name):
     with Image.open(source) as image:
         image.convert("RGBA").save(icon_path, format="ICO", sizes=sizes)
     return icon_path
-
 
 def _build_command(args, sender_dir, build_dir, dist_dir, icon_path=None):
     cmd = [
@@ -458,6 +475,140 @@ def _notarize_macos_app(app_path, build_dir, notary_profile, timeout=None):
     _staple_and_verify_macos_app(app_path)
 
 
+def _macos_arch_label():
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    if machine in ("x86_64", "amd64"):
+        return "x86_64"
+    return machine or "arm64"
+
+
+def _release_dmg_path(dist_dir, app_name, version, arch=None):
+    arch_label = arch or _macos_arch_label()
+    return Path(dist_dir) / f"{app_name}-{version}-macOS-{arch_label}.dmg"
+
+
+def _create_release_dmg(app_path, dist_dir, build_dir, version, arch=None):
+    """Stage a clean DMG with only the .app and an /Applications symlink."""
+    _require_tool("ditto")
+    _require_tool("hdiutil")
+    app_path = Path(app_path)
+    if not app_path.is_dir():
+        raise RuntimeError(f"App not found: {app_path}")
+
+    staging = Path(build_dir) / "dmg-staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True, exist_ok=True)
+
+    staged_app = staging / app_path.name
+    _run(["ditto", str(app_path), str(staged_app)])
+    applications_link = staging / "Applications"
+    if applications_link.exists() or applications_link.is_symlink():
+        applications_link.unlink()
+    applications_link.symlink_to("/Applications")
+
+    dist_dir = Path(dist_dir)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    dmg_path = _release_dmg_path(dist_dir, app_path.stem, version, arch=arch)
+    sha_path = Path(f"{dmg_path}.sha256")
+    if dmg_path.exists():
+        dmg_path.unlink()
+    if sha_path.exists():
+        sha_path.unlink()
+
+    _run([
+        "hdiutil",
+        "create",
+        "-volname",
+        f"{app_path.stem} {version}",
+        "-srcfolder",
+        str(staging),
+        "-ov",
+        "-format",
+        "UDZO",
+        str(dmg_path),
+    ])
+    return dmg_path
+
+
+def _sign_notarize_staple_dmg(dmg_path, identity, notary_profile, timeout=None):
+    _require_tool("codesign")
+    _require_tool("xcrun")
+    _require_tool("hdiutil")
+    dmg_path = Path(dmg_path)
+    _run([
+        "codesign",
+        "--force",
+        "--timestamp",
+        "--sign",
+        identity,
+        str(dmg_path),
+    ])
+    cmd = [
+        "xcrun",
+        "notarytool",
+        "submit",
+        str(dmg_path),
+        "--keychain-profile",
+        notary_profile,
+        "--wait",
+    ]
+    if timeout:
+        cmd.extend(["--timeout", timeout])
+    _run(cmd)
+    _run(["xcrun", "stapler", "staple", str(dmg_path)])
+    _run(["xcrun", "stapler", "validate", str(dmg_path)])
+    if shutil.which("spctl") is not None:
+        _run([
+            "spctl",
+            "-a",
+            "-vvv",
+            "--type",
+            "open",
+            "--context",
+            "context:primary-signature",
+            str(dmg_path),
+        ])
+    _run(["hdiutil", "verify", str(dmg_path)])
+
+
+def _write_sha256(artifact_path):
+    """Write a GitHub-style sha256 sidecar. Call only after stapling (staple mutates DMGs)."""
+    artifact_path = Path(artifact_path)
+    digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    sha_path = Path(f"{artifact_path}.sha256")
+    sha_path.write_text(f"{digest}  {artifact_path.name}\n", encoding="ascii")
+    return sha_path
+
+
+def _build_release_dmg(
+    app_path,
+    dist_dir,
+    build_dir,
+    version,
+    identity,
+    notary_profile,
+    timeout=None,
+    arch=None,
+):
+    print()
+    print(f"Creating release DMG from: {app_path}")
+    dmg_path = _create_release_dmg(
+        app_path,
+        dist_dir,
+        build_dir,
+        version,
+        arch=arch,
+    )
+    print()
+    print(f"Signing and notarizing DMG: {dmg_path}")
+    _sign_notarize_staple_dmg(dmg_path, identity, notary_profile, timeout=timeout)
+    sha_path = _write_sha256(dmg_path)
+    return dmg_path, sha_path
+
+
 def _output_path(args, dist_dir):
     if args.target == "macos" and args.windowed:
         return dist_dir / f"{args.name}.app"
@@ -566,6 +717,18 @@ def main(argv=None):
         help="Skip build and staple/verify the existing macOS app output.",
     )
     parser.add_argument(
+        "--dmg",
+        action="store_true",
+        help="After a signed and notarized macOS .app, create a signed/notarized/stapled "
+        "release DMG and write the .sha256 sidecar (checksum after staple).",
+    )
+    parser.add_argument(
+        "--dmg-only",
+        action="store_true",
+        help="Skip build and create/sign/notarize/staple a release DMG from the existing "
+        "macOS .app in dist/. Use after --staple-existing when notary wait timed out.",
+    )
+    parser.add_argument(
         "--windows-sign-metadata",
         type=Path,
         default=os.environ.get("PRIMUSV3_WINDOWS_SIGN_METADATA"),
@@ -637,14 +800,26 @@ def main(argv=None):
     args.windowed = not args.console
     if args.onefile is None:
         args.onefile = args.target == "windows"
+    if args.dmg and args.dmg_only:
+        print("Use only one of --dmg and --dmg-only.")
+        return 1
     if args.notary_profile and (args.target != "macos" or args.console):
         print("Notarization requires a windowed macOS .app build.")
         return 1
     if args.staple_existing and (args.target != "macos" or args.console):
         print("Stapling requires a windowed macOS .app build.")
         return 1
+    if (args.dmg or args.dmg_only) and (args.target != "macos" or args.console):
+        print("Release DMG creation requires a windowed macOS .app build.")
+        return 1
     if args.notary_profile and not args.sign_identity:
         print("Notarization requires --sign-identity or PRIMUSV3_CODESIGN_IDENTITY.")
+        return 1
+    if (args.dmg or args.dmg_only) and (not args.sign_identity or not args.notary_profile):
+        print(
+            "Release DMG creation requires --sign-identity and --notary-profile "
+            "(or PRIMUSV3_CODESIGN_IDENTITY / PRIMUSV3_NOTARY_PROFILE)."
+        )
         return 1
     if args.entitlements_file and not args.entitlements_file.exists():
         print(f"Entitlements file not found: {args.entitlements_file}")
@@ -691,6 +866,28 @@ def main(argv=None):
     output_path = _output_path(args, dist_dir)
     windows_readme_path = dist_dir / "README-Windows.txt"
 
+    if args.dmg_only:
+        if not output_path.exists():
+            print(f"App output not found: {output_path}")
+            return 1
+        try:
+            dmg_path, sha_path = _build_release_dmg(
+                output_path,
+                dist_dir,
+                build_dir,
+                args.app_version,
+                args.sign_identity,
+                args.notary_profile,
+                timeout=args.notary_timeout,
+            )
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+            print(f"Release DMG failed: {exc}")
+            return exc.returncode if isinstance(exc, subprocess.CalledProcessError) else 1
+        print()
+        print(f"Built DMG: {dmg_path}")
+        print(f"Checksum: {sha_path}")
+        return 0
+
     if args.staple_existing:
         if not output_path.exists():
             print(f"App output not found: {output_path}")
@@ -701,6 +898,23 @@ def main(argv=None):
             print(f"macOS stapling failed: {exc}")
             return exc.returncode if isinstance(exc, subprocess.CalledProcessError) else 1
         print(f"Stapled and verified: {output_path}")
+        if args.dmg:
+            try:
+                dmg_path, sha_path = _build_release_dmg(
+                    output_path,
+                    dist_dir,
+                    build_dir,
+                    args.app_version,
+                    args.sign_identity,
+                    args.notary_profile,
+                    timeout=args.notary_timeout,
+                )
+            except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+                print(f"Release DMG failed: {exc}")
+                return exc.returncode if isinstance(exc, subprocess.CalledProcessError) else 1
+            print()
+            print(f"Built DMG: {dmg_path}")
+            print(f"Checksum: {sha_path}")
         return 0
 
     if importlib.util.find_spec("PyInstaller") is None:
@@ -712,9 +926,13 @@ def main(argv=None):
     try:
         icon_path = args.icon
         if icon_path is None and args.target == "macos":
-            icon_path = _prepare_macos_icon(v5_dir, build_dir, args.name)
+            icon_path = _prepare_macos_icon(
+                v5_dir, build_dir, args.name, product=args.product
+            )
         if icon_path is None and args.target == "windows":
-            icon_path = _prepare_windows_icon(v5_dir, build_dir, args.name)
+            icon_path = _prepare_windows_icon(
+                v5_dir, build_dir, args.name, product=args.product
+            )
         if args.target == "windows" and args.windows_installer:
             windows_readme_path = _prepare_windows_readme(v5_dir, dist_dir)
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
@@ -732,6 +950,8 @@ def main(argv=None):
     if args.target == "windows":
         _refresh_windows_icon_cache(output_path)
 
+    dmg_path = None
+    sha_path = None
     try:
         if args.target == "macos" and args.windowed and args.sign_identity:
             print()
@@ -781,6 +1001,16 @@ def main(argv=None):
             print()
             print(f"Notarizing: {output_path}")
             _notarize_macos_app(output_path, build_dir, args.notary_profile, args.notary_timeout)
+        if args.dmg:
+            dmg_path, sha_path = _build_release_dmg(
+                output_path,
+                dist_dir,
+                build_dir,
+                args.app_version,
+                args.sign_identity,
+                args.notary_profile,
+                timeout=args.notary_timeout,
+            )
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"Signing/notarization failed: {exc}")
         return exc.returncode if isinstance(exc, subprocess.CalledProcessError) else 1
@@ -789,8 +1019,13 @@ def main(argv=None):
     print(f"Built: {output_path}")
     if args.target == "windows" and args.windows_installer and installer_path:
         print(f"Built installer: {installer_path}")
+    if args.dmg and dmg_path and sha_path:
+        print(f"Built DMG: {dmg_path}")
+        print(f"Checksum: {sha_path}")
     if args.notary_profile:
         print("The app was signed, notarized, and stapled.")
+        if args.dmg:
+            print("The DMG was signed, notarized, stapled, verified, and checksummed.")
     elif args.target == "windows" and args.windows_sign_metadata and args.windows_installer:
         print("The executable and installer were signed and timestamped.")
     elif args.target == "windows" and args.windows_sign_metadata:
@@ -801,6 +1036,10 @@ def main(argv=None):
         print("Run the executable from Terminal/Command Prompt to test console logging.")
     elif args.target == "macos":
         print("Double-click the app in Finder to start the sender.")
+        print(
+            "For packaged validation, launch through Finder/LaunchServices "
+            "(open -n …), not Contents/MacOS/<name> directly."
+        )
     elif args.target == "windows":
         if args.windows_installer:
             print("Run the installer or double-click the .exe to start the sender.")

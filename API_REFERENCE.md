@@ -503,7 +503,7 @@ python3 V5/build_sender_app.py \
 
 Build-time overrides are `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime/storage overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`. The macOS timing assertion override is `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1`.
 
-The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V5/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V5/PACKAGING.md](V5/PACKAGING.md).
+PrimusCentral uses bundle ID `com.socialbodylab.PrimusCentral` and output path `V5/dist/macos/PrimusCentral.app`. RadiusCentral (`com.socialbodylab.RadiusCentral`) and DeviceManager (`com.socialbodylab.DeviceManager`) share the same V5 builder. Release DMGs are produced with `V5/build_sender_app.py --dmg` (clean staging with only the app and an `/Applications` symlink, then DMG sign/notarize/staple, `hdiutil verify`, and sha256 after stapling). The canonical command checklist lives in [V5/PACKAGING.md](V5/PACKAGING.md).
 
 ### POST Endpoints — Device Management
 
