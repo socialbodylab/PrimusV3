@@ -13,6 +13,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -58,7 +59,7 @@ WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 WINDOWS_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
 WINDOWS_INSTALLER_APP_ID = "{{E8573E10-0D2C-4C6E-91C8-D1F5927A9328}"
 WINDOWS_README_SOURCE = Path("PrimusCentral-Windows-README.txt")
-DEFAULT_APP_VERSION = "0.97"
+DEFAULT_APP_VERSION = "0.98"
 DEFAULT_MACOS_ENTITLEMENTS = Path(__file__).resolve().parent / "macos" / "PrimusCentral.entitlements"
 
 
@@ -207,6 +208,32 @@ def _patch_macos_info_plist(app_path, values):
 def _run(cmd, cwd=None):
     print(" ".join(str(part) for part in cmd))
     subprocess.run(cmd, cwd=cwd, check=True)
+
+
+# codesign --timestamp and notarytool both call Apple services, and those calls
+# fail intermittently when several builds run back to back -- a release that
+# should be one command turns into "run it again until it sticks", and a failure
+# halfway through leaves a half-signed bundle. Retry the network-dependent steps
+# rather than making the operator do it.
+_NETWORK_RETRY_ATTEMPTS = 3
+_NETWORK_RETRY_DELAY_SECONDS = 15
+
+
+def _run_with_retry(cmd, cwd=None, attempts=_NETWORK_RETRY_ATTEMPTS,
+                    delay=_NETWORK_RETRY_DELAY_SECONDS):
+    """Run a command that depends on an Apple service, retrying on failure."""
+    for attempt in range(1, attempts + 1):
+        try:
+            _run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError:
+            if attempt >= attempts:
+                raise
+            print(
+                f"  attempt {attempt}/{attempts} failed (likely an Apple service "
+                f"hiccup); retrying in {delay}s..."
+            )
+            time.sleep(delay)
 
 
 def _require_tool(name):
@@ -407,7 +434,7 @@ def _post_sign_macos_app(app_path, identity, entitlements_file=None):
     if macos_dir.is_dir():
         for executable in sorted(macos_dir.iterdir()):
             if executable.is_file():
-                _run([
+                _run_with_retry([
                     "codesign",
                     "--force",
                     "--options",
@@ -431,7 +458,7 @@ def _post_sign_macos_app(app_path, identity, entitlements_file=None):
         identity,
         str(app_path),
     ]
-    _run(cmd)
+    _run_with_retry(cmd)
     _run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_path)])
 
 
@@ -471,7 +498,7 @@ def _notarize_macos_app(app_path, build_dir, notary_profile, timeout=None):
     ]
     if timeout:
         cmd.extend(["--timeout", timeout])
-    _run(cmd)
+    _run_with_retry(cmd)
     _staple_and_verify_macos_app(app_path)
 
 
@@ -538,7 +565,7 @@ def _sign_notarize_staple_dmg(dmg_path, identity, notary_profile, timeout=None):
     _require_tool("xcrun")
     _require_tool("hdiutil")
     dmg_path = Path(dmg_path)
-    _run([
+    _run_with_retry([
         "codesign",
         "--force",
         "--timestamp",
@@ -557,7 +584,7 @@ def _sign_notarize_staple_dmg(dmg_path, identity, notary_profile, timeout=None):
     ]
     if timeout:
         cmd.extend(["--timeout", timeout])
-    _run(cmd)
+    _run_with_retry(cmd)
     _run(["xcrun", "stapler", "staple", str(dmg_path)])
     _run(["xcrun", "stapler", "validate", str(dmg_path)])
     if shutil.which("spctl") is not None:
