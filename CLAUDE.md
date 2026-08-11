@@ -28,6 +28,14 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|IP:D|F:RA`
 - Track telemetry: UDP 6455 magic `PTR` for current filename
 
+**KNOWN LIMITATION — RadiusCentral cannot currently run alongside PrimusCentral/DeviceManager.** PrimusCentral and DeviceManager deliberately share one backend (DeviceManager is a frontend on the Primus server), but RadiusCentral is a *different product* and has no working co-existence story. Launching it while a Primus Central is running silently attaches it to that Primus backend:
+
+- `find_running_central_server()` in `central_launcher.py` returns any live Central **without checking product**, and `candidate_ports()` probes the requested port, then the registry port, then 8080 — so `--port 8081` still attaches to a Primus server on 8080. `central_server.json` holds a single `{port, product, pid}`; it is a one-server registry.
+- Result: `/radius` returns 200 and the UI loads, but it is served by a `primus` backend. `radius_state.py` / `.radius_state.json` are never loaded, `/api/state` returns clips/looks/cues with no audio/ftp/track keys, and `/api/audio/cue_map` returns 400. **The failure is invisible — the app looks healthy.**
+- Deeper blocker: the Watch-lane telemetry listener binds `0.0.0.0:6455` with `SO_REUSEADDR` only, so a second backend cannot bind it (`Errno 48`). Fixing only the launcher moves the failure rather than removing it, and adding `SO_REUSEPORT` would be worse — telemetry would be split arbitrarily between processes.
+
+Preferred direction when this is addressed: make RadiusCentral a **third frontend on one shared backend**, the same way DeviceManager already is, with the single 6455 listener demuxing by magic (`PST`/`PFP` = Primus, `PTR` = Radius). That removes the port conflict by construction, and DeviceManager's mixed monitoring already discovers `PVRAD1` nodes on the Primus backend. The work is that the backend picks one product globally via `sender_product()` and would need to hold both states at once. Independently, the launcher should **fail loudly on product mismatch** rather than silently attaching.
+
 ### DeviceManager (network monitoring, device config, and firmware app)
 
 DeviceManager is not a separate backend — it is a third frontend served by the same unified server that hosts PrimusCentral, always running against the `primus` product. It exists to give a stage manager a live, monitoring-first view of every receiver on the network, plus device configuration and firmware upload, without the show-control workflow (Look Designer, Cue Controller) getting in the way.
