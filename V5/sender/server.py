@@ -145,6 +145,23 @@ class Handler(BaseHTTPRequestHandler):
     def _osc_service(self):
         return getattr(self.server, "osc_service", None)
 
+    def _server_has_live_output(self):
+        """True when this Central is actively driving a show.
+
+        Reuses the same callable the UI-lifecycle monitor uses to decide whether
+        it is safe to auto-quit, so /api/server/stop and the auto-shutdown path
+        can never disagree about whether output is live.
+        """
+        live_output_fn = getattr(self.server, "live_output_fn", None)
+        if not callable(live_output_fn):
+            return False
+        try:
+            return bool(live_output_fn(self.server))
+        except Exception:
+            # A broken predicate must not make the server look idle, or a stop
+            # request would black out a running show.
+            return True
+
     def _leave_controller_runtime(self, preserve_selection=True):
         if self.cue_list is not None:
             self.cue_list.release_output(preserve_selection=preserve_selection)
@@ -238,6 +255,32 @@ class Handler(BaseHTTPRequestHandler):
                 "default_frontend": default_frontend_path(),
                 "monitor_only": bool(getattr(self._device_state(), "monitor_only", False)),
                 "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
+            })
+            return
+        if path == "/api/server/status":
+            # Richer than /api/runtime on purpose: /api/runtime is the discovery
+            # probe and has to stay stable for older clients, so operational
+            # detail that changes shape over time lives here instead.
+            sessions = getattr(self.server, "ui_sessions", None) or {}
+            started_at = getattr(self.server, "ui_lifecycle_started_at", None)
+            uptime = None
+            if started_at is not None:
+                uptime = round(time.monotonic() - started_at, 1)
+            self._json_response({
+                "pid": os.getpid(),
+                "host": self.server.server_address[0],
+                "port": self.server.server_address[1],
+                "product": sender_product(),
+                "app_version": app_version(),
+                "monitor_only": bool(
+                    getattr(self._device_state(), "monitor_only", False)),
+                "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
+                "ui_lifecycle": bool(
+                    getattr(self.server, "ui_lifecycle_enabled", False)),
+                "client_sessions": sorted(sessions.keys()),
+                "client_session_count": len(sessions),
+                "live_output": self._server_has_live_output(),
+                "uptime_seconds": uptime,
             })
             return
         if path == "/api/state":
@@ -510,6 +553,21 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ui/closed":
             close_session(self.server, data.get("session_id"))
             self._ok()
+
+        elif path == "/api/server/stop":
+            # Guarded by default: another app asking this Central to step aside
+            # must not be able to black out a running show. --force is the
+            # deliberate override.
+            if self._server_has_live_output() and not data.get("force"):
+                self._json_error(
+                    409,
+                    "Central is driving output; stop playback first or retry with force.",
+                )
+                return
+            self._json_response({"ok": True, "message": "stopping"})
+            # Shut down off-thread: shutdown() blocks until serve_forever exits,
+            # which cannot happen while this handler is still running.
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
 
         elif path == "/api/ui/focus":
             callback = getattr(self.server, "ui_focus_callback", None)

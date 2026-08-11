@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 
+from launcher_dialog import notify
 from paths import sender_dir, uses_app_data_dir
 from ui_focus import request_ui_focus
 
@@ -27,6 +28,10 @@ FRONTEND_PATHS = {
     "radius": "/radius",
     "devices": "/devices",
 }
+
+# Why a running Central cannot serve this launcher.
+MISMATCH_WRONG_PRODUCT = "wrong_product"
+MISMATCH_MONITOR_ONLY = "monitor_only"
 
 
 class CentralPortInUseByCentral(Exception):
@@ -127,6 +132,39 @@ def probe_central_server(host="127.0.0.1", port=DEFAULT_HTTP_PORT, timeout=0.75)
     return payload
 
 
+def evaluate_server(runtime, *, need_product=None, needs_output=False):
+    """Return None when a running Central can serve this launcher, else a reason.
+
+    The launcher has to answer three questions before attaching, and for a long
+    time it only answered the first: is something running, can it serve my
+    product, and can it do what I need. Skipping the last two is what let
+    RadiusCentral attach to a Primus backend and PrimusCentral inherit
+    DeviceManager's monitor-only mode, both silently.
+    """
+    runtime = runtime if isinstance(runtime, dict) else {}
+    backend_product = str(runtime.get("product") or "").strip().lower()
+
+    if need_product:
+        need_product = str(need_product).strip().lower()
+        if backend_product and backend_product != need_product:
+            return {
+                "reason": MISMATCH_WRONG_PRODUCT,
+                "backend_product": backend_product,
+                "need_product": need_product,
+            }
+
+    # monitor_only exists so DeviceManager is safe beside a live console: the
+    # server never opens standing DMX output. A client that needs to drive
+    # cannot borrow that backend.
+    if needs_output and bool(runtime.get("monitor_only")):
+        return {
+            "reason": MISMATCH_MONITOR_ONLY,
+            "backend_product": backend_product,
+            "need_product": need_product,
+        }
+    return None
+
+
 def read_registry():
     for path in registry_read_paths():
         try:
@@ -151,14 +189,32 @@ def _write_json(path, payload):
     os.replace(temp_path, path)
 
 
-def register_central_server(port, product, pid=None, host="127.0.0.1"):
+def register_central_server(
+    port,
+    product,
+    pid=None,
+    host="127.0.0.1",
+    monitor_only=False,
+    lan_enabled=False,
+    app_version=None,
+):
+    """Record where the Central is *and* what it is able to do.
+
+    The capability fields matter as much as the address: a launcher that finds
+    this entry needs to decide whether attaching is appropriate before it opens
+    a browser, not after.
+    """
     payload = {
         "host": host,
         "port": int(port),
         "pid": int(pid if pid is not None else os.getpid()),
         "product": str(product or "").strip().lower() or "unknown",
+        "monitor_only": bool(monitor_only),
+        "lan_enabled": bool(lan_enabled),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    if app_version:
+        payload["app_version"] = str(app_version)
     for path in registry_write_paths():
         try:
             _write_json(path, payload)
@@ -301,7 +357,7 @@ def reserve_ui_session(host, port, session_id=None):
         return False
 
 
-def try_attach_before_start(
+def attach_to_running_central(
     *,
     port,
     frontend_path,
@@ -310,22 +366,122 @@ def try_attach_before_start(
     launcher_name,
     host="127.0.0.1",
 ):
-    """Open a frontend against an existing server instead of starting a new one."""
+    """Open ``frontend_path`` against an already-running Central on ``port``."""
+    url = build_central_url(port, frontend_path, host=host)
+    print(f"{launcher_name}: Central already running on port {port}")
+    print(f"  View URL: {url}")
+    # Count this client before the browser exists. Without it there is a window
+    # where the running Central sees zero UI sessions and shuts itself down
+    # just as we hand it a new one.
+    reserve_ui_session(host, port)
+    if no_browser:
+        print("  Browser: not opened (--no-browser)")
+    else:
+        browser_result = _raise_existing_ui(host, port, url, open_browser)
+        print(f"  Browser: {browser_result}")
+        if "could not" in str(browser_result).lower():
+            # This is the silent-launch failure: the app attached correctly but
+            # could not surface a window, so a windowed build exited showing the
+            # user absolutely nothing. Tell them where the UI actually is.
+            notify(
+                launcher_name,
+                f"{launcher_name} is already running on port {port}, but its "
+                f"window could not be brought to the front.\n\nOpen this address "
+                f"in a browser:\n{url}",
+            )
+    print()
+    return True
+
+
+def try_attach_before_start(
+    *,
+    port,
+    frontend_path,
+    no_browser,
+    open_browser,
+    launcher_name,
+    host="127.0.0.1",
+    need_product=None,
+    needs_output=False,
+    on_mismatch=None,
+):
+    """Open a frontend against an existing server instead of starting a new one.
+
+    When the running Central cannot serve this launcher, ``on_mismatch`` decides
+    what happens instead of attaching regardless. It receives the mismatch dict
+    plus the discovered port/runtime and returns one of:
+
+    ``"attach"``  -- attach anyway (e.g. the user chose read-only)
+    ``"start"``   -- caller should start its own server (returns False)
+    ``"abort"``   -- give up quietly (raises SystemExit)
+
+    With no handler the safe default is to refuse, because silently attaching to
+    the wrong backend is the failure this whole path exists to prevent.
+    """
     found = find_running_central_server(port, host=host)
     if not found:
         return False
     actual_port, runtime = found
-    url = build_central_url(actual_port, frontend_path, host=host)
-    backend = runtime.get("product", "unknown")
-    print(f"{launcher_name}: Central already running on port {actual_port} (backend: {backend})")
-    print(f"  View URL: {url}")
-    if no_browser:
-        print("  Browser: not opened (--no-browser)")
-    else:
-        browser_result = _raise_existing_ui(host, actual_port, url, open_browser)
-        print(f"  Browser: {browser_result}")
-    print()
-    return True
+
+    mismatch = evaluate_server(
+        runtime, need_product=need_product, needs_output=needs_output)
+    if mismatch:
+        decision = "abort"
+        if callable(on_mismatch):
+            decision = on_mismatch(mismatch, actual_port, runtime) or "abort"
+        if decision == "start":
+            return False
+        if decision != "attach":
+            backend = mismatch.get("backend_product") or "unknown"
+            print(
+                f"{launcher_name}: not attaching to the Central on port "
+                f"{actual_port} (backend: {backend}, reason: {mismatch['reason']})."
+            )
+            raise SystemExit(1)
+
+    return attach_to_running_central(
+        port=actual_port,
+        frontend_path=frontend_path,
+        no_browser=no_browser,
+        open_browser=open_browser,
+        launcher_name=launcher_name,
+        host=host,
+    )
+
+
+def stop_running_central(host="127.0.0.1", port=DEFAULT_HTTP_PORT, force=False,
+                         timeout=5.0):
+    """Ask a running Central to shut down. Returns (ok, message)."""
+    url = f"http://{host}:{int(port)}/api/server/stop"
+    payload = json.dumps({"force": bool(force)}).encode("utf-8")
+    request = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8") or "{}")
+        return True, body.get("message", "stopping")
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8") or "{}")
+        except (ValueError, OSError):
+            body = {}
+        return False, body.get("error", f"HTTP {exc.code}")
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        return False, str(exc)
+
+
+def wait_for_port_release(host="127.0.0.1", port=DEFAULT_HTTP_PORT, timeout=15.0):
+    """Block until no Central answers on ``port``. True if it went away."""
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while time.monotonic() < deadline:
+        if probe_central_server(host, port, timeout=0.5) is None:
+            # The HTTP listener is gone; give the OS a moment to release the
+            # socket so our own bind() does not race it.
+            time.sleep(0.5)
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def probe_port_is_central(host="127.0.0.1", port=DEFAULT_HTTP_PORT):

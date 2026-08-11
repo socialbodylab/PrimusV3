@@ -876,6 +876,23 @@ class RadiusState:
                 "devices": devices,
             }
 
+    def has_live_playback(self):
+        """True when any receiver reports audio playing.
+
+        Radius has no sender-side "driving output" flag the way Primus does --
+        playback lives on the device and arrives via PTR telemetry -- so the
+        device view is the only honest signal. Used as the UI-lifecycle idle
+        guard so closing the last window mid-cue does not kill the server.
+        """
+        with self.lock:
+            for dev in self.devices:
+                try:
+                    if int(dev.get("playback_state") or 0) > 0:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+        return False
+
     def get_performance_json(self):
         return self.performance.snapshot()
 

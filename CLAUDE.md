@@ -28,6 +28,17 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|IP:D|F:RA`
 - Track telemetry: UDP 6455 magic `PTR` for current filename
 
+**Launcher contract (all three apps).** There is one backend process; the apps are launchers onto its frontends. Before attaching, a launcher must answer three questions, and `central_launcher.evaluate_server()` is where that happens: is a Central running, can it serve *my product*, and can it serve *my capabilities* (drive output). A mismatch must never silently attach — packaged apps are windowed with no console, so a silent decision is indistinguishable from a failed launch. Key pieces:
+
+- `launcher_dialog.py` — stdlib-only native dialogs (`osascript` on macOS, `MessageBoxW` on Windows, print+default fallback). Set `PRIMUSV3_NO_DIALOGS=1` to force the non-blocking fallback in scripts and CI.
+- `try_attach_before_start(..., need_product=, needs_output=, on_mismatch=)` — the handler returns `"attach"`, `"start"`, or `"abort"`. With no handler the default is to refuse, not attach.
+- PrimusCentral offers **Restart in full mode / Open read-only / Cancel** when it finds a `monitor_only` backend (DeviceManager's). Restart calls `POST /api/server/stop` then `wait_for_port_release()` and rebinds. Without this, PrimusCentral silently inherited monitor-only and every `connect_all` returned 409.
+- RadiusCentral refuses a non-Radius backend outright (see the limitation below).
+- Attach calls `reserve_ui_session()` so the running Central counts the new client before its browser exists and cannot auto-quit in that gap.
+- The registry (`central_server.json`) records capabilities — `monitor_only`, `lan_enabled`, `app_version` — not just host/port.
+- Both the auto-shutdown monitor and `POST /api/server/stop` read the same `server.live_output_fn`, so they can never disagree about whether quitting is safe. Primus uses `playback_source`; Radius uses `RadiusState.has_live_playback()` (any device reporting playback via PTR).
+- Operator control: `python3 V5/sender/run.py --server-status` and `--stop-server [--force]`. This is the supported way to clear an orphaned server holding the port.
+
 **KNOWN LIMITATION — RadiusCentral cannot currently run alongside PrimusCentral/DeviceManager.** PrimusCentral and DeviceManager deliberately share one backend (DeviceManager is a frontend on the Primus server), but RadiusCentral is a *different product* and has no working co-existence story. Launching it while a Primus Central is running silently attaches it to that Primus backend:
 
 - `find_running_central_server()` in `central_launcher.py` returns any live Central **without checking product**, and `candidate_ports()` probes the requested port, then the registry port, then 8080 — so `--port 8081` still attaches to a Primus server on 8080. `central_server.json` holds a single `{port, product, pid}`; it is a one-server registry.

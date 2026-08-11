@@ -446,6 +446,8 @@ The PrimusCentral sender (`python3 V5/sender/run.py --product primus`) serves a 
 | Route | Description |
 |---|---|
 | `GET /` | HTML control interface (Alpine.js SPA) |
+| `GET /api/server/status` | Operational detail about this Central: `pid`, `port`, `product`, `app_version`, `monitor_only`, `lan_enabled`, `client_session_count`, `live_output`, `uptime_seconds`. Separate from `/api/runtime` on purpose — `/api/runtime` is the discovery probe and must stay stable for older clients, so detail that changes shape lives here |
+| `POST /api/server/stop` | Ask this Central to shut down so another launcher can take the port. Returns `409` when `live_output` is true unless the body sets `{"force": true}`, so one app can never black out a show another is running |
 | `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership, `monitor_only` (true when this backend never auto-connects to devices or drives Art-Net output — DeviceManager's safety mode when it starts its own fresh backend), and `lan_enabled` (true when the HTTP server is bound to the LAN interface rather than loopback-only — DeviceManager's own fresh backend only, enabling its Mobile / Tablet View) |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
 | `GET /api/performance` | Rolling sender timing diagnostics, counters, and per-second rates for FPS/debug validation |
