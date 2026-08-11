@@ -81,6 +81,14 @@ still on in this firmware. Devices flashed with 3.14.1 report their IP mode and
 universe base correctly again; devices left on the earlier 3.14.0 build will
 still show `unknown` IP mode until reflashed.
 
+## Packaging
+
+- **Bundle version fixed** — PyInstaller left `CFBundleShortVersionString` and
+  `CFBundleVersion` at `0.0.0`, so every previously shipped build reported
+  `0.0.0` to Finder's Get Info and to any OS-level version check while the DMG
+  name and in-app version said otherwise. Both keys are now stamped with the
+  release version before signing. This also applies to RadiusCentral builds.
+
 ## Validation
 
 - 374 stdlib unittests pass; `py_compile` clean across `V5/sender`
@@ -98,3 +106,10 @@ still show `unknown` IP mode until reflashed.
 - `PrimusCentral-0.97-macOS-arm64.dmg.sha256`
 - `DeviceManager-0.97-macOS-arm64.dmg`
 - `DeviceManager-0.97-macOS-arm64.dmg.sha256`
+
+## SHA-256
+
+```text
+ba294e744f16d6e1602a6af201b37140b18ba331b8e5baeaa98c914447d308a7  PrimusCentral-0.97-macOS-arm64.dmg
+eaf25da4ec33f53a7d7c8d1e7cf32cf30bd0f9f5a5df4191d6d9a75919e44fed  DeviceManager-0.97-macOS-arm64.dmg
+```

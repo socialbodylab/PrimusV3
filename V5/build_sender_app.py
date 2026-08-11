@@ -946,7 +946,16 @@ def main(argv=None):
     except subprocess.CalledProcessError as exc:
         return exc.returncode
     if args.target == "macos" and args.windowed:
-        _patch_macos_info_plist(output_path, {"LSMultipleInstancesProhibited": True})
+        # Stamp the release version into the bundle as well. PyInstaller leaves
+        # these at 0.0.0, so Finder's Get Info and every OS-level version check
+        # reported 0.0.0 for shipped builds while the DMG name and the in-app
+        # APP_VERSION said otherwise. Must stay ahead of _post_sign_macos_app —
+        # editing Info.plist after signing invalidates the signature.
+        _patch_macos_info_plist(output_path, {
+            "LSMultipleInstancesProhibited": True,
+            "CFBundleShortVersionString": args.app_version,
+            "CFBundleVersion": args.app_version,
+        })
     if args.target == "windows":
         _refresh_windows_icon_cache(output_path)
 
