@@ -18,6 +18,7 @@ document.addEventListener("alpine:init", () => {
             pollreply:     "Reply",
             art_address:   "Rename",
             output_config: "OutCfg",
+            show_info:     "ShowInfo",
             audio_cmd:     "Audio",
             ftp_cmd:       "FTP Ctrl",
             ftp_upload:    "Upload",

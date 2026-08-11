@@ -966,4 +966,8 @@ Track telemetry on UDP 6455 uses magic `PTR`: `[P][T][R][state:1][name_len:1][na
 
 Push sync stops playback on all connected nodes, then FTP-uploads cue-referenced WAV files missing from each SD card. Pull sync and conflict resolution are **not** implemented in V5.
 
+**Net log entries** are JSON objects `{id, ts, dir, type, summary, detail?}` where `dir` is `IN` or `OUT` and `type` is a short event slug (rendered with a friendly label in the UI). Emitted types: `audio_cmd`, `audio_status`, `osc_cmd`, `ftp_cmd`, `ftp_upload`, `ftp_rename`, `ftp_delete`, `ftp_mkdir`, `ftp_sync`, `show_info`, and `fps_telemetry` (sampled to at most once per second per IP).
+
+Editing character/performer names (`POST /api/device_show_info`) emits `show_info` events: an `OUT` write (`ArtShowInfo write → <ip>: char=… perf=…`) followed by an `IN` read-back result — `ArtShowInfo confirmed ← <ip>` when the receiver echoes the stored values, or `ArtShowInfo NOT confirmed ← <ip>: <reason>` when it does not respond or the stored values differ. When a device advertises no `show_info` capability the edit is saved locally only and logged as `Show info saved locally for <label> … (no show_info capability — not sent to device)`.
+
 Implementation: `V5/sender/artnet.py`, `V5/sender/radius_state.py`, `V5/sender/audio_cues.py`, `V5/sender/netlog.py`, firmware `V5/Arduino/radius_receiver/`. Launch with `python3 V5/sender/run.py`.
