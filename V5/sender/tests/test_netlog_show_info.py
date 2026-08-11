@@ -137,6 +137,34 @@ class ShowInfoLocalSaveLogTests(unittest.TestCase):
         self.assertIn("Plain", entries[0]["summary"])
         self.assertIn("Robot", entries[0]["summary"])
 
+    @patch("radius_state.sync_show_info_to_device",
+           return_value=(False, "receiver did not respond to show info read"))
+    @patch("radius_state._save_devices")
+    def test_radius_sync_failure_falls_back_to_local_save(self, _save, _sync):
+        # A radius device whose firmware has no 0x8210 handler never answers the
+        # read-back. Solution B: the edit must still succeed locally, not error.
+        from radius_state import RadiusState
+
+        radius = RadiusState()
+        radius.devices = [{
+            "ip": "192.168.1.71",
+            "name": "E8",
+            "capabilities": {"show_info": False},
+            "is_radius": True,
+            "character_name": "",
+            "performer_name": "",
+        }]
+
+        result = radius.update_device_show_info(0, character_name="Nomad", performer_name="Sam")
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["applied_to_device"])
+        self.assertEqual(radius.devices[0]["character_name"], "Nomad")
+        entries = _show_info_entries()
+        self.assertEqual(len(entries), 1)
+        self.assertIn("saved locally", entries[0]["summary"])
+        self.assertIn("did not confirm", entries[0]["summary"])
+
 
 if __name__ == "__main__":
     unittest.main()

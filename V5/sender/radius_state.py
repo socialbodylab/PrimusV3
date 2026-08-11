@@ -606,19 +606,29 @@ class RadiusState:
                 dev["performer_name"] = show_info_store.normalize_show_info_value(performer_name)
             caps = _normalize_capabilities(dev.get("capabilities"))
             applied_to_device = False
+            sync_error = None
             if caps.get("show_info") or dev.get("is_radius"):
                 ok, attempted = self._sync_show_info_to_device_unlocked(dev)
-                if not ok:
-                    return {"ok": False, "error": dev.get("transport_error")}
-                applied_to_device = attempted
+                if ok:
+                    applied_to_device = attempted
+                else:
+                    # Older Radius firmware has no 0x8210 handler and never
+                    # answers the read-back. Don't fail the edit — fall back to
+                    # local-only storage (matches V4 behaviour) so the name is
+                    # still saved and shown.
+                    sync_error = dev.get("transport_error")
             if not applied_to_device:
                 label = dev.get("name") or dev.get("ip") or f"device {di}"
+                if sync_error:
+                    reason = f"device did not confirm ({sync_error}) — saved locally"
+                else:
+                    reason = "no show_info capability — not sent to device"
                 netlog.log(
                     "OUT", "show_info",
                     f"Show info saved locally for {label}: "
                     f"char={dev.get('character_name', '')!r} "
                     f"perf={dev.get('performer_name', '')!r} "
-                    f"(no show_info capability — not sent to device)",
+                    f"({reason})",
                 )
             show_info_store.persist_device_show_info(
                 show_info_store.radius_state_path(),

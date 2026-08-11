@@ -2375,39 +2375,71 @@ import contextlib as _contextlib
 import io as _io
 
 
+# A browser opens two FTP-backed panels at once (e.g. the audio file browser and
+# the cue map both list the SD card), so concurrent FTP sessions to one device
+# can interleave — one session's `finally: FTP stop` tears down another's
+# in-flight listing. Serialize sessions per device IP.
+_ftp_ip_locks = {}
+_ftp_ip_locks_guard = threading.Lock()
+
+
+def _ftp_ip_lock(ip):
+    with _ftp_ip_locks_guard:
+        lock = _ftp_ip_locks.get(ip)
+        if lock is None:
+            lock = threading.Lock()
+            _ftp_ip_locks[ip] = lock
+        return lock
+
+
 @_contextlib.contextmanager
 def _ftp_session(ip, source_ip=None, timeout=8.0):
     import ftplib
-    send_ftp_cmd(ip, start=True, source_ip=source_ip)
-    time.sleep(0.5)
-    ftp = ftplib.FTP()
-    try:
-        ftp.connect(ip, FTP_PORT, timeout=timeout)
-        ftp.login(FTP_USER, FTP_PASSWORD)
-        yield ftp
+    with _ftp_ip_lock(ip):
+        send_ftp_cmd(ip, start=True, source_ip=source_ip)
+        time.sleep(0.5)
+        ftp = ftplib.FTP()
         try:
-            ftp.quit()
+            ftp.connect(ip, FTP_PORT, timeout=timeout)
+            ftp.login(FTP_USER, FTP_PASSWORD)
+            yield ftp
+            try:
+                ftp.quit()
+            except Exception:
+                pass
         except Exception:
-            pass
-    except Exception:
-        try:
-            ftp.close()
-        except Exception:
-            pass
-        raise
-    finally:
-        send_ftp_cmd(ip, start=False, source_ip=source_ip)
+            try:
+                ftp.close()
+            except Exception:
+                pass
+            raise
+        finally:
+            send_ftp_cmd(ip, start=False, source_ip=source_ip)
 
 
 def _parse_list_line(line):
+    """Parse a SimpleFTPServer LIST line into {name, is_dir, size}.
+
+    SimpleFTPServer (SD storage, the Radius firmware's FTP server) omits the
+    group field, producing 8 whitespace-separated fields:
+      permissions links user size month day time filename
+    Standard Unix ls long format has 9 fields (group between user and size):
+      permissions links user group size month day time/year filename
+    Handle both, or the Radius SD listing comes back empty.
+    """
     parts = line.split(None, 8)
-    if len(parts) < 9:
+    n = len(parts)
+    if n == 9:
+        size_idx, name_idx = 4, 8   # standard: has group field
+    elif n == 8:
+        size_idx, name_idx = 3, 7   # SimpleFTPServer: no group field
+    else:
         return None
     try:
-        size = int(parts[4])
+        size = int(parts[size_idx])
     except ValueError:
         size = 0
-    return {"name": parts[8], "is_dir": parts[0].startswith("d"), "size": size}
+    return {"name": parts[name_idx], "is_dir": parts[0].startswith("d"), "size": size}
 
 
 def ftp_list_dir(ip, path="/", source_ip=None):
