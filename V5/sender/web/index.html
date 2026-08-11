@@ -329,10 +329,10 @@
                         <template x-if="loading[dev.di] && entries[dev.di] === undefined">
                             <div class="audio-fm-empty text-muted">Loading...</div>
                         </template>
-                        <template x-if="!loading[dev.di] && entries[dev.di] && entries[dev.di].length === 0 && !newFolderMode[dev.di]">
+                        <template x-if="!loading[dev.di] && entries[dev.di] && displayEntries(dev.di).length === 0 && !newFolderMode[dev.di]">
                             <div class="audio-fm-empty text-muted">Empty directory</div>
                         </template>
-                        <template x-for="entry in (entries[dev.di] || [])" :key="entry.name">
+                        <template x-for="entry in displayEntries(dev.di)" :key="entry.name">
                             <div class="audio-fm-row"
                                  :class="{ 'fm-row-playing': !entry.is_dir && isPlaying(dev.di, entry.name) }">
                                 <span class="audio-fm-icon"

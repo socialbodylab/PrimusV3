@@ -44,6 +44,16 @@ document.addEventListener("alpine:init", () => {
             return devices.map((d, i) => ({ ...d, di: i })).filter(d => d.is_radius || d.is_audio);
         },
 
+        // Show only navigable folders and playable sound files — hide dotfiles
+        // and macOS junk (._resource forks, .Spotlight-V100, .Trashes,
+        // .fseventsd, .TemporaryItems) and non-audio files like config.txt.
+        displayEntries(di) {
+            return (this.entries[di] || []).filter(e =>
+                !e.name.startsWith(".") &&
+                (e.is_dir || e.name.toLowerCase().endsWith(".wav"))
+            );
+        },
+
         // ── Lifecycle ───────────────────────────────────────────────────
 
         initDevice(di) {
