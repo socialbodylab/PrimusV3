@@ -60,5 +60,43 @@ class FtpListParserTests(unittest.TestCase):
         self.assertIsNone(_parse_list_line("-rw-r--r-- 1 owner 100"))
 
 
+class FtpListParserTabDelimitedTests(unittest.TestCase):
+    r"""Firmware 4.0 on V1 hardware emits these lines tab-delimited.
+
+    Captured from a live receiver:
+        -rw-rw-r--\t1\tradius\t209\tJan 01 00:00\tconfig.txt
+    Tabs disambiguate the name, so prefer them over counting whitespace
+    tokens whenever they are present.
+    """
+
+    def test_tab_delimited_file(self):
+        entry = _parse_list_line(
+            "-rw-rw-r--\t1\tradius\t209\tJan 01 00:00\tconfig.txt"
+        )
+        self.assertEqual(
+            entry, {"name": "config.txt", "is_dir": False, "size": 209}
+        )
+
+    def test_tab_delimited_directory(self):
+        entry = _parse_list_line(
+            "drwxrwsr-x\t2\tradius\t4096\tJan 01 00:00\t.fseventsd"
+        )
+        self.assertEqual(
+            entry, {"name": ".fseventsd", "is_dir": True, "size": 4096}
+        )
+
+    def test_tab_delimited_filename_with_spaces(self):
+        # Counting whitespace tokens reads this 8-field line as a 9-field one,
+        # truncating the name to "2.wav" and zeroing the size.
+        entry = _parse_list_line(
+            "-rw-rw-r--\t1\tradius\t512\tJan 01 00:00\tmy song 2.wav"
+        )
+        self.assertEqual(entry["name"], "my song 2.wav")
+        self.assertEqual(entry["size"], 512)
+
+    def test_tab_delimited_too_few_fields_returns_none(self):
+        self.assertIsNone(_parse_list_line("-rw-rw-r--\t1\tradius"))
+
+
 if __name__ == "__main__":
     unittest.main()

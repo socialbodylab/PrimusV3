@@ -3,6 +3,8 @@
 import os
 import struct
 import sys
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -137,6 +139,102 @@ class RadiusArtNetTests(unittest.TestCase):
         opcode = struct.unpack("<H", sent[0][8:10])[0]
         self.assertEqual(opcode, ARTNET_OPCODE_FTP_CMD)
         self.assertEqual(sent[0][12], 1)
+
+
+class _FakeFtp:
+    """Minimal ftplib.FTP stand-in. Fails `fail_times` connects, then works."""
+
+    fail_times = 0
+    connects = 0
+
+    def connect(self, host, port, timeout=None):
+        type(self).connects += 1
+        if type(self).connects <= type(self).fail_times:
+            raise OSError("timed out")
+
+    def login(self, user, password):
+        pass
+
+    def quit(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class FtpSessionTests(unittest.TestCase):
+    """A receiver serves one FTP connection at a time and `stop` is global, so
+    sessions serialize per IP and only the outermost may stop the server.
+    """
+
+    def setUp(self):
+        import artnet as artnet_mod
+        self.artnet = artnet_mod
+        _FakeFtp.fail_times = 0
+        _FakeFtp.connects = 0
+        self.cmds = []
+        self._orig_send = artnet_mod.send_ftp_cmd
+        artnet_mod.send_ftp_cmd = (
+            lambda ip, start, source_ip=None, dest_port=None: self.cmds.append(
+                (ip, start)
+            )
+        )
+        self._orig_settle = artnet_mod.FTP_START_SETTLE
+        artnet_mod.FTP_START_SETTLE = 0.0
+        artnet_mod._ftp_ip_locks.clear()
+
+    def tearDown(self):
+        self.artnet.send_ftp_cmd = self._orig_send
+        self.artnet.FTP_START_SETTLE = self._orig_settle
+
+    def test_nested_session_sends_one_start_stop_pair(self):
+        # A plain (non-reentrant) lock would deadlock here instead.
+        with patch("ftplib.FTP", _FakeFtp):
+            with self.artnet._ftp_session("10.0.0.5"):
+                with self.artnet._ftp_session("10.0.0.5"):
+                    pass
+        self.assertEqual(self.cmds, [("10.0.0.5", True), ("10.0.0.5", False)])
+
+    def test_retries_connect_before_giving_up(self):
+        _FakeFtp.fail_times = 2
+        with patch("ftplib.FTP", _FakeFtp):
+            with self.artnet._ftp_session("10.0.0.5"):
+                pass
+        self.assertEqual(_FakeFtp.connects, 3)
+
+    def test_raises_after_exhausting_attempts(self):
+        _FakeFtp.fail_times = self.artnet.FTP_CONNECT_ATTEMPTS
+        with patch("ftplib.FTP", _FakeFtp):
+            with self.assertRaises(OSError):
+                with self.artnet._ftp_session("10.0.0.5"):
+                    pass
+        # The server is still told to stop even when the handshake never landed.
+        self.assertEqual(self.cmds[-1], ("10.0.0.5", False))
+
+    def test_concurrent_sessions_to_one_ip_do_not_overlap(self):
+        overlaps = []
+        active = []
+        guard = threading.Lock()
+
+        def worker():
+            with self.artnet._ftp_session("10.0.0.5"):
+                with guard:
+                    active.append(1)
+                    if len(active) > 1:
+                        overlaps.append(True)
+                time.sleep(0.02)
+                with guard:
+                    active.pop()
+
+        # Patch once around every thread: mock.patch is not thread-safe, and
+        # patching per-worker lets one thread restore ftplib under another.
+        with patch("ftplib.FTP", _FakeFtp):
+            threads = [threading.Thread(target=worker) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(overlaps, [])
 
 
 if __name__ == "__main__":

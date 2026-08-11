@@ -146,6 +146,11 @@ _AUDIO_CMD_NAMES = {
 FTP_PORT = 21
 FTP_USER = "radius"
 FTP_PASSWORD = "radius"
+# Seconds to wait after ArtFtpCmd start before dialing in, and how many times
+# to re-issue start when the device's FTP server is not listening yet.
+FTP_START_SETTLE = 0.5
+FTP_CONNECT_TIMEOUT = 5.0
+FTP_CONNECT_ATTEMPTS = 3
 
 
 # ======================================================================
@@ -2577,38 +2582,73 @@ _ftp_ip_locks = {}
 _ftp_ip_locks_guard = threading.Lock()
 
 
+_ftp_depth = threading.local()
+
+
 def _ftp_ip_lock(ip):
+    # Reentrant so a session opened inside another session cannot deadlock;
+    # the depth counter below keeps the inner one from stopping the server.
     with _ftp_ip_locks_guard:
         lock = _ftp_ip_locks.get(ip)
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
             _ftp_ip_locks[ip] = lock
         return lock
 
 
-@_contextlib.contextmanager
-def _ftp_session(ip, source_ip=None, timeout=8.0, dest_port=None):
+def _ftp_open(ip, source_ip, timeout, dest_port, owns_session):
+    """Bring up the device FTP server and connect, retrying the handshake.
+
+    A receiver intermittently is not listening by the time we dial in, which
+    surfaces as a spurious timeout even though the card is fine. Re-send the
+    start command and back off before giving up.
+    """
     import ftplib
-    with _ftp_ip_lock(ip):
-        send_ftp_cmd(ip, start=True, source_ip=source_ip, dest_port=dest_port)
-        time.sleep(0.5)
+    last_exc = None
+    for attempt in range(FTP_CONNECT_ATTEMPTS):
+        if owns_session:
+            send_ftp_cmd(ip, start=True, source_ip=source_ip, dest_port=dest_port)
+        time.sleep(FTP_START_SETTLE + FTP_START_SETTLE * attempt)
         ftp = ftplib.FTP()
         try:
             ftp.connect(ip, FTP_PORT, timeout=timeout)
             ftp.login(FTP_USER, FTP_PASSWORD)
-            yield ftp
-            try:
-                ftp.quit()
-            except Exception:
-                pass
-        except Exception:
+            return ftp
+        except Exception as exc:
+            last_exc = exc
             try:
                 ftp.close()
             except Exception:
                 pass
-            raise
+    raise last_exc
+
+
+@_contextlib.contextmanager
+def _ftp_session(ip, source_ip=None, timeout=FTP_CONNECT_TIMEOUT, dest_port=None):
+    with _ftp_ip_lock(ip):
+        # Only the outermost session on this thread owns start/stop, so a
+        # nested session cannot stop the FTP server out from under its caller.
+        depth = getattr(_ftp_depth, "value", 0)
+        _ftp_depth.value = depth + 1
+        owns_session = depth == 0
+        try:
+            ftp = _ftp_open(ip, source_ip, timeout, dest_port, owns_session)
+            try:
+                yield ftp
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    ftp.close()
+                except Exception:
+                    pass
+                raise
         finally:
-            send_ftp_cmd(ip, start=False, source_ip=source_ip, dest_port=dest_port)
+            _ftp_depth.value = depth
+            if owns_session:
+                send_ftp_cmd(ip, start=False, source_ip=source_ip, dest_port=dest_port)
 
 
 def _parse_list_line(line):
@@ -2620,20 +2660,31 @@ def _parse_list_line(line):
     Standard Unix ls long format has 9 fields (group between user and size):
       permissions links user group size month day time/year filename
     Handle both, or the Radius SD listing comes back empty.
+
+    SimpleFTPServer delimits with tabs, so split on those when present rather
+    than counting whitespace tokens: a filename containing a space makes an
+    8-field line look like a 9-field one, which silently truncates the name to
+    the text after its last space and reports the size as 0.
     """
-    parts = line.split(None, 8)
-    n = len(parts)
-    if n == 9:
-        size_idx, name_idx = 4, 8   # standard: has group field
-    elif n == 8:
-        size_idx, name_idx = 3, 7   # SimpleFTPServer: no group field
+    if "\t" in line:
+        parts = line.split("\t", 5)
+        if len(parts) < 6:
+            return None
+        perms, raw_size, name = parts[0], parts[3], parts[5]
     else:
-        return None
+        parts = line.split(None, 8)
+        n = len(parts)
+        if n == 9:
+            perms, raw_size, name = parts[0], parts[4], parts[8]
+        elif n == 8:
+            perms, raw_size, name = parts[0], parts[3], parts[7]
+        else:
+            return None
     try:
-        size = int(parts[size_idx])
+        size = int(raw_size)
     except ValueError:
         size = 0
-    return {"name": parts[name_idx], "is_dir": parts[0].startswith("d"), "size": size}
+    return {"name": name, "is_dir": perms.startswith("d"), "size": size}
 
 
 def ftp_list_dir(ip, path="/", source_ip=None, dest_port=None):
