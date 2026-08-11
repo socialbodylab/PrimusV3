@@ -48,6 +48,12 @@ from primus_protocol import (
 # ======================================================================
 
 ARTNET_HEADER = b"Art-Net\x00"
+# Art-Net opcode registry — authoritative allocation. Vendor opcodes live in
+# 0x8000+ (0x81xx config, 0x82xx identity, 0x83xx Radius audio). These MUST stay
+# pairwise-unique and in sync with each firmware config.h. The 0x83xx audio block
+# came from radius-central; do not let a merge drop or renumber it back into
+# 0x82xx (the historical collision that forced the remap). Enforced by
+# tests/test_artnet_opcodes.py; full table in V5/FIRMWARE_DEVELOPMENT.md.
 ARTNET_OPCODE_DMX = 0x5000
 ARTNET_OPCODE_POLL = 0x2000
 ARTNET_OPCODE_POLLREPLY = 0x2100

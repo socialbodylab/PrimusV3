@@ -167,12 +167,43 @@ Radius firmware optimizes for **audio-first loop scheduling** and **exclusive SD
 
 ## Protocol
 
-| Opcode | Name | Purpose |
-|--------|------|---------|
-| 0x6000 | ArtAddress | Rename (NVS) |
-| 0x8200 | ArtIPConfig | Static IP / DHCP (NVS, reboot) |
-| 0x8300 | ArtAudioCmd | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
-| 0x8301 | ArtFtpCmd | FTP server start/stop |
+### Art-Net opcode registry (single source of truth)
+
+This table is the **authoritative allocation** for every Art-Net opcode the sender and
+firmware use. The same list is held in `V5/sender/artnet.py` (`ARTNET_OPCODE_*`, plus the
+versioned management pair in `V5/sender/primus_protocol.py`) and in each firmware `config.h`.
+**Enforced by `V5/sender/tests/test_artnet_opcodes.py`**, which asserts (a) all sender opcodes
+are pairwise-unique, (b) every opcode a firmware `config.h` defines equals the sender's value,
+and (c) the two firmware families agree on shared opcodes. Add a new opcode here **and** in the
+sender **and** in the relevant `config.h` in the same change, or the test fails.
+
+Vendor-defined opcodes live in the `0x8000+` range, sub-allocated by concern:
+`0x81xx` config / management · `0x82xx` node identity (IP, show info) · `0x83xx` Radius audio.
+
+| Opcode | Name | LED (`primusV3_receiver`) | Radius (`radius_receiver`) | Purpose |
+|--------|------|:---:|:---:|---------|
+| 0x2000 | ArtPoll | ✅ | ✅ | Discovery request |
+| 0x2100 | ArtPollReply | ✅ | ✅ | Discovery reply (capability tag) |
+| 0x5000 | ArtDmx | ✅ | — | Pixel data (LED only) |
+| 0x6000 | ArtAddress | ✅ | ✅ | Rename (NVS) |
+| 0x8100 | ArtOutputConfig | ✅ | — | Set output types (LED only) |
+| 0x8110 | ArtReceiveConfig | ✅ | — | Set receive mode / universe base (LED only) |
+| 0x8130 | ArtVirtualResolution | ✅ | — | Set virtual grid resolution (LED only) |
+| 0x8140 | ArtManagementRequest | ✅ | — | Versioned Primus management request |
+| 0x8141 | ArtManagementReply | ✅ | — | Versioned Primus management reply |
+| 0x8200 | ArtIPConfig | ✅ | ✅ | Static IP / DHCP (NVS, reboot) |
+| 0x8210 | ArtShowInfo | ✅ | ✅ | Character/performer names (NVS): read / write / response, 143-byte packet, two 64-byte fields |
+| 0x8300 | ArtAudioCmd | — | ✅ | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
+| 0x8301 | ArtFtpCmd | — | ✅ | FTP server start/stop |
+| 0x8302 | ArtAudioStatus | — | ✅ | Unsolicited playback status from device → sender (UDP 6455) |
+
+> **Merge guardrail.** The `0x83xx` audio range (`ArtAudioCmd`, `ArtFtpCmd`, `ArtAudioStatus`)
+> came from the `radius-central` line and the `0x8140`/`0x8141` management pair from the Primus
+> DeviceManager line; all must coexist. If a future merge from `main` conflicts on the opcode
+> block in `artnet.py` / `primus_protocol.py` or either `config.h`, keep the **union** of both
+> sides and run `test_artnet_opcodes.py` — a green run proves the allocation is still
+> collision-free and firmware/sender are in sync. Never renumber the `0x83xx` block back into
+> `0x82xx` (the historical `0x8200` collision that forced the original remap).
 
 ### ArtAudioCmd (0x8300)
 
@@ -213,6 +244,63 @@ UDP 6455 back-channel:
 
 - `PFP` — 7-byte packet rate telemetry
 - `PTR` — `[P][T][R][state][name_len][name…]` track name + playback state (0=stopped, 1=playing, 2=paused)
+
+## VS1053 audio chip: safe patterns
+
+The VS1053 (Music Maker FeatherWing) is the source of a whole family of "audio goes silent
+or wrong until a power cycle" bugs. Each rule below cost a debugging session; each is now
+pinned by `V5/sender/tests/test_firmware_source_contracts.py` so a refactor or a bad merge
+cannot quietly undo it. **All of these live in `radius_receiver/audio.h`.**
+
+> **Merge guardrail.** `audio.h` carries ~140 lines of VS1053 hardening that a plain `main`
+> tree does not have. If a merge conflict touches `audio.h`, **keep the guarded versions** of
+> `_applyVolume`, `_muteChip`, `audioPlay`, `audioLoop`, and `audioTestTone` — do not accept a
+> "simpler" version that drops the clamps, the cache invalidation, or the ordering. Then run the
+> firmware source contract tests; a green run is the proof the hardening survived.
+
+### Never write SCI_VOL 254 — it is analog powerdown, not "very quiet"
+`setVolume(254, 254)` (SCI_VOL ≈ 0xFEFE) is the VS1053's **analog powerdown** command; the
+analog stage can stay dead until a full reset. All attenuation is clamped to
+`VS1053_MAX_SAFE_ATTENUATION` (250, ≈ −125 dB, inaudible, analog stage alive) in
+`_applyVolume()`. *Pinned: `test_no_analog_powerdown_volume_writes`.*
+
+### Every hard mute and reset() must invalidate the volume cache
+`_applyVolume()` skips the SCI write when the requested volume equals `_lastAppliedVolume`.
+So any path that writes the chip volume directly — the hard mute in `_muteChip()`, or the
+`reset()` on a sample-rate change (which sets chip volume to 40/40) — must set
+`_lastAppliedVolume = 255` afterward, or the next `_applyVolume()` at the old value is skipped
+and playback runs **silently** while status packets still report "playing". Route all direct
+mutes through `_muteChip()`. *Pinned: `test_chip_mute_always_invalidates_volume_cache`,
+`test_no_bare_soft_reset`.*
+
+### Use the library's full `reset()`, never a bare `softReset()`
+A bare `softReset()` clears `SCI_CLOCKF` (the clock multiplier); at 1.0× the decoder cannot
+run and playback streams silently while `playingMusic` stays true. `reset()` restores CLOCKF
+with the settle delays this hardware needs. Used only on a sample-rate change in `audioPlay()`.
+*Pinned: `test_no_bare_soft_reset`.*
+
+### `sciWrite()` does not gate on DREQ — no SCI writes right after `sineTest()`
+The Adafruit library's `sciWrite()` writes SPI without checking DREQ. `sineTest()` leaves the
+chip exiting SM_TEST with DREQ low/transitioning, so a `setVolume()`/`sciWrite()` issued before
+DREQ goes high can be dropped or corrupt an SCI register — silencing **all** later playback
+until a power cycle. The runtime `audioTestTone()` therefore ends on `sineTest()` with no volume
+write after it. (`audioBootTest()` may set volume *before* `sineTest()` — its internal `reset()`
+overrides it — which is safe.) To control test-tone volume in future, poll `MM_DREQ_PIN` high
+first. *Pinned: `test_no_sci_write_after_sinetest_in_test_tone`.*
+
+### `delay(20)` after `stopPlaying()` before feeding a new file
+Switching tracks without letting the codec flush makes it misparse the next WAV header and play
+at the wrong pitch (or silently). `audioPlay()` waits after `stopPlaying()`. *Pinned:
+`test_delay_after_stop_playing_before_new_file`.*
+
+### `_audioLooping = true` must be set AFTER `audioPlay()`
+`audioPlay()` resets `_audioLooping` to false, so setting the flag before the call makes loops
+play exactly once. This one has regressed on every port. *Pinned:
+`test_audio_looping_set_after_audio_play`.*
+
+### Battery sampling is gated on `!audioIsPlaying()`
+Reading VBAT blocks ~16 ms; Radius audio is main-loop fed (no DREQ interrupt), so a mid-track
+sample underruns the VS1053. *Pinned: `test_battery_tick_skips_active_playback`.*
 
 ## SD / SPI contention
 
