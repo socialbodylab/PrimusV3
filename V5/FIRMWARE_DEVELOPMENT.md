@@ -14,12 +14,37 @@ assets and install newer receiver source into app data without upgrading the sen
 | `v2` | ESP32 Feather (2025 Make) | `./upload.sh --board v2` |
 | `v3` | ESP32-S3 Reverse TFT + custom PCB (A0/A1 NeoPixel, A4 battery) | `./upload.sh --board v3` |
 
-Discovery capability tag (includes lane ports):  
-`PV3CAP1|F:RIOHBMSG|B:v1|SHOW:6454|MGMT:6457|TELE:6455|IP:D|U:C:0|G:1P`.  
+Discovery capability tag, node on default lane ports:  
+`PV3CAP1|F:RIOHBMSGL|B:v1|IP:D|U:C:0|0:1:0:30|G:1P`.  
 V1 and V3 add `B` for battery data; `G` advertises management and `G:1P` /
 `G:1L` marks protocol v1 prototype/locked mode. Long Name and ArtPoll
 `NumPorts` always inventory A0 and A1, including Off. Full descriptors come
 from `GET_CONFIG`, not the 64-byte Node Report.
+
+**Lane ports are advertised only when moved off their default.** The full
+`|SHOW:6454|MGMT:6457|TELE:6455` triple is 30 bytes; emitting it unconditionally
+overflowed the hard 64-byte Node Report and silently dropped `|IP:`, `|U:`,
+`|G:` and every per-output tuple. The `L` feature flag is what tells the sender
+this firmware binds a separate Setup lane, so a node with no lane token is read
+as "lane-aware, on the documented defaults" rather than as pre-lane firmware.
+A node that *has* been moved emits just the lanes that changed, e.g.
+`…|IP:D|U:C:0|MGMT:7000`.
+
+Node Report token priority, highest first — whatever runs out of room is
+dropped from the bottom:
+
+| Order | Token | Why it ranks here |
+|-------|-------|-------------------|
+| 1 | `F:` | Gates rename, hello, IP, output, receive mode, battery, show info, lanes |
+| 2 | `B:` | Board identity; without it hardware is "unconfirmed" |
+| 3 | `IP:` | DHCP/static mode; no fallback source |
+| 4 | `U:` | Receive mode + base universe; no fallback source |
+| 5 | `SHOW:`/`MGMT:`/`TELE:` | Only present when moved — a node that cannot say its Setup lane moved is unmanageable |
+| 6 | per-output tuples | Sender falls back to Long Name parsing |
+| 7 | `G:` | Not parsed by any sender code today |
+
+Each token is appended only if it fits **whole**: a truncated `|MGMT:645` still
+parses as a valid port number and would send every Setup opcode into the void.
 
 UDP lanes (see `docs/systems/PORT_ORGANIZATION.md`):
 - **Show :6454** — ArtDmx + ArtPoll (Eos-compatible)

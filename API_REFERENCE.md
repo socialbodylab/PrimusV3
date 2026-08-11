@@ -72,8 +72,13 @@ for remote rename via ArtAddress, `I` for remote IP configuration via
 ArtIPConfig, `O` for remote output configuration via ArtOutputConfig, `M` for
 remote receive mode configuration via ArtReceiveConfig, `H` for
 the identify flash used by `POST /api/hello_device`, `B` for battery telemetry
-(UDP 6455 `PBT` packets), and `S` for receiver-backed show info storage
-(character/performer name) via `POST /api/device_show_info`. Receive layout is
+(UDP 6455 `PBT` packets), `S` for receiver-backed show info storage
+(character/performer name) via `POST /api/device_show_info`, and `L` to signal
+that the node binds a separate Setup lane. `L` matters because lane ports are
+advertised only when moved off their defaults (the full `SHOW:/MGMT:/TELE:`
+triple does not fit the 64-byte Node Report), so an `L` node with no lane token
+is read as "on the documented defaults" while a node without `L` is pre-lane
+firmware whose management still lives on the Show port. Receive layout is
 also reported as `U:S:<base>` (split: one universe per output starting at
 base) or `U:C:<base>` (combined: all outputs in one universe). Older nodes
 without this tag still fall back to the human-readable Long Name parser, and

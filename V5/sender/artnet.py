@@ -1251,6 +1251,12 @@ def parse_node_capabilities(node_report, short_name="", long_name=""):
             caps["receive_config"] = "M" in features
             caps["battery"] = "B" in features
             caps["show_info"] = "S" in features
+            # L = firmware binds a separate Setup lane. Nodes on the documented
+            # defaults advertise no SHOW:/MGMT:/TELE: token at all (they do not
+            # fit in the 64-byte Node Report alongside IP:/U:/G:), so this flag
+            # is what distinguishes "lane-aware, on defaults" from "pre-lane
+            # firmware that only ever listens on the Show port".
+            caps["lane_aware"] = "L" in features
         if saw_feature_token:
             if caps["hardware_profile"] == "unknown" and "primusv3" in name_blob:
                 caps["hardware_profile"] = "v31"
@@ -1351,7 +1357,10 @@ def _apply_lane_port_token(part, caps):
 def resolve_lane_ports(capabilities=None, is_radius=False):
     """Resolve Show/Setup/Watch ports from advertised caps with legacy fallbacks.
 
-    Missing MGMT → Setup sends fall back to Show (pre-lane-split firmware).
+    A lane is advertised only when it has been moved off its default, so a
+    missing token means "default" for lane-aware nodes (F: contains L) and
+    "pre-lane-split firmware" otherwise:
+    Missing MGMT + lane-aware → Setup 6457. Missing MGMT + legacy → Setup = Show.
     Missing AUD on Radius → Show stays 6454 (legacy V5 Radius on discovery port).
     """
     caps = capabilities or {}
@@ -1380,7 +1389,10 @@ def resolve_lane_ports(capabilities=None, is_radius=False):
         show = ARTNET_PORT
     setup = caps.get("port_setup")
     if setup is None:
-        setup = show  # legacy Primus management on Show port
+        # Lane-aware firmware only advertises a lane it has moved, so silence
+        # here means "on the documented default". Pre-lane firmware has no such
+        # lane and still takes management on the Show port.
+        setup = PORT_SETUP if caps.get("lane_aware") else show
     watch = caps.get("port_watch")
     if watch is None:
         watch = PORT_WATCH

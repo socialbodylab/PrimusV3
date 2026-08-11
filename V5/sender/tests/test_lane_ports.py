@@ -92,6 +92,52 @@ class LanePortCapabilityTests(unittest.TestCase):
         self.assertEqual(ports["port_show"], PORT_SHOW_PRIMUS)
         self.assertEqual(ports["port_setup"], ports["port_show"])
 
+    def test_lane_aware_primus_on_defaults_advertises_no_lane_token(self):
+        """Firmware on default lanes emits no SHOW:/MGMT:/TELE: at all.
+
+        The 64-byte Node Report cannot hold the 30-byte lane triple alongside
+        IP:/U:, so lane-awareness rides on the L feature flag and the sender
+        infers the documented defaults from it.
+        """
+        report = "#0001 [0000] OK|PV3CAP1|F:RIOHBMSGL|B:v1|IP:D|U:S:0|0:1:0:30"
+        self.assertLessEqual(len(report), 63)
+        caps = parse_node_capabilities(report, "PrimusV3", "")
+        self.assertTrue(caps["lane_aware"])
+        self.assertIsNone(caps.get("port_setup"))
+        ports = resolve_lane_ports(caps, is_radius=False)
+        self.assertEqual(ports["port_show"], PORT_SHOW_PRIMUS)
+        self.assertEqual(ports["port_setup"], PORT_SETUP)
+        self.assertEqual(ports["port_watch"], PORT_WATCH)
+
+    def test_lane_aware_report_keeps_ip_and_universe(self):
+        """Regression: the lane triple used to overflow and eat IP:/U:.
+
+        A device on defaults must still report its IP mode and universe base;
+        losing them left every freshly flashed node showing "unknown".
+        """
+        report = "#0001 [0000] OK|PV3CAP1|F:RIOHBMSGL|B:v1|IP:D|U:S:0|0:1:0:30"
+        caps = parse_node_capabilities(report, "PrimusV3", "")
+        self.assertEqual(caps["ip_mode"], "dhcp")
+        self.assertEqual(caps["base_universe"], 0)
+        self.assertEqual(caps["receive_mode"], "split")
+
+    def test_moved_setup_lane_is_advertised_and_wins(self):
+        """A moved lane must still fit — otherwise the node is unmanageable."""
+        report = "#0001 [0000] OK|PV3CAP1|F:RIOHBMSGL|B:v1|IP:D|U:S:0|MGMT:7000"
+        self.assertLessEqual(len(report), 63)
+        caps = parse_node_capabilities(report, "PrimusV3", "")
+        ports = resolve_lane_ports(caps, is_radius=False)
+        self.assertEqual(ports["port_setup"], 7000)
+        self.assertEqual(ports["port_show"], PORT_SHOW_PRIMUS)
+
+    def test_legacy_primus_without_lane_flag_still_falls_back_to_show(self):
+        """No L flag means pre-lane firmware: Setup stays on the Show port."""
+        report = "#0001 [0000] OK|PV3CAP1|F:RIOHBMSG|B:v1|IP:D|U:S:0"
+        caps = parse_node_capabilities(report, "PrimusV3", "")
+        self.assertFalse(caps["lane_aware"])
+        ports = resolve_lane_ports(caps, is_radius=False)
+        self.assertEqual(ports["port_setup"], PORT_SHOW_PRIMUS)
+
     def test_device_port_helpers(self):
         primus = {"port_show": 6454, "port_setup": 6457, "is_radius": False}
         radius = {"port_show": 6456, "port_setup": 6457, "is_radius": True}

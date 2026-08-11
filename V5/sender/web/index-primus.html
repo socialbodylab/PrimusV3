@@ -192,6 +192,13 @@
                           x-show="$store.conn.firmwareLabel(dev) !== '—'"
                           x-text="'FW ' + $store.conn.firmwareLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
+                    <!-- Read-only here: lane ports are edited in DeviceManager, but the
+                         show operator still needs to see that a node has been moved off
+                         the Art-Net default and will not receive from a stock console. -->
+                    <span class="device-lane-warning"
+                          x-show="$store.conn.lanePortsWarning(dev)"
+                          :title="$store.conn.lanePortsWarning(dev)"
+                          x-text="'Show :' + $store.conn.devicePortShow(dev)"></span>
                 </div>
                 <div class="btn-group device-actions device-actions-primary">
                     <button class="btn btn-sm device-action-main"

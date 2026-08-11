@@ -131,6 +131,12 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "port_setup": None,
     "port_watch": None,
     "ftp_port": None,
+    # Firmware binds a separate Setup lane. Nodes on default ports advertise no
+    # lane token (it does not fit the 64-byte Node Report), so this flag is the
+    # only thing distinguishing them from pre-lane firmware whose management
+    # still lives on the Show port. Dropping it here would silently route every
+    # Setup opcode back to 6454.
+    "lane_aware": False,
 }
 CONTROL_CAPABILITY_LABELS = {
     "rename": "remote rename",
@@ -443,6 +449,7 @@ def _normalize_device_capabilities(capabilities=None):
     out["audio"] = bool(out.get("audio"))
     out["ftp"] = bool(out.get("ftp"))
     out["show_info"] = bool(out.get("show_info"))
+    out["lane_aware"] = bool(out.get("lane_aware"))
     out["management"] = bool(out.get("management"))
     version = out.get("management_protocol_version")
     out["management_protocol_version"] = int(version) if version is not None else None
@@ -1870,6 +1877,12 @@ class ControllerState:
                         dev.get("unlock_remaining_seconds") or 0),
                     "telemetry_target": dev.get("telemetry_target"),
                     "telemetry_configured": bool(dev.get("telemetry_configured")),
+                    # Resolved, not raw: the UI prefills its lane editor from these
+                    # and warns when Show has moved off 6454, so it needs the port
+                    # actually in use rather than None for a node on defaults.
+                    "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+                    "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+                    "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
                     "outputs": [],
                     "descriptor_config": [],
                 }

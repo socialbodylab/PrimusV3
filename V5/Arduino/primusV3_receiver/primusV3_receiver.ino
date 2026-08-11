@@ -1227,19 +1227,36 @@ void sendArtPollReply(IPAddress dest) {
   }
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|SHOW:%u|MGMT:%u|TELE:%u", portShow, portSetup, portWatch);
-    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
-  }
-  if (reportPos < (int)sizeof(reportBuf) - 1) {
-    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|IP:%c", useStaticIP ? 'S' : 'D');
     if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
   }
   reportPos = buildReceiveModeCapabilityToken(reportBuf, sizeof(reportBuf), reportPos);
-  if (reportPos < (int)sizeof(reportBuf) - 1) {
-    reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                          "|G:1%c", isProductionMode() ? 'L' : 'P');
-    if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  // Lane ports: only advertise a lane that has been moved off its compiled
+  // default. The full "|SHOW:6454|MGMT:6457|TELE:6455" triple is 30 bytes and
+  // on its own overflows this 64-byte buffer, which silently ate |IP:, |U:
+  // and |G: for every device on defaults. The sender learns "this node speaks
+  // the lane split" from the L feature flag instead, and assumes the
+  // documented defaults unless a token below says otherwise.
+  //
+  // These rank above the per-output tuples and |G: because a node whose Setup
+  // lane has moved but cannot say so is unmanageable: the sender would keep
+  // talking to 6457 while the device listens elsewhere. Each token is appended
+  // only when it fits whole — a truncated "|MGMT:645" still parses as a valid
+  // port number and would send every Setup opcode into the void.
+  {
+    const struct { const char* tag; uint16_t value; uint16_t deflt; } laneTokens[] = {
+      { "SHOW", portShow,  PORT_SHOW_DEFAULT  },
+      { "MGMT", portSetup, PORT_SETUP_DEFAULT },
+      { "TELE", portWatch, PORT_WATCH_DEFAULT },
+    };
+    for (uint8_t i = 0; i < 3 && reportPos < (int)sizeof(reportBuf) - 1; i++) {
+      if (laneTokens[i].value == laneTokens[i].deflt) continue;
+      int tokenLen = snprintf(nullptr, 0, "|%s:%u", laneTokens[i].tag, laneTokens[i].value);
+      if (reportPos + tokenLen >= (int)sizeof(reportBuf) - 1) break;
+      reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                            "|%s:%u", laneTokens[i].tag, laneTokens[i].value);
+      if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+    }
   }
   for (uint8_t i = 0; i < NUM_OUTPUTS && reportPos < (int)sizeof(reportBuf) - 1; i++) {
     if (outputs[i].type == OUTPUT_CUSTOM) continue;
@@ -1252,6 +1269,16 @@ void sendArtPollReply(IPAddress dest) {
                           "|%u:%u:%u:%u", i, (uint8_t)outputs[i].type,
                           outputs[i].universe, outputs[i].virtualPixelCount);
     if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+  }
+  // |G: goes last: no sender code parses it today, so it is the only token here
+  // whose loss costs nothing. Whatever space survives the tokens above is its.
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    int genLen = snprintf(nullptr, 0, "|G:1%c", isProductionMode() ? 'L' : 'P');
+    if (reportPos + genLen < (int)sizeof(reportBuf) - 1) {
+      reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                            "|G:1%c", isProductionMode() ? 'L' : 'P');
+      if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+    }
   }
   strncpy((char*)&reply[108], reportBuf, 63);
 

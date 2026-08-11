@@ -38,7 +38,15 @@ class PackagingBuilderTests(unittest.TestCase):
         )
 
     def test_default_release_version_matches_builder(self):
-        self.assertEqual(build_sender_app.DEFAULT_APP_VERSION, "0.93")
+        """The builder default and the sender's own APP_VERSION must agree.
+
+        Asserted against each other rather than a hardcoded literal: the point
+        is that a release bump touches both, and pinning a version string here
+        just means every release fails this test until someone edits it.
+        """
+        import version
+
+        self.assertEqual(build_sender_app.DEFAULT_APP_VERSION, version.APP_VERSION)
 
     def test_radius_product_uses_radius_icon_source(self):
         self.assertEqual(

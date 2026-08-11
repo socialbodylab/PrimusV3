@@ -7,7 +7,7 @@
 ### Migration note
 
 - Existing receivers that only listen on `:6454` keep working while dual-listen is on: senders fall back Setup → Show when `MGMT:` is absent from discovery.
-- New Primus firmware binds Show `:6454` + Setup `:6457` and advertises `|SHOW:|MGMT:|TELE:|`. New Radius binds discovery `:6454`, audio Show `:6456`, Setup `:6457`, and advertises `|AUD:|MGMT:|TELE:|FTP:|`.
+- New Primus firmware binds Show `:6454` + Setup `:6457`, advertises the `L` feature flag, and emits `|SHOW:|MGMT:|TELE:|` **only for lanes moved off their defaults** (see §4.3 — the full triple does not fit the 64-byte Node Report). New Radius binds discovery `:6454`, audio Show `:6456`, Setup `:6457`, and advertises `|AUD:|MGMT:|TELE:|FTP:|`.
 - **Recovery:** discover on `:6454` → open Setup on advertised/default `:6457` → `SET_LANE_PORTS` / ArtLanePorts `0x8220` (or boot-window unlock) to restore defaults.
 - Sender network defaults live under Settings → UDP Lanes; per-device overrides via DeviceManager expanded card / `GET|POST /api/device_lane_ports`.
 
@@ -110,9 +110,27 @@ Primus `portShow` default 6454; Radius live-audio listen default 6456. A device 
 Extend capability / Node Report (64-byte pressure still applies — keep tokens short), e.g.:
 
 ```text
-...|SHOW:6454|MGMT:6457|TELE:6455
 ...|AUD:6456|MGMT:6457|TELE:6455|FTP:21
 ```
+
+**Resolved for Primus (implemented):** the 64-byte pressure is not merely a
+caution — the 30-byte `|SHOW:6454|MGMT:6457|TELE:6455` triple *by itself*
+overflowed the Node Report and silently dropped `|IP:`, `|U:`, `|G:` and every
+per-output tuple on every device, whatever its lane config. Primus therefore:
+
+1. advertises the `L` feature flag in `F:` to mean "this node binds a Setup lane";
+2. emits `SHOW:`/`MGMT:`/`TELE:` **only for a lane moved off its default**;
+3. appends each token only when it fits whole, since a truncated `|MGMT:645`
+   parses as a plausible port and would black-hole every Setup opcode.
+
+So a node on defaults advertises no lane token at all, and the sender reads
+`L` + silence as "the documented defaults" — which is *not* the §4.5 prohibition
+on silently defaulting, because nothing was advertised to contradict. A node
+without `L` is genuinely pre-lane firmware and keeps Setup on Show.
+
+Token priority under pressure, highest first: `F:` → `B:` → `IP:` → `U:` →
+moved-lane tokens → per-output tuples → `G:`. `G:` ranks last because no sender
+code parses it; per-output tuples outrank it but fall back to Long Name parsing.
 
 Management `GET_CONFIG` should return the same map as structured fields for DeviceManager.
 
