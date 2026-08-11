@@ -2,8 +2,6 @@
 
 This document describes the shipped V5 integration that lets **DeviceManager** monitor **Primus and Radius receivers on the same network**, while **RadiusCentral** gains the same identity editing UX as PrimusCentral. PrimusCentral and RadiusCentral firmware panels remain product-scoped; only DeviceManager exposes a mixed Primus/Radius firmware upload flow.
 
-For the pre-implementation firmware audit, see [RADIUS_FIRMWARE_AUDIT.md](RADIUS_FIRMWARE_AUDIT.md).
-
 ## Architecture
 
 ```mermaid

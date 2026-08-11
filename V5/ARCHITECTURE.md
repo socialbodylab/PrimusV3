@@ -143,4 +143,4 @@ deliberately deferred to a future protocol version.
 - [README.md](README.md) — quick start and UI modes
 - [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) — opcode tables and hardware notes
 - [PACKAGING.md](PACKAGING.md) — PyInstaller, signing, DMG
-- [RADIUS_CENTRAL_BRANCH_FEATURES.md](RADIUS_CENTRAL_BRANCH_FEATURES.md) — branch parity inventory
+- [RADIUS_INTEGRATION.md](RADIUS_INTEGRATION.md) — Radius + DeviceManager integration architecture
