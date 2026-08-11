@@ -46,10 +46,12 @@ from network_settings import (
     NetworkSettingsError,
     apply_static_ip,
     get_artnet_interface,
+    get_lane_ports,
     get_network_status,
     save_profile,
     set_controller_connection,
     set_dhcp,
+    set_lane_ports,
     set_preferred_interface,
 )
 from paths import web_dir, frontend_index_path, default_frontend_path, sender_product, app_version
@@ -156,6 +158,23 @@ class Handler(BaseHTTPRequestHandler):
     def _osc_service(self):
         return getattr(self.server, "osc_service", None)
 
+    def _server_has_live_output(self):
+        """True when this Central is actively driving a show.
+
+        Reuses the same callable the UI-lifecycle monitor uses to decide whether
+        it is safe to auto-quit, so /api/server/stop and the auto-shutdown path
+        can never disagree about whether output is live.
+        """
+        live_output_fn = getattr(self.server, "live_output_fn", None)
+        if not callable(live_output_fn):
+            return False
+        try:
+            return bool(live_output_fn(self.server))
+        except Exception:
+            # A broken predicate must not make the server look idle, or a stop
+            # request would black out a running show.
+            return True
+
     def _leave_controller_runtime(self, preserve_selection=True):
         if self.cue_list is not None:
             self.cue_list.release_output(preserve_selection=preserve_selection)
@@ -251,6 +270,32 @@ class Handler(BaseHTTPRequestHandler):
                 "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
             })
             return
+        if path == "/api/server/status":
+            # Richer than /api/runtime on purpose: /api/runtime is the discovery
+            # probe and has to stay stable for older clients, so operational
+            # detail that changes shape over time lives here instead.
+            sessions = getattr(self.server, "ui_sessions", None) or {}
+            started_at = getattr(self.server, "ui_lifecycle_started_at", None)
+            uptime = None
+            if started_at is not None:
+                uptime = round(time.monotonic() - started_at, 1)
+            self._json_response({
+                "pid": os.getpid(),
+                "host": self.server.server_address[0],
+                "port": self.server.server_address[1],
+                "product": sender_product(),
+                "app_version": app_version(),
+                "monitor_only": bool(
+                    getattr(self._device_state(), "monitor_only", False)),
+                "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
+                "ui_lifecycle": bool(
+                    getattr(self.server, "ui_lifecycle_enabled", False)),
+                "client_sessions": sorted(sessions.keys()),
+                "client_session_count": len(sessions),
+                "live_output": self._server_has_live_output(),
+                "uptime_seconds": uptime,
+            })
+            return
         if path == "/api/state":
             self._json_response(self._device_state().get_json())
             return
@@ -316,6 +361,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/network/status":
             self._json_response(get_network_status())
+            return
+        if path == "/api/network/lane_ports":
+            self._json_response(get_lane_ports())
+            return
+        if path == "/api/device_lane_ports":
+            params = self._query_params()
+            try:
+                di = self._parse_int_field(params.get("device"), "device", location="query")
+            except ValueError as exc:
+                self._json_error(400, str(exc))
+                return
+            self._json_state_result(self._device_state().get_device_lane_ports(di))
             return
         if path == "/api/firmware/status":
             params = self._query_params()
@@ -509,6 +566,21 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ui/closed":
             close_session(self.server, data.get("session_id"))
             self._ok()
+
+        elif path == "/api/server/stop":
+            # Guarded by default: another app asking this Central to step aside
+            # must not be able to black out a running show. --force is the
+            # deliberate override.
+            if self._server_has_live_output() and not data.get("force"):
+                self._json_error(
+                    409,
+                    "Central is driving output; stop playback first or retry with force.",
+                )
+                return
+            self._json_response({"ok": True, "message": "stopping"})
+            # Shut down off-thread: shutdown() blocks until serve_forever exits,
+            # which cannot happen while this handler is still running.
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
 
         elif path == "/api/ui/focus":
             callback = getattr(self.server, "ui_focus_callback", None)
@@ -952,6 +1024,30 @@ class Handler(BaseHTTPRequestHandler):
                     error_code=result.get("error_code"),
                 )
 
+        elif path == "/api/device_lane_ports":
+            self._sync_artnet_source()
+            di = data.get("device", -1)
+            try:
+                di = int(di)
+                port_show = self._parse_int_field(data.get("port_show"), "port_show")
+                port_setup = self._parse_int_field(data.get("port_setup"), "port_setup")
+                port_watch = self._parse_int_field(data.get("port_watch"), "port_watch")
+            except (TypeError, ValueError) as exc:
+                self._json_error(400, str(exc) or "invalid device or port value")
+                return
+            result = self._device_state().set_device_lane_ports(
+                di, port_show, port_setup, port_watch)
+            if result.get("ok"):
+                self._json_response(result)
+            else:
+                error = result.get("error", "lane port update failed")
+                self._json_error_with_details(
+                    result.get("http_status")
+                    or (400 if "invalid" in error.lower() or "must" in error.lower() else 409),
+                    error,
+                    error_code=result.get("error_code"),
+                )
+
         elif path == "/api/clip/preview":
             clip_id = data.get("clip_id")
             try:
@@ -1301,6 +1397,12 @@ class Handler(BaseHTTPRequestHandler):
                 source_ip = (interface or {}).get("source_ip") or (interface or {}).get("ipv4")
                 self._device_state().set_artnet_source(source_ip)
                 self._json_response(result)
+            except NetworkSettingsError as exc:
+                self._json_network_error(exc)
+
+        elif path == "/api/network/lane_ports":
+            try:
+                self._json_response(set_lane_ports(data))
             except NetworkSettingsError as exc:
                 self._json_network_error(exc)
 

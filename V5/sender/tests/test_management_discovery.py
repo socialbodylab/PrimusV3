@@ -141,7 +141,7 @@ class ManagementDiscoveryTests(StateScratchMixin, unittest.TestCase):
             [("A0", "small_grid", 1), ("A1", "none", 0)],
         )
         get_primus_config.assert_called_once_with(
-            "192.168.1.50", source_ip=None)
+            "192.168.1.50", source_ip=None, dest_port=6454)
         save_devices.assert_not_called()
 
     @patch("state._save_devices")

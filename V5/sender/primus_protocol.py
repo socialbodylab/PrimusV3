@@ -41,6 +41,11 @@ class Operation(IntEnum):
     SET_IP_CONFIG = 0x14
     SET_IDENTITY = 0x15
     BOOT_WINDOW_UNLOCK = 0x16
+    SET_LANE_PORTS = 0x17
+
+CONFIG_VERSION_V1 = 1
+CONFIG_VERSION_V2 = 2
+LANE_PORTS_SIZE = 6  # 3 × uint16 BE: show, setup, watch
 
 
 class ReplyStatus(IntEnum):
@@ -542,10 +547,18 @@ class DeviceConfig:
     technical_name: str
     character_name: str
     performer_name: str
+    port_show: int = 6454
+    port_setup: int = 6457
+    port_watch: int = 6455
+    config_version: int = CONFIG_VERSION_V1
 
 
 def _ip_bytes(value):
     return ipaddress.IPv4Address(value).packed
+
+
+def pack_lane_ports(port_show, port_setup, port_watch):
+    return struct.pack(">HHH", int(port_show), int(port_setup), int(port_watch))
 
 
 def pack_config(config):
@@ -555,22 +568,32 @@ def pack_config(config):
     )
     if not 0 <= config.unlock_remaining_seconds <= 0xFFFF:
         raise ValueError("unlock_remaining_seconds must fit uint16")
-    return (
-        _CONFIG_PREFIX.pack(
-            1,
-            int(config.operating_mode),
-            int(config.unlock_window_open),
-            0,
-            config.unlock_remaining_seconds,
-            int(receive_mode),
-            0,
-            base_universe,
-            _ip_bytes(config.telemetry_target),
-            int(config.ip_mode),
-            _ip_bytes(config.ip),
-            _ip_bytes(config.gateway),
-            _ip_bytes(config.subnet),
+    version = int(getattr(config, "config_version", CONFIG_VERSION_V2) or CONFIG_VERSION_V2)
+    if version not in (CONFIG_VERSION_V1, CONFIG_VERSION_V2):
+        raise ValueError("unsupported GET_CONFIG payload version")
+    body = _CONFIG_PREFIX.pack(
+        CONFIG_VERSION_V2 if version >= CONFIG_VERSION_V2 else CONFIG_VERSION_V1,
+        int(config.operating_mode),
+        int(config.unlock_window_open),
+        0,
+        config.unlock_remaining_seconds,
+        int(receive_mode),
+        0,
+        base_universe,
+        _ip_bytes(config.telemetry_target),
+        int(config.ip_mode),
+        _ip_bytes(config.ip),
+        _ip_bytes(config.gateway),
+        _ip_bytes(config.subnet),
+    )
+    if version >= CONFIG_VERSION_V2:
+        body += pack_lane_ports(
+            getattr(config, "port_show", 6454),
+            getattr(config, "port_setup", 6457),
+            getattr(config, "port_watch", 6455),
         )
+    return (
+        body
         + pack_output_descriptors(config.outputs)
         + pack_identity(
             config.technical_name,
@@ -600,9 +623,18 @@ def unpack_config(data):
         gateway,
         subnet,
     ) = _CONFIG_PREFIX.unpack_from(data)
-    if config_version != 1 or reserved != 0 or receive_reserved != 0:
+    if config_version not in (CONFIG_VERSION_V1, CONFIG_VERSION_V2):
         raise ValueError("unsupported GET_CONFIG payload version")
-    descriptor_start = _CONFIG_PREFIX.size
+    if reserved != 0 or receive_reserved != 0:
+        raise ValueError("unsupported GET_CONFIG payload version")
+    offset = _CONFIG_PREFIX.size
+    port_show, port_setup, port_watch = 6454, 6457, 6455
+    if config_version >= CONFIG_VERSION_V2:
+        if len(data) < offset + LANE_PORTS_SIZE + OUTPUT_SLOT_COUNT * OUTPUT_DESCRIPTOR_SIZE + 3:
+            raise ValueError("GET_CONFIG payload is truncated")
+        port_show, port_setup, port_watch = struct.unpack_from(">HHH", data, offset)
+        offset += LANE_PORTS_SIZE
+    descriptor_start = offset
     descriptor_end = descriptor_start + OUTPUT_SLOT_COUNT * OUTPUT_DESCRIPTOR_SIZE
     outputs = unpack_output_descriptors(data[descriptor_start:descriptor_end])
     receive_mode, base_universe = _validate_base_universe(receive_mode, base_universe)
@@ -626,6 +658,10 @@ def unpack_config(data):
             identity[0],
             identity[1],
             identity[2],
+            int(port_show),
+            int(port_setup),
+            int(port_watch),
+            int(config_version),
         )
     except ValueError as exc:
         raise ValueError("invalid GET_CONFIG enum") from exc

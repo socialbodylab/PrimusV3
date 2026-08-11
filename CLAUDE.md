@@ -28,6 +28,25 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|IP:D|F:RA`
 - Track telemetry: UDP 6455 magic `PTR` for current filename
 
+**Launcher contract (all three apps).** There is one backend process; the apps are launchers onto its frontends. Before attaching, a launcher must answer three questions, and `central_launcher.evaluate_server()` is where that happens: is a Central running, can it serve *my product*, and can it serve *my capabilities* (drive output). A mismatch must never silently attach — packaged apps are windowed with no console, so a silent decision is indistinguishable from a failed launch. Key pieces:
+
+- `launcher_dialog.py` — stdlib-only native dialogs (`osascript` on macOS, `MessageBoxW` on Windows, print+default fallback). Set `PRIMUSV3_NO_DIALOGS=1` to force the non-blocking fallback in scripts and CI.
+- `try_attach_before_start(..., need_product=, needs_output=, on_mismatch=)` — the handler returns `"attach"`, `"start"`, or `"abort"`. With no handler the default is to refuse, not attach.
+- PrimusCentral offers **Restart in full mode / Open read-only / Cancel** when it finds a `monitor_only` backend (DeviceManager's). Restart calls `POST /api/server/stop` then `wait_for_port_release()` and rebinds. Without this, PrimusCentral silently inherited monitor-only and every `connect_all` returned 409.
+- RadiusCentral refuses a non-Radius backend outright (see the limitation below).
+- Attach calls `reserve_ui_session()` so the running Central counts the new client before its browser exists and cannot auto-quit in that gap.
+- The registry (`central_server.json`) records capabilities — `monitor_only`, `lan_enabled`, `app_version` — not just host/port.
+- Both the auto-shutdown monitor and `POST /api/server/stop` read the same `server.live_output_fn`, so they can never disagree about whether quitting is safe. Primus uses `playback_source`; Radius uses `RadiusState.has_live_playback()` (any device reporting playback via PTR).
+- Operator control: `python3 V5/sender/run.py --server-status` and `--stop-server [--force]`. This is the supported way to clear an orphaned server holding the port.
+
+**KNOWN LIMITATION — RadiusCentral cannot currently run alongside PrimusCentral/DeviceManager.** PrimusCentral and DeviceManager deliberately share one backend (DeviceManager is a frontend on the Primus server), but RadiusCentral is a *different product* and has no working co-existence story. Launching it while a Primus Central is running silently attaches it to that Primus backend:
+
+- `find_running_central_server()` in `central_launcher.py` returns any live Central **without checking product**, and `candidate_ports()` probes the requested port, then the registry port, then 8080 — so `--port 8081` still attaches to a Primus server on 8080. `central_server.json` holds a single `{port, product, pid}`; it is a one-server registry.
+- Result: `/radius` returns 200 and the UI loads, but it is served by a `primus` backend. `radius_state.py` / `.radius_state.json` are never loaded, `/api/state` returns clips/looks/cues with no audio/ftp/track keys, and `/api/audio/cue_map` returns 400. **The failure is invisible — the app looks healthy.**
+- Deeper blocker: the Watch-lane telemetry listener binds `0.0.0.0:6455` with `SO_REUSEADDR` only, so a second backend cannot bind it (`Errno 48`). Fixing only the launcher moves the failure rather than removing it, and adding `SO_REUSEPORT` would be worse — telemetry would be split arbitrarily between processes.
+
+Preferred direction when this is addressed: make RadiusCentral a **third frontend on one shared backend**, the same way DeviceManager already is, with the single 6455 listener demuxing by magic (`PST`/`PFP` = Primus, `PTR` = Radius). That removes the port conflict by construction, and DeviceManager's mixed monitoring already discovers `PVRAD1` nodes on the Primus backend. The work is that the backend picks one product globally via `sender_product()` and would need to hold both states at once. Independently, the launcher should **fail loudly on product mismatch** rather than silently attaching.
+
 ### DeviceManager (network monitoring, device config, and firmware app)
 
 DeviceManager is not a separate backend — it is a third frontend served by the same unified server that hosts PrimusCentral, always running against the `primus` product. It exists to give a stage manager a live, monitoring-first view of every receiver on the network, plus device configuration and firmware upload, without the show-control workflow (Look Designer, Cue Controller) getting in the way.
@@ -103,7 +122,8 @@ The sender and receiver must agree on:
 - **Custom opcode 0x8130**: ArtVirtualResolution for per-output virtual send pixel counts (firmware 3.11+).
 - **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration.
 - **Discovery capability tag**: `PV3CAP1|F:RIOHM|B:<profile>|IP:D|U:S:0|...` in ArtPollReply Node Report (`U:C:N` for combined mode; trailing `...` is the per-output `port:type:universe[:virtual]` tuples, with the optional fourth field being virtual pixel count on firmware 3.11+). Firmware **3.12+** put `F:` (feature flags) right after the `PV3CAP1` prefix instead of last — the Node Report is a hard 64-byte Art-Net field, and with 2 outputs + a 3-digit base universe + combined mode + a static IP the full token set can exceed that, so whatever comes last risks silent truncation. `F:` gates nearly every capability the sender can act on (rename, hello, IP config, output config, receive mode, battery, show info), so losing it is far worse than losing the lower-stakes per-output tuples, which now come last instead.
-- **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config, `M` receive mode config.
+- **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config, `M` receive mode config, `B` battery telemetry, `S` show info storage, `L` Setup-lane aware.
+- **Lane ports (firmware 3.14+)**: Show 6454 / Setup 6457 / Watch 6455. A node advertises `SHOW:`/`MGMT:`/`TELE:` **only for a lane moved off its default** — the full 30-byte triple alone overflows the 64-byte Node Report and silently ate `IP:`, `U:`, `G:` and all per-output tuples. `L` in `F:` is what marks a node lane-aware, so `L` + no lane token means "on the documented defaults" and no `L` means pre-lane firmware whose Setup stays on the Show port. Node Report priority under pressure: `F:` → `B:` → `IP:` → `U:` → moved-lane tokens → per-output tuples → `G:` (last; nothing parses it). Every token is appended only if it fits whole — a truncated `|MGMT:645` parses as a plausible port and would black-hole all Setup traffic.
 - **FPS telemetry**: 7-byte `PFP` packets on UDP 6455.
 - **Brightness**: sender-side RGB scaling only; no receiver brightness channel.
 - **Virtual resolution**: sender renders at full physical resolution; Art-Net transport uses `virtual_pixels` per output (Badge default 1); receiver upscales to physical LEDs.
@@ -149,7 +169,7 @@ Use `--auto` only when exactly one ESP32-like serial port is connected. Use `--a
 
 ## Packaging and release marker
 
-Shipped PrimusCentral releases (v0.81+) are built from **V4** with `--product primus`. The v0.65 release is an important packaged macOS performance marker from the earlier V3_6 line. It fixed an FPS drop where source `run.py` and direct binary execution reached about 30 FPS, but a real `.app` LaunchServices/Finder launch dropped to about 15-20 FPS. Future packaged FPS validation must launch the app through Finder or LaunchServices, not by running `PrimusCentral.app/Contents/MacOS/PrimusCentral` directly.
+Shipped PrimusCentral releases v0.81–v0.92 were built from **V4** with `--product primus`. **v0.97 is the first release built from V5**, for both PrimusCentral and DeviceManager. Note that PrimusCentral and DeviceManager share one `v0.9x` tag stream and one `APP_VERSION` in `V5/sender/version.py` — DeviceManager reached v0.96 while PrimusCentral was still at v0.92, so pick the next free number in the shared stream rather than incrementing either product on its own. RadiusCentral versions separately under `RadiusCentral-v0.9x` tags. The v0.65 release is an important packaged macOS performance marker from the earlier V3_6 line. It fixed an FPS drop where source `run.py` and direct binary execution reached about 30 FPS, but a real `.app` LaunchServices/Finder launch dropped to about 15-20 FPS. Future packaged FPS validation must launch the app through Finder or LaunchServices, not by running `PrimusCentral.app/Contents/MacOS/PrimusCentral` directly.
 
 Validated macOS release identity:
 - App name: `PrimusCentral.app`

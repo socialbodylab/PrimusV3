@@ -35,6 +35,10 @@ document.addEventListener("alpine:init", () => {
         ipConfigIp: "",
         ipConfigGateway: "",
         ipConfigSubnet: "255.255.255.0",
+        lanePortsConfigDevice: -1,
+        lanePortsShow: "",
+        lanePortsSetup: "",
+        lanePortsWatch: "",
         configFeedback: {},
         _ipRediscoveryTimer: null,
         _ipRediscoveryUntil: 0,
@@ -98,6 +102,88 @@ document.addEventListener("alpine:init", () => {
 
         canConfigureIp(dev) {
             return !!dev?.capabilities?.ip_config && this.canEditDeviceSettings(dev);
+        },
+
+        // Lane ports (Show/Setup/Watch) are part of the Primus management
+        // protocol for Primus receivers, and a standalone opcode for Radius
+        // nodes — either way they're gated the same way IP config is.
+        canConfigureLanePorts(dev) {
+            if (!dev) return false;
+            if (isRadiusDevice(dev)) return this.canEditDeviceSettings(dev);
+            return this.isPrimusManagementDevice(dev) && this.canEditDeviceSettings(dev);
+        },
+
+        lanePortsHint(dev) {
+            if (!dev) return "";
+            if (this.canConfigureLanePorts(dev)) return "Configure this device's Show/Setup/Watch UDP ports.";
+            if (this.deviceSettingsLocked(dev)) return "Production-locked; unlock to change lane ports.";
+            if (isRadiusDevice(dev)) return "Lane port configuration unavailable for this device.";
+            return "This device does not advertise Primus management support, so lane ports cannot be changed remotely.";
+        },
+
+        devicePortShow(dev) {
+            return dev?.port_show ?? (isRadiusDevice(dev) ? 6456 : 6454);
+        },
+
+        devicePortSetup(dev) {
+            return dev?.port_setup ?? this.devicePortShow(dev);
+        },
+
+        devicePortWatch(dev) {
+            return dev?.port_watch ?? 6455;
+        },
+
+        // Stock Eos (and any other console that only speaks vanilla Art-Net)
+        // sends ArtDmx to UDP 6454. A Primus node whose Show lane has been
+        // moved off that default will silently miss that traffic, so flag it
+        // in the monitoring view rather than let it look mysteriously dark.
+        lanePortsWarning(dev) {
+            if (!dev || isRadiusDevice(dev)) return "";
+            return this.devicePortShow(dev) !== 6454
+                ? "custom Art-Net — stock Eos will not hit this node."
+                : "";
+        },
+
+        openLanePortsConfig(di) {
+            const dev = this.devices[di];
+            if (!this.canConfigureLanePorts(dev)) {
+                Alpine.store("app").showNotice(this.lanePortsHint(dev), "info");
+                return;
+            }
+            this.lanePortsConfigDevice = di;
+            this.lanePortsShow = this.devicePortShow(dev);
+            this.lanePortsSetup = this.devicePortSetup(dev);
+            this.lanePortsWatch = this.devicePortWatch(dev);
+        },
+
+        closeLanePortsConfig() {
+            this.lanePortsConfigDevice = -1;
+        },
+
+        async setDeviceLanePorts(di) {
+            const show = Number(this.lanePortsShow);
+            const setup = Number(this.lanePortsSetup);
+            const watch = Number(this.lanePortsWatch);
+            const name = this.devices[di]?.name || "device";
+            const ports = [show, setup, watch];
+            if (!ports.every(v => Number.isInteger(v) && v >= 1 && v <= 65535)) {
+                Alpine.store("app").showNotice("Show, Setup, and Watch ports must be whole numbers 1-65535.", "warn");
+                return;
+            }
+            if (setup === show || setup === watch) {
+                Alpine.store("app").showNotice("Setup port must differ from Show and Watch.", "warn");
+                return;
+            }
+            try {
+                await api("POST", "/api/device_lane_ports", {
+                    device: di, port_show: show, port_setup: setup, port_watch: watch,
+                });
+                Alpine.store("app").showNotice("Lane ports updated for " + name + ".", "success");
+                this.lanePortsConfigDevice = -1;
+                this.scheduleRediscovery();
+            } catch (e) {
+                Alpine.store("app").showApiError("Lane port update failed", e);
+            }
         },
 
         canConfigureOutputs(dev) {

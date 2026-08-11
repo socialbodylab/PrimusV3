@@ -58,6 +58,7 @@ class FireAudioCueTests(unittest.TestCase):
             "192.168.1.10",
             AUDIO_CMD_PLAY,
             source_ip=None,
+            dest_port=6456,
             volume=60,
             filename="a.wav",
             duration=15,
@@ -94,6 +95,7 @@ class FireAudioCueTests(unittest.TestCase):
             AUDIO_CMD_TEST_TONE,
             volume=55,
             source_ip=None,
+            dest_port=6456,
         )
 
     @patch("radius_state.send_audio_cmd")
@@ -115,6 +117,7 @@ class FireAudioCueTests(unittest.TestCase):
             "192.168.1.10",
             AUDIO_CMD_LOOP,
             source_ip=None,
+            dest_port=6456,
             volume=80,
             filename="loop.wav",
             duration=0,
@@ -132,6 +135,7 @@ class FireAudioCueTests(unittest.TestCase):
             "192.168.1.10",
             AUDIO_CMD_STOP,
             source_ip=None,
+            dest_port=6456,
             volume=80,
         )
 

@@ -19,6 +19,12 @@ from artnet import (
     ArtNetSender,
     parse_node_capabilities,
     parse_node_outputs,
+    resolve_lane_ports,
+    device_show_port,
+    device_setup_port,
+    FPS_LISTEN_PORT,
+    send_lane_ports,
+    set_primus_lane_ports,
     get_primus_config,
     set_primus_output_descriptors,
     set_primus_telemetry_target,
@@ -123,6 +129,16 @@ DEFAULT_DEVICE_CAPABILITIES = {
     "management_protocol_version": None,
     "max_pixels_per_port": MAX_PHYSICAL_PIXELS,
     "max_combined_pixels": MAX_COMBINED_VIRTUAL_PIXELS,
+    "port_show": None,
+    "port_setup": None,
+    "port_watch": None,
+    "ftp_port": None,
+    # Firmware binds a separate Setup lane. Nodes on default ports advertise no
+    # lane token (it does not fit the 64-byte Node Report), so this flag is the
+    # only thing distinguishing them from pre-lane firmware whose management
+    # still lives on the Show port. Dropping it here would silently route every
+    # Setup opcode back to 6454.
+    "lane_aware": False,
 }
 CONTROL_CAPABILITY_LABELS = {
     "rename": "remote rename",
@@ -435,6 +451,7 @@ def _normalize_device_capabilities(capabilities=None):
     out["audio"] = bool(out.get("audio"))
     out["ftp"] = bool(out.get("ftp"))
     out["show_info"] = bool(out.get("show_info"))
+    out["lane_aware"] = bool(out.get("lane_aware"))
     out["management"] = bool(out.get("management"))
     version = out.get("management_protocol_version")
     out["management_protocol_version"] = int(version) if version is not None else None
@@ -448,7 +465,38 @@ def _normalize_device_capabilities(capabilities=None):
         if max_combined is not None
         else MAX_COMBINED_VIRTUAL_PIXELS
     )
+    for key in ("port_show", "port_setup", "port_watch", "ftp_port"):
+        value = out.get(key)
+        if value is None or value == "":
+            out[key] = None
+        else:
+            try:
+                out[key] = int(value)
+            except (TypeError, ValueError):
+                out[key] = None
     return out
+
+
+def _apply_lane_ports_to_device(dev, capabilities=None):
+    """Copy resolved Show/Setup/Watch ports onto the device record."""
+    caps = _normalize_device_capabilities(capabilities or dev.get("capabilities"))
+    ports = resolve_lane_ports(caps, is_radius=_is_radius_capabilities(caps))
+    for key, value in ports.items():
+        if value is not None:
+            dev[key] = int(value)
+    dev["capabilities"] = caps
+
+
+def _validate_device_lane_ports(port_show, port_setup, port_watch):
+    """Raise ValueError if the requested per-device lane ports are unusable."""
+    ports = {"port_show": port_show, "port_setup": port_setup, "port_watch": port_watch}
+    for name, value in ports.items():
+        if value < 1 or value > 65535:
+            raise ValueError(f"{name} must be 1-65535")
+    if port_setup == port_show:
+        raise ValueError("port_setup must differ from port_show")
+    if port_setup == port_watch:
+        raise ValueError("port_setup must differ from port_watch")
 
 
 def _management_state_defaults(capabilities=None):
@@ -1071,6 +1119,7 @@ def _promote_device_to_radius(dev):
 
 
 def _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=None):
+    _apply_lane_ports_to_device(dev, capabilities)
     dev["ip_mode"] = capabilities.get("ip_mode", "unknown")
     static_ip = capabilities.get("static_ip")
     if dev["ip_mode"] == "static" and not static_ip:
@@ -1541,7 +1590,7 @@ class ControllerState:
                 if device_name:
                     sync_device_name_to_receiver(
                         ip, device_name, source_ip=self.artnet_source_ip,
-                        port=_device_port(dev))
+                        dest_port=device_setup_port(dev))
                     dev["name"] = str(device_name)[:17]
                 char = dev.get("character_name", "")
                 perf = dev.get("performer_name", "")
@@ -1554,7 +1603,7 @@ class ControllerState:
                 if character_name is not None or performer_name is not None:
                     sync_show_info_to_device(
                         ip, char, perf, source_ip=self.artnet_source_ip,
-                        port=_device_port(dev))
+                        dest_port=device_setup_port(dev))
                 _persist_device_show_info(
                     ip,
                     dev.get("name"),
@@ -1836,6 +1885,12 @@ class ControllerState:
                         dev.get("unlock_remaining_seconds") or 0),
                     "telemetry_target": dev.get("telemetry_target"),
                     "telemetry_configured": bool(dev.get("telemetry_configured")),
+                    # Resolved, not raw: the UI prefills its lane editor from these
+                    # and warns when Show has moved off 6454, so it needs the port
+                    # actually in use rather than None for a node on defaults.
+                    "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+                    "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+                    "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
                     "outputs": [],
                     "descriptor_config": [],
                 }
@@ -2011,6 +2066,7 @@ class ControllerState:
 
     def _ensure_sender_connected_unlocked(self, dev):
         dev["sender"].ip = dev["ip"]
+        dev["sender"].set_dest_port(device_show_port(dev))
         if hasattr(dev["sender"], "set_source_ip"):
             dev["sender"].set_source_ip(self.artnet_source_ip)
         if not dev["sender"].connected:
@@ -2105,6 +2161,20 @@ class ControllerState:
         dev["unlock_remaining_seconds"] = int(config.unlock_remaining_seconds)
         dev["telemetry_target"] = config.telemetry_target
         dev["telemetry_configured"] = config.telemetry_target != "0.0.0.0"
+        # Authoritative lane ports from GET_CONFIG v2 (never invent defaults over these).
+        if getattr(config, "config_version", 1) >= 2:
+            dev["port_show"] = int(config.port_show)
+            dev["port_setup"] = int(config.port_setup)
+            dev["port_watch"] = int(config.port_watch)
+            caps = _normalize_device_capabilities(dev.get("capabilities"))
+            caps["port_show"] = int(config.port_show)
+            caps["port_setup"] = int(config.port_setup)
+            caps["port_watch"] = int(config.port_watch)
+            dev["capabilities"] = caps
+            sender = dev.get("sender")
+            if sender is not None:
+                sender.set_dest_port(device_show_port(dev))
+                sender.ip = dev.get("ip") or sender.ip
         existing_outputs = dev.get("outputs", [])
         outputs = []
         for slot in range(OUTPUT_SLOT_COUNT):
@@ -2213,8 +2283,9 @@ class ControllerState:
             dev = self.devices[idx]
             target_ip = dev["ip"]
             source_ip = self.artnet_source_ip
+            setup_port = device_setup_port(dev)
         try:
-            result = get_primus_config(target_ip, source_ip=source_ip)
+            result = get_primus_config(target_ip, source_ip=source_ip, dest_port=setup_port)
         except MANAGEMENT_CALL_ERRORS as error:
             with self.lock:
                 idx, dev, change = self._locate_device_ref_unlocked(
@@ -2264,6 +2335,7 @@ class ControllerState:
             dev = self.devices[idx]
             target_ip = dev["ip"]
             source_ip = self.artnet_source_ip
+            setup_port = device_setup_port(dev)
             try:
                 prepared = prepare_unlocked(dev)
                 expected_snapshot = self._snapshot_device_config_state_unlocked(dev)
@@ -2271,7 +2343,7 @@ class ControllerState:
             except ValueError as error:
                 return {"ok": False, "error": str(error), "http_status": 400}
         try:
-            send_call(target_ip, source_ip, prepared)
+            send_call(target_ip, source_ip, prepared, setup_port)
         except MANAGEMENT_CALL_ERRORS as error:
             return _management_error_result(error)
         if skip_readback:
@@ -2298,7 +2370,7 @@ class ControllerState:
                 extra=success_extra,
             )
         try:
-            readback = get_primus_config(target_ip, source_ip=source_ip)
+            readback = get_primus_config(target_ip, source_ip=source_ip, dest_port=setup_port)
         except MANAGEMENT_CALL_ERRORS as error:
             warning = (
                 "Device acknowledged the management update, but follow-up config readback failed: "
@@ -2458,7 +2530,8 @@ class ControllerState:
         type_to_id = {name: i for i, name in enumerate(LOOK_OUTPUT_TYPES)}
         try:
             send_output_config(
-                dev["ip"], types, type_to_id, source_ip=self.artnet_source_ip)
+                dev["ip"], types, type_to_id, source_ip=self.artnet_source_ip,
+                dest_port=device_setup_port(dev))
         except OSError as error:
             return False, self._transport_error_text(error)
         for o in dev.get("outputs", []):
@@ -2484,7 +2557,8 @@ class ControllerState:
         virtual_counts = [resolve_virtual_pixels(o) for o in outputs]
         try:
             send_virtual_resolution(
-                dev["ip"], virtual_counts, source_ip=self.artnet_source_ip)
+                dev["ip"], virtual_counts, source_ip=self.artnet_source_ip,
+                dest_port=device_setup_port(dev))
         except OSError as error:
             return False, self._transport_error_text(error)
         return True, None
@@ -2581,8 +2655,8 @@ class ControllerState:
                     device_ref,
                     lambda idx: self._device_capability_status_unlocked(idx, "output_config"),
                     prepare_unlocked,
-                    lambda ip, source_ip, prepared: set_primus_output_descriptors(
-                        ip, prepared["descriptors"], source_ip=source_ip),
+                    lambda ip, source_ip, prepared, dest_port=None: set_primus_output_descriptors(
+                        ip, prepared["descriptors"], source_ip=source_ip, dest_port=dest_port),
                     lambda target, prepared, persist=False: self._apply_output_descriptors_to_device_unlocked(
                         target, prepared["descriptors"], persist=persist),
                 )
@@ -2666,8 +2740,8 @@ class ControllerState:
                     device_ref,
                     lambda idx: self._device_capability_status_unlocked(idx, "output_config"),
                     prepare_unlocked,
-                    lambda ip, source_ip, prepared: set_primus_output_descriptors(
-                        ip, prepared["descriptors"], source_ip=source_ip),
+                    lambda ip, source_ip, prepared, dest_port=None: set_primus_output_descriptors(
+                        ip, prepared["descriptors"], source_ip=source_ip, dest_port=dest_port),
                     lambda target, prepared, persist=False: self._apply_output_descriptors_to_device_unlocked(
                         target, prepared["descriptors"], persist=persist),
                 )
@@ -2757,11 +2831,12 @@ class ControllerState:
                     device_ref,
                     lambda idx: self._device_capability_status_unlocked(idx, "receive_config"),
                     prepare_unlocked,
-                    lambda ip, source_ip, prepared: set_primus_receive_config(
+                    lambda ip, source_ip, prepared, dest_port=None: set_primus_receive_config(
                         ip,
                         prepared["receive_mode_enum"],
                         prepared["base_universe"],
                         source_ip=source_ip,
+                        dest_port=dest_port,
                     ),
                     lambda target, prepared, persist=False: self._apply_receive_config_to_device_unlocked(
                         target,
@@ -2778,6 +2853,7 @@ class ControllerState:
                     receive_mode,
                     base_universe,
                     source_ip=self.artnet_source_ip,
+                    dest_port=device_setup_port(dev),
                 )
             except OSError as error:
                 dev["receive_mode"] = prior_mode
@@ -2958,7 +3034,6 @@ class ControllerState:
                 "base_universe": base_u,
                 "receive_mode": receive_mode,
                 "connected": False,
-                "sender": ArtNetSender(node_info["ip"], source_ip=self.artnet_source_ip),
                 "transport_error": None,
                 "send_fail_streak": 0,
                 "capabilities": capabilities,
@@ -2973,6 +3048,11 @@ class ControllerState:
             }
             _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=dev["ip"])
             _apply_management_state_to_device(dev, node_info, capabilities)
+            dev["sender"] = ArtNetSender(
+                node_info["ip"],
+                source_ip=self.artnet_source_ip,
+                dest_port=device_show_port(dev),
+            )
             dev["outputs"] = self._build_device_outputs_unlocked(
                 node_info, output_cfgs, base_u, receive_mode=receive_mode)
             _apply_persisted_show_info(dev, node_info)
@@ -3096,6 +3176,7 @@ class ControllerState:
             sender = dev.get("sender")
             if sender is not None:
                 sender.ip = dev["ip"]
+                sender.set_dest_port(device_show_port(dev))
             return {
                 "updated": True,
                 "needs_management_refresh": True,
@@ -3142,6 +3223,7 @@ class ControllerState:
                 existing_outputs=dev.get("outputs", []),
                 receive_mode=receive_mode)
         dev["sender"].ip = dev["ip"]
+        dev["sender"].set_dest_port(device_show_port(dev))
         return {
             "updated": True,
             "needs_management_refresh": False,
@@ -3212,7 +3294,7 @@ class ControllerState:
                 try:
                     ok, error = sync_device_name_to_receiver(
                         dev["ip"], new_name, source_ip=self.artnet_source_ip,
-                        port=_device_port(dev))
+                        dest_port=device_setup_port(dev))
                 except OSError as error:
                     if dev.get("is_radius"):
                         dev["transport_error"] = str(error)
@@ -3246,12 +3328,13 @@ class ControllerState:
                     "character_name": current_dev.get("character_name", ""),
                     "performer_name": current_dev.get("performer_name", ""),
                 },
-                lambda ip, source_ip, prepared: set_primus_identity(
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_identity(
                     ip,
                     prepared["technical_name"],
                     prepared["character_name"],
                     prepared["performer_name"],
                     source_ip=source_ip,
+                    dest_port=dest_port,
                 ),
                 lambda target, prepared, persist=False: self._apply_identity_fields_unlocked(
                     target,
@@ -3272,7 +3355,7 @@ class ControllerState:
                 dev.get("character_name", ""),
                 dev.get("performer_name", ""),
                 source_ip=self.artnet_source_ip,
-                port=_device_port(dev),
+                dest_port=device_setup_port(dev),
             )
         except OSError as error:
             self._mark_transport_error_unlocked(dev, error)
@@ -3328,12 +3411,13 @@ class ControllerState:
                     "character_name": next_character,
                     "performer_name": next_performer,
                 },
-                lambda ip, source_ip, prepared: set_primus_identity(
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_identity(
                     ip,
                     prepared["technical_name"],
                     prepared["character_name"],
                     prepared["performer_name"],
                     source_ip=source_ip,
+                    dest_port=dest_port,
                 ),
                 lambda target, prepared, persist=False: self._apply_identity_fields_unlocked(
                     target,
@@ -3398,8 +3482,8 @@ class ControllerState:
                 device_ref,
                 self._device_management_status_unlocked,
                 prepare_unlocked,
-                lambda ip, source_ip, prepared: set_primus_output_descriptors(
-                    ip, prepared["descriptors"], source_ip=source_ip),
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_output_descriptors(
+                    ip, prepared["descriptors"], source_ip=source_ip, dest_port=dest_port),
                 lambda target, prepared, persist=False: self._apply_output_descriptors_to_device_unlocked(
                     target, prepared["descriptors"], persist=persist),
             )
@@ -3416,8 +3500,8 @@ class ControllerState:
                 device_ref,
                 self._device_management_status_unlocked,
                 lambda current_dev: {"address": address},
-                lambda ip, source_ip, prepared: set_primus_telemetry_target(
-                    ip, prepared["address"], source_ip=source_ip),
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_telemetry_target(
+                    ip, prepared["address"], source_ip=source_ip, dest_port=dest_port),
                 lambda target, prepared, persist=False: self._apply_telemetry_target_to_device_unlocked(
                     target, prepared["address"], persist=persist),
             )
@@ -3437,8 +3521,8 @@ class ControllerState:
                 device_ref,
                 self._device_management_status_unlocked,
                 lambda current_dev: {"mode": OperatingMode.PRODUCTION},
-                lambda ip, source_ip, prepared: set_primus_operating_mode(
-                    ip, prepared["mode"], source_ip=source_ip),
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_operating_mode(
+                    ip, prepared["mode"], source_ip=source_ip, dest_port=dest_port),
                 lambda target, prepared, persist=False: self._apply_operating_mode_to_device_unlocked(
                     target, prepared["mode"], persist=persist),
             )
@@ -3455,8 +3539,8 @@ class ControllerState:
                 device_ref,
                 self._device_management_status_unlocked,
                 lambda current_dev: {"unlock": True},
-                lambda ip, source_ip, prepared: unlock_primus_boot_window(
-                    ip, source_ip=source_ip),
+                lambda ip, source_ip, prepared, dest_port=None: unlock_primus_boot_window(
+                    ip, source_ip=source_ip, dest_port=dest_port),
                 self._apply_boot_window_unlock_to_device_unlocked,
             )
 
@@ -3489,7 +3573,9 @@ class ControllerState:
                     ipv4_octets(static_ip, "ip")
                     ipv4_octets(gateway, "gateway")
                     ipv4_octets(subnet, "subnet")
-                    send_ip_config(dev["ip"], 1, static_ip, gateway, subnet, source_ip=self.artnet_source_ip, port=_device_port(dev))
+                    send_ip_config(
+                        dev["ip"], 1, static_ip, gateway, subnet,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev))
                 except (OSError, ValueError) as error:
                     if dev.get("is_radius"):
                         dev["transport_error"] = str(error)
@@ -3517,13 +3603,14 @@ class ControllerState:
                         "gateway": gateway,
                         "subnet": subnet,
                     },
-                    lambda ip, source_ip, prepared: set_primus_ip_config(
+                    lambda ip, source_ip, prepared, dest_port=None: set_primus_ip_config(
                         ip,
                         prepared["ip_mode_enum"],
                         prepared["static_ip"],
                         prepared["gateway"],
                         prepared["subnet"],
                         source_ip=source_ip,
+                        dest_port=dest_port,
                     ),
                     self._apply_ip_config_to_device_unlocked,
                     skip_readback=True,
@@ -3541,7 +3628,9 @@ class ControllerState:
                 device_lock = self._ensure_device_management_lock_unlocked(dev)
             else:
                 try:
-                    send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip, port=_device_port(dev))
+                    send_ip_config(
+                        dev["ip"], 0, source_ip=self.artnet_source_ip,
+                        dest_port=device_setup_port(dev))
                 except (OSError, ValueError) as error:
                     if dev.get("is_radius"):
                         dev["transport_error"] = str(error)
@@ -3566,15 +3655,116 @@ class ControllerState:
                         "ip_mode": "dhcp",
                         "ip_mode_enum": IpMode.DHCP,
                     },
-                    lambda ip, source_ip, prepared: set_primus_ip_config(
+                    lambda ip, source_ip, prepared, dest_port=None: set_primus_ip_config(
                         ip,
                         prepared["ip_mode_enum"],
                         source_ip=source_ip,
+                        dest_port=dest_port,
                     ),
                     self._apply_ip_config_to_device_unlocked,
                     skip_readback=True,
                     success_extra={"pending_reconnect": True},
                 )
+
+    def _apply_lane_ports_result_unlocked(self, dev, prepared, persist=False):
+        dev["port_show"] = int(prepared["port_show"])
+        dev["port_setup"] = int(prepared["port_setup"])
+        dev["port_watch"] = int(prepared["port_watch"])
+        caps = _normalize_device_capabilities(dev.get("capabilities"))
+        caps["port_show"] = dev["port_show"]
+        caps["port_setup"] = dev["port_setup"]
+        caps["port_watch"] = dev["port_watch"]
+        dev["capabilities"] = caps
+        sender = dev.get("sender")
+        if sender is not None and hasattr(sender, "set_dest_port"):
+            sender.set_dest_port(device_show_port(dev))
+
+    def get_device_lane_ports(self, di):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            return {
+                "ok": True,
+                "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+                "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+                "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
+                "ftp_port": dev.get("ftp_port"),
+                "is_radius": bool(dev.get("is_radius")),
+                "management_capable": self._device_supports_management_unlocked(dev),
+            }
+
+    def set_device_lane_ports(self, di, port_show, port_setup, port_watch):
+        try:
+            port_show = int(port_show)
+            port_setup = int(port_setup)
+            port_watch = int(port_watch)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "ports must be integers", "http_status": 400}
+        try:
+            _validate_device_lane_ports(port_show, port_setup, port_watch)
+        except ValueError as error:
+            return {"ok": False, "error": str(error), "http_status": 400}
+
+        device_ref = None
+        device_lock = None
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            if dev.get("is_radius"):
+                try:
+                    send_lane_ports(
+                        dev["ip"], port_show, port_setup, port_watch,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
+                    )
+                except OSError as error:
+                    dev["transport_error"] = str(error)
+                    return {"ok": False, "error": dev.get("transport_error")}
+                self._apply_lane_ports_result_unlocked(
+                    dev,
+                    {"port_show": port_show, "port_setup": port_setup, "port_watch": port_watch},
+                    persist=True,
+                )
+                self._clear_transport_error_unlocked(dev)
+                _save_devices(self.devices)
+                return {
+                    "ok": True,
+                    "port_show": port_show,
+                    "port_setup": port_setup,
+                    "port_watch": port_watch,
+                }
+            if not self._device_supports_management_unlocked(dev):
+                return {
+                    "ok": False,
+                    "error": f'{dev.get("name", "Device")} does not advertise Primus management support.',
+                    "error_code": "UnsupportedOperation",
+                    "http_status": 409,
+                }
+            device_ref = dev
+            device_lock = self._ensure_device_management_lock_unlocked(dev)
+
+        with device_lock:
+            return self._run_management_mutation_for_locked_device(
+                device_ref,
+                lambda idx: self._device_management_status_unlocked(idx),
+                lambda current_dev: {
+                    "port_show": port_show,
+                    "port_setup": port_setup,
+                    "port_watch": port_watch,
+                },
+                lambda ip, source_ip, prepared, dest_port=None: set_primus_lane_ports(
+                    ip,
+                    prepared["port_show"],
+                    prepared["port_setup"],
+                    prepared["port_watch"],
+                    source_ip=source_ip,
+                    dest_port=dest_port,
+                ),
+                self._apply_lane_ports_result_unlocked,
+                skip_readback=True,
+                success_extra={"pending_reconnect": True},
+            )
 
     def connect_all(self, only_ips=None):
         results = []
@@ -3685,6 +3875,7 @@ class ControllerState:
                         AUDIO_CMD_TEST_TONE,
                         volume=int(volume),
                         source_ip=self.artnet_source_ip,
+                        dest_port=device_show_port(dev),
                     )
                     return True
                 except OSError:

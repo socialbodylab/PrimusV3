@@ -43,10 +43,25 @@ Adafruit_NeoPixel statusPixel(1, BOARD_STATUS_NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800
 bool sdBusy = false;
 
 #define MAX_UDP_PACKET 600
-WiFiUDP udp;
+WiFiUDP udp;      // Discovery lane (ArtPoll) — always 6454, plus dual-listen
+WiFiUDP udpShow;  // Show lane (ArtAudioCmd)
+WiFiUDP udpSetup; // Setup lane (identity/IP/show-info/FTP gate/lane ports)
 WiFiUDP udpFps;
 WiFiUDP udpOsc;
 uint8_t udpBuf[MAX_UDP_PACKET];
+
+// Discovery is intentionally not NVS-overridable — it is the well-known
+// bootstrap port a misconfigured Show/Setup port can always recover through.
+uint16_t portDiscovery = PORT_DISCOVERY_DEFAULT;
+uint16_t portShow  = PORT_SHOW_DEFAULT;
+uint16_t portSetup = PORT_SETUP_DEFAULT;
+uint16_t portWatch = PORT_WATCH_DEFAULT;
+
+enum ArtNetLane : uint8_t {
+  LANE_DISCOVERY = 0,
+  LANE_SHOW      = 1,
+  LANE_SETUP     = 2,
+};
 
 #define MAX_OSC_PACKET 512
 uint8_t oscBuf[MAX_OSC_PACKET];
@@ -235,9 +250,62 @@ void loadStoredNetworkConfig() {
   }
 }
 
+// ── UDP lane ports (Show / Setup / Watch) — stored in NVS ────────────
+// Discovery is fixed at PORT_DISCOVERY_DEFAULT and is never part of this set.
+bool validUdpLanePort(uint16_t port) {
+  return port != 0 && port >= 1024;
+}
+
+bool validLanePortSet(uint16_t show, uint16_t setup, uint16_t watch) {
+  return validUdpLanePort(show) && validUdpLanePort(setup) && validUdpLanePort(watch) &&
+         show != setup && show != watch && setup != watch;
+}
+
+void loadStoredLanePorts() {
+  uint16_t show  = prefs.getUShort("portShow", PORT_SHOW_DEFAULT);
+  uint16_t setup = prefs.getUShort("portSetup", PORT_SETUP_DEFAULT);
+  uint16_t watch = prefs.getUShort("portWatch", PORT_WATCH_DEFAULT);
+  if (!validLanePortSet(show, setup, watch)) {
+    show  = PORT_SHOW_DEFAULT;
+    setup = PORT_SETUP_DEFAULT;
+    watch = PORT_WATCH_DEFAULT;
+  }
+  portShow  = show;
+  portSetup = setup;
+  portWatch = watch;
+}
+
+bool saveLanePorts(uint16_t show, uint16_t setup, uint16_t watch) {
+  if (!validLanePortSet(show, setup, watch)) return false;
+  if (prefs.putUShort("portShow", show) != sizeof(uint16_t) ||
+      prefs.putUShort("portSetup", setup) != sizeof(uint16_t) ||
+      prefs.putUShort("portWatch", watch) != sizeof(uint16_t)) {
+    return false;
+  }
+  portShow  = show;
+  portSetup = setup;
+  portWatch = watch;
+  return true;
+}
+
+void resetLanePortsToDefaults() {
+  saveLanePorts(PORT_SHOW_DEFAULT, PORT_SETUP_DEFAULT, PORT_WATCH_DEFAULT);
+}
+
 void buildNodeReport(char* reportBuf, size_t reportLen) {
   int pos = snprintf(reportBuf, reportLen, "#0001 [%04d] OK|%s|B:%s",
                      (int)packetCount, NODE_CAPS_PREFIX, NODE_CAPS_BOARD);
+  if (pos < 0 || (size_t)pos >= reportLen) return;
+
+  pos += snprintf(reportBuf + pos, reportLen - pos, "|F:%s", NODE_CAPS_FEATURES);
+  if (pos < 0 || (size_t)pos >= reportLen) return;
+
+  // Lane port map — put this early since it is the primary payload of this
+  // change; IP/Marius tokens below are lower priority and may get truncated
+  // first if the 64-byte Node Report field runs out of room.
+  pos += snprintf(reportBuf + pos, reportLen - pos, "|AUD:%u|MGMT:%u|TELE:%u|FTP:%u",
+                  (unsigned)portShow, (unsigned)portSetup, (unsigned)portWatch,
+                  (unsigned)FTP_PORT);
   if (pos < 0 || (size_t)pos >= reportLen) return;
 
   if (useStaticIP) {
@@ -245,9 +313,6 @@ void buildNodeReport(char* reportBuf, size_t reportLen) {
   } else {
     pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:D");
   }
-  if (pos < 0 || (size_t)pos >= reportLen) return;
-
-  pos += snprintf(reportBuf + pos, reportLen - pos, "|F:%s", NODE_CAPS_FEATURES);
   if (pos < 0 || (size_t)pos >= reportLen) return;
 
   if (mariusIsConfigured()) {
@@ -355,7 +420,9 @@ void checkWifiConnection() {
       wifiConnected = true;
       wifiConnecting = false;
       WiFi.setSleep(false);
-      udp.begin(ARTNET_PORT);
+      udp.begin(portDiscovery);
+      udpShow.begin(portShow);
+      udpSetup.begin(portSetup);
       udpOsc.begin(OSC_PORT);
       broadcastArtPollReply();
       if (infoScreenIndex == 0)
@@ -394,8 +461,8 @@ void sendArtPollReply(IPAddress dest) {
   reply[10] = myIP[0]; reply[11] = myIP[1];
   reply[12] = myIP[2]; reply[13] = myIP[3];
 
-  reply[14] = ARTNET_PORT & 0xFF;
-  reply[15] = (ARTNET_PORT >> 8) & 0xFF;
+  reply[14] = portDiscovery & 0xFF;
+  reply[15] = (portDiscovery >> 8) & 0xFF;
 
   reply[16] = FIRMWARE_VERSION_H;
   reply[17] = FIRMWARE_VERSION_L;
@@ -424,7 +491,7 @@ void sendArtPollReply(IPAddress dest) {
   reply[211] = 1;
   reply[212] = 0x08;
 
-  udp.beginPacket(dest, ARTNET_PORT);
+  udp.beginPacket(dest, portDiscovery);
   udp.write(reply, sizeof(reply));
   udp.endPacket();
 }
@@ -497,7 +564,7 @@ void sendShowInfoReply(IPAddress dest) {
   reply[78] = perfLen;
   memcpy(reply + 79, showPerformerName, perfLen);
 
-  udp.beginPacket(dest, ARTNET_PORT);
+  udp.beginPacket(dest, portDiscovery);
   udp.write(reply, sizeof(reply));
   udp.endPacket();
 }
@@ -560,6 +627,44 @@ void handleArtFtpCmd(uint8_t* data, uint16_t len) {
     displayFtpStatus(ftpIsRunning(), WiFi.localIP(), sdFileCount());
 }
 
+// ArtLanePorts (0x8220) — vendor opcode to move the Show/Setup/Watch lane
+// ports. Layout: Art-Net header + opcode LE + ProtVer BE, then three
+// big-endian uint16 fields: portShow, portSetup, portWatch.
+void handleArtLanePorts(uint8_t* data, uint16_t len) {
+  if (len < 18) return;
+
+  uint16_t newShow  = ((uint16_t)data[12] << 8) | data[13];
+  uint16_t newSetup = ((uint16_t)data[14] << 8) | data[15];
+  uint16_t newWatch = ((uint16_t)data[16] << 8) | data[17];
+
+  if (!validLanePortSet(newShow, newSetup, newWatch)) {
+    Serial.println("ArtLanePorts rejected: invalid port set");
+    return;
+  }
+
+  bool showOrSetupChanged = newShow != portShow || newSetup != portSetup;
+  if (!saveLanePorts(newShow, newSetup, newWatch)) {
+    Serial.println("ArtLanePorts rejected: NVS save failed");
+    return;
+  }
+
+  if (showOrSetupChanged) {
+    udpShow.stop();
+    udpShow.begin(portShow);
+    udpSetup.stop();
+    udpSetup.begin(portSetup);
+  }
+
+  Serial.print("Lane ports updated: show=");
+  Serial.print(portShow);
+  Serial.print(" setup=");
+  Serial.print(portSetup);
+  Serial.print(" watch=");
+  Serial.println(portWatch);
+
+  broadcastArtPollReply();
+}
+
 void sendAudioStatus(uint8_t status, const char* filename) {
   if (!senderKnown || !wifiConnected) return;
   uint8_t buf[78];
@@ -571,7 +676,7 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   buf[11] = 0x0E;
   buf[12] = status;
   if (filename && filename[0]) strncpy((char*)&buf[13], filename, 64);
-  udpFps.beginPacket(senderIP, AUDIO_REPORT_PORT);
+  udpFps.beginPacket(senderIP, portWatch);
   udpFps.write(buf, sizeof(buf));  // full 78 bytes — write(buf,46) truncated names at 33 chars
   udpFps.endPacket();
 }
@@ -715,35 +820,51 @@ void handleOscPacket() {
   }
 }
 
-void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr) {
+void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr, uint8_t lane) {
   if (len < 10) return;
   if (memcmp(data, ARTNET_MAGIC, ARTNET_HEADER_LEN) != 0) return;
 
   uint16_t opcode = (uint16_t)data[8] | ((uint16_t)data[9] << 8);
   packetCount++;
 
+  // ArtPoll is Discovery-lane only. Radius must never accept ArtDmx on any
+  // lane, so there is deliberately no opcode case for it anywhere below.
   if (opcode == ARTNET_OPCODE_POLL) {
+    if (lane != LANE_DISCOVERY) return;
     sendArtPollReply(remoteAddr);
     return;
   }
-  if (opcode == ARTNET_OPCODE_ADDRESS) {
-    handleArtAddress(data, len);
-    return;
-  }
-  if (opcode == ARTNET_OPCODE_IP_CONFIG) {
-    handleArtIPConfig(data, len);
-    return;
-  }
-  if (opcode == ARTNET_OPCODE_SHOW_INFO) {
-    handleArtShowInfo(data, len, remoteAddr);
-    return;
-  }
+
+  // ArtAudioCmd is the Show lane; dual-listen also accepts it on Discovery
+  // (6454) while legacy V5 senders still target the bootstrap port.
   if (opcode == ARTNET_OPCODE_AUDIO_CMD) {
+    if (lane != LANE_SHOW && !(PORT_DUAL_LISTEN && lane == LANE_DISCOVERY)) return;
     handleArtAudioCmd(data, len);
     return;
   }
-  if (opcode == ARTNET_OPCODE_FTP_CMD) {
-    handleArtFtpCmd(data, len);
+
+  // Setup opcodes (identity, IP, show info, FTP gate, lane-port config) live
+  // on the Setup lane; dual-listen also accepts them on Show or Discovery
+  // while senders migrate to the dedicated Setup lane.
+  bool isSetupOpcode = opcode == ARTNET_OPCODE_ADDRESS ||
+                       opcode == ARTNET_OPCODE_IP_CONFIG ||
+                       opcode == ARTNET_OPCODE_SHOW_INFO ||
+                       opcode == ARTNET_OPCODE_FTP_CMD ||
+                       opcode == ARTNET_OPCODE_LANE_PORTS;
+  if (isSetupOpcode) {
+    if (lane != LANE_SETUP && !PORT_DUAL_LISTEN) return;
+
+    if (opcode == ARTNET_OPCODE_ADDRESS) {
+      handleArtAddress(data, len);
+    } else if (opcode == ARTNET_OPCODE_IP_CONFIG) {
+      handleArtIPConfig(data, len);
+    } else if (opcode == ARTNET_OPCODE_SHOW_INFO) {
+      handleArtShowInfo(data, len, remoteAddr);
+    } else if (opcode == ARTNET_OPCODE_FTP_CMD) {
+      handleArtFtpCmd(data, len);
+    } else if (opcode == ARTNET_OPCODE_LANE_PORTS) {
+      handleArtLanePorts(data, len);
+    }
     return;
   }
 }
@@ -764,7 +885,7 @@ void sendTrackTelemetry(uint8_t state, const char* filename) {
   buf[4] = (uint8_t)nameLen;
   if (nameLen > 0) memcpy(buf + 5, track, nameLen);
 
-  udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
+  udpFps.beginPacket(senderIP, portWatch);
   udpFps.write(buf, 5 + nameLen);
   udpFps.endPacket();
 }
@@ -782,7 +903,7 @@ void sendFpsTelemetry(uint16_t pktRate) {
   buf[5] = (pktRate >> 8) & 0xFF;
   buf[6] = pktRate & 0xFF;
 
-  udpFps.beginPacket(senderIP, FPS_REPORT_PORT);
+  udpFps.beginPacket(senderIP, portWatch);
   udpFps.write(buf, 7);
   udpFps.endPacket();
 }
@@ -855,6 +976,7 @@ void setup() {
   displayStartup();
 
   prefs.begin("artnet", false);
+  loadStoredLanePorts();
   loadStoredDeviceName();
   loadStoredShowInfo();
   loadStoredNetworkConfig();
@@ -863,8 +985,13 @@ void setup() {
   startWifiConnect();
   displayConnection(DEFAULT_WIFI_SSID, IPAddress(0, 0, 0, 0), false, 0);
 
-  udp.begin(ARTNET_PORT);
+  udp.begin(portDiscovery);
+  udpShow.begin(portShow);
+  udpSetup.begin(portSetup);
   udpFps.begin(0);
+  Serial.print("Discovery lane listening on port "); Serial.println(portDiscovery);
+  Serial.print("Show lane listening on port ");      Serial.println(portShow);
+  Serial.print("Setup lane listening on port ");     Serial.println(portSetup);
 
   audioInit();
   cuesLoad();
@@ -902,6 +1029,8 @@ void loop() {
   }
 
   int pktSize;
+
+  // ── Drain Discovery lane (ArtPoll, + dual-listen for legacy 6454) ────
   while ((pktSize = udp.parsePacket()) > 0) {
     if (pktSize > MAX_UDP_PACKET) {
       while (udp.available()) udp.read();
@@ -914,7 +1043,41 @@ void loop() {
         senderIP = remoteAddr;
         senderKnown = true;
       }
-      processArtNetPacket(udpBuf, bytesRead, remoteAddr);
+      processArtNetPacket(udpBuf, bytesRead, remoteAddr, LANE_DISCOVERY);
+    }
+  }
+
+  // ── Drain Show lane (ArtAudioCmd) ────────────────────────────────────
+  while ((pktSize = udpShow.parsePacket()) > 0) {
+    if (pktSize > MAX_UDP_PACKET) {
+      while (udpShow.available()) udpShow.read();
+      continue;
+    }
+    int bytesRead = udpShow.read(udpBuf, pktSize);
+    if (bytesRead > 0) {
+      IPAddress remoteAddr = udpShow.remoteIP();
+      if (!senderKnown) {
+        senderIP = remoteAddr;
+        senderKnown = true;
+      }
+      processArtNetPacket(udpBuf, bytesRead, remoteAddr, LANE_SHOW);
+    }
+  }
+
+  // ── Drain Setup lane (identity/IP/show-info/FTP gate/lane ports) ────
+  while ((pktSize = udpSetup.parsePacket()) > 0) {
+    if (pktSize > MAX_UDP_PACKET) {
+      while (udpSetup.available()) udpSetup.read();
+      continue;
+    }
+    int bytesRead = udpSetup.read(udpBuf, pktSize);
+    if (bytesRead > 0) {
+      IPAddress remoteAddr = udpSetup.remoteIP();
+      if (!senderKnown) {
+        senderIP = remoteAddr;
+        senderKnown = true;
+      }
+      processArtNetPacket(udpBuf, bytesRead, remoteAddr, LANE_SETUP);
     }
   }
 

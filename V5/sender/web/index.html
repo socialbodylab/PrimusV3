@@ -1258,6 +1258,36 @@
                     </div>
                 </div>
             </details>
+
+            <details class="output-section settings-section settings-lane-ports-section">
+                <summary class="settings-advanced-summary">
+                    <span class="output-name">UDP Lanes (Art-Net Ports)</span>
+                    <span class="settings-status-pill" :class="{ 'settings-pill-warning': !!lanePortsValidationMessage, 'settings-pill-muted': lanePortsLoading }" x-text="lanePortsLoading ? 'Loading...' : (lanePortsValidationMessage || 'OK')"></span>
+                </summary>
+                <div class="settings-current-meta">Default Show/Setup/Watch UDP ports advertised to newly configured receivers. Changing these does not move already-configured devices &mdash; use each device's own lane port fields for that.</div>
+                <div class="firmware-form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Show (Primus)</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_show_primus" :disabled="lanePortsSaving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Show (Radius)</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_show_radius" :disabled="lanePortsSaving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Setup</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_setup" :disabled="lanePortsSaving">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Watch</label>
+                        <input class="form-input" type="number" x-model.number="lanePorts.port_watch" :disabled="lanePortsSaving">
+                    </div>
+                </div>
+                <div class="settings-profile-summary" :class="{ 'settings-summary-error': !!lanePortsValidationMessage }" x-text="lanePortsValidationMessage || 'Setup must differ from both Show ports and from Watch.'"></div>
+                <div class="settings-actions-row">
+                    <button class="btn btn-primary" @click="saveLanePorts()" :disabled="!canSaveLanePorts" x-text="lanePortsSaving ? 'Saving...' : 'Save UDP Lane Defaults'"></button>
+                </div>
+            </details>
         </div>
     </div>
 

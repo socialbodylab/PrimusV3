@@ -53,15 +53,15 @@ class ConfigContracts(unittest.TestCase):
         self.assertRegex(config, r"#define\s+BOARD_BATTERY_PIN\s+A13")
         self.assertIn('"RIHASB"', config)  # V1 caps advertise battery (B)
 
-    def test_artnet_port_matches_sender(self):
-        # Radius nodes listen on their own Art-Net port (off 6454 so LED
-        # traffic and third-party gear never reach them). Firmware and
-        # sender must agree or the fleet goes silent.
+    def test_radius_show_port_matches_sender(self):
+        # Lane model: Radius audio rides the Show lane (PORT_SHOW_DEFAULT in
+        # config.h, off the 6454 discovery/LED port). Firmware and sender must
+        # agree on it or audio never reaches the node.
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from artnet import RADIUS_ARTNET_PORT
         config = read_source("config.h")
-        match = re.search(r"#define\s+ARTNET_PORT\s+(\d+)", config)
-        self.assertIsNotNone(match, "ARTNET_PORT define missing from config.h")
+        match = re.search(r"#define\s+PORT_SHOW_DEFAULT\s+(\d+)", config)
+        self.assertIsNotNone(match, "PORT_SHOW_DEFAULT define missing from config.h")
         self.assertEqual(int(match.group(1)), RADIUS_ARTNET_PORT)
 
 

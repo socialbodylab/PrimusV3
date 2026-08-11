@@ -18,17 +18,20 @@ import sys
 import threading
 import time
 
-from artnet import RadiusTelemetryListener
-from paths import ensure_runtime_data, is_bundled, log_path, sender_product
+from artnet import RadiusTelemetryListener, FPS_LISTEN_PORT
+from paths import app_version, ensure_runtime_data, is_bundled, log_path, sender_product
+from network_settings import get_lane_ports
 from radius_state import RadiusState
 from central_launcher import (
     CentralPortInUseByCentral,
+    MISMATCH_WRONG_PRODUCT,
     frontend_path_for,
     probe_central_server,
     register_central_server,
     try_attach_before_start,
     unregister_central_server,
 )
+from launcher_dialog import choose as dialog_choose
 from browser_launcher import DedicatedBrowser
 from ui_focus import UiFocusServer
 from server import create_server
@@ -162,8 +165,45 @@ def _create_server_with_fallback(host, port, state, ui_lifecycle_enabled):
         return create_server(host, 0, state, ui_lifecycle_enabled=ui_lifecycle_enabled)
 
 
+def _ui_has_live_output(server):
+    state = getattr(server, "radius_state", None)
+    if state is None:
+        return False
+    try:
+        return bool(state.has_live_playback())
+    except Exception:
+        # Never report "idle" on error: that would let the server quit during a
+        # cue. Mirrors the same conservative choice on the Primus side.
+        return True
+
+
 def _ui_lifecycle_monitor(server):
-    ui_lifecycle_monitor(server, app_name="RadiusCentral")
+    ui_lifecycle_monitor(
+        server, app_name="RadiusCentral", live_output_fn=_ui_has_live_output)
+
+
+def _attach_mismatch_handler():
+    """RadiusCentral must never be served from a non-Radius backend.
+
+    Attaching anyway produced a /radius UI backed by Primus state: HTTP 200,
+    no audio endpoints, no radius_state loaded, and nothing to tell the user.
+    """
+    def handler(mismatch, port, runtime):
+        if mismatch["reason"] != MISMATCH_WRONG_PRODUCT:
+            return "abort"
+        backend = mismatch.get("backend_product") or "another product"
+        choice = dialog_choose(
+            "RadiusCentral",
+            f"A {backend} Central server is already running on port {port}.\n\n"
+            "RadiusCentral needs its own backend and cannot share that one yet, "
+            "so its audio and FTP controls would not work.\n\n"
+            f"Quit the {backend} server first, or open its interface instead.",
+            [f"Open {backend} interface", "Cancel"],
+            "Cancel",
+        )
+        return "attach" if choice.startswith("Open ") else "abort"
+
+    return handler
 
 
 def main():
@@ -197,6 +237,8 @@ def main():
         no_browser=args.no_browser,
         open_browser=_open_browser,
         launcher_name="Radius Central V5",
+        need_product="radius",
+        on_mismatch=_attach_mismatch_handler(),
     ):
         return
 
@@ -204,7 +246,11 @@ def main():
     if args.replace:
         _kill_existing()
 
-    telemetry_listener = RadiusTelemetryListener()
+    try:
+        watch_port = int(get_lane_ports().get("port_watch") or FPS_LISTEN_PORT)
+    except Exception:
+        watch_port = FPS_LISTEN_PORT
+    telemetry_listener = RadiusTelemetryListener(listen_port=watch_port)
     telemetry_thread = threading.Thread(target=telemetry_listener.run, daemon=True)
     telemetry_thread.start()
 
@@ -225,17 +271,21 @@ def main():
             no_browser=args.no_browser,
             open_browser=_open_browser,
             launcher_name="Radius Central V5",
+            need_product="radius",
+            on_mismatch=_attach_mismatch_handler(),
         ):
             telemetry_listener.stop()
             return
         raise
     port = server.server_address[1]
+    server.live_output_fn = _ui_has_live_output
     if not args.no_browser:
         server.ui_focus_callback = _dedicated_browser.focus
         ui_focus_server = UiFocusServer(port, _dedicated_browser.focus)
         ui_focus_server.start()
     url = f"http://127.0.0.1:{port}{frontend_path}"
-    register_central_server(port, sender_product())
+    register_central_server(
+        port, sender_product(), app_version=app_version())
 
     if ui_lifecycle_enabled:
         ui_thread = threading.Thread(

@@ -14,16 +14,49 @@ assets and install newer receiver source into app data without upgrading the sen
 | `v2` | ESP32 Feather (2025 Make) | `./upload.sh --board v2` |
 | `v3` | ESP32-S3 Reverse TFT + custom PCB (A0/A1 NeoPixel, A4 battery) | `./upload.sh --board v3` |
 
-Discovery capability tag: `PV3CAP1|F:RIOHBMSG|B:v1|IP:D|U:C:0|G:1P`.
+Discovery capability tag, node on default lane ports:  
+`PV3CAP1|F:RIOHBMSGL|B:v1|IP:D|U:C:0|0:1:0:30|G:1P`.  
 V1 and V3 add `B` for battery data; `G` advertises management and `G:1P` /
 `G:1L` marks protocol v1 prototype/locked mode. Long Name and ArtPoll
 `NumPorts` always inventory A0 and A1, including Off. Full descriptors come
 from `GET_CONFIG`, not the 64-byte Node Report.
 
+**Lane ports are advertised only when moved off their default.** The full
+`|SHOW:6454|MGMT:6457|TELE:6455` triple is 30 bytes; emitting it unconditionally
+overflowed the hard 64-byte Node Report and silently dropped `|IP:`, `|U:`,
+`|G:` and every per-output tuple. The `L` feature flag is what tells the sender
+this firmware binds a separate Setup lane, so a node with no lane token is read
+as "lane-aware, on the documented defaults" rather than as pre-lane firmware.
+A node that *has* been moved emits just the lanes that changed, e.g.
+`…|IP:D|U:C:0|MGMT:7000`.
+
+Node Report token priority, highest first — whatever runs out of room is
+dropped from the bottom:
+
+| Order | Token | Why it ranks here |
+|-------|-------|-------------------|
+| 1 | `F:` | Gates rename, hello, IP, output, receive mode, battery, show info, lanes |
+| 2 | `B:` | Board identity; without it hardware is "unconfirmed" |
+| 3 | `IP:` | DHCP/static mode; no fallback source |
+| 4 | `U:` | Receive mode + base universe; no fallback source |
+| 5 | `SHOW:`/`MGMT:`/`TELE:` | Only present when moved — a node that cannot say its Setup lane moved is unmanageable |
+| 6 | per-output tuples | Sender falls back to Long Name parsing |
+| 7 | `G:` | Not parsed by any sender code today |
+
+Each token is appended only if it fits **whole**: a truncated `|MGMT:645` still
+parses as a valid port number and would send every Setup opcode into the void.
+
+UDP lanes (see `docs/systems/PORT_ORGANIZATION.md`):
+- **Show :6454** — ArtDmx + ArtPoll (Eos-compatible)
+- **Setup :6457** — management `0x8140`/`0x8141`, ArtAddress, output/receive/virtual, IP, show-info, `SET_LANE_PORTS` `0x17`
+- **Watch :6455** — PST / PFP telemetry destination
+- `PORT_DUAL_LISTEN=1` still accepts Setup opcodes on Show during migration
+
 Protocol highlights: ArtDmx pixel output, paired management request/reply
-(`0x8140`/`0x8141`), and explicit-target UDP 6455 unified status (`PST` v1).
-Legacy ArtAddress and `0x8100`/`0x8110`/`0x8130`/`0x8200`/`0x8210` mutations
-remain compatible in prototype mode.
+(`0x8140`/`0x8141`), GET_CONFIG **v2** (includes lane ports), and explicit-target
+UDP 6455 unified status (`PST` v1). Legacy ArtAddress and
+`0x8100`/`0x8110`/`0x8130`/`0x8200`/`0x8210` mutations remain compatible in
+prototype mode (on Setup, or Show while dual-listen is enabled).
 
 ### V3 custom PCB (profile `v3`)
 
@@ -178,32 +211,38 @@ and (c) the two firmware families agree on shared opcodes. Add a new opcode here
 sender **and** in the relevant `config.h` in the same change, or the test fails.
 
 Vendor-defined opcodes live in the `0x8000+` range, sub-allocated by concern:
-`0x81xx` config / management · `0x82xx` node identity (IP, show info) · `0x83xx` Radius audio.
+`0x81xx` config / management · `0x82xx` node identity (IP, show info, lane ports) · `0x83xx` Radius audio.
 
-| Opcode | Name | LED (`primusV3_receiver`) | Radius (`radius_receiver`) | Purpose |
-|--------|------|:---:|:---:|---------|
-| 0x2000 | ArtPoll | ✅ | ✅ | Discovery request |
-| 0x2100 | ArtPollReply | ✅ | ✅ | Discovery reply (capability tag) |
-| 0x5000 | ArtDmx | ✅ | — | Pixel data (LED only) |
-| 0x6000 | ArtAddress | ✅ | ✅ | Rename (NVS) |
-| 0x8100 | ArtOutputConfig | ✅ | — | Set output types (LED only) |
-| 0x8110 | ArtReceiveConfig | ✅ | — | Set receive mode / universe base (LED only) |
-| 0x8130 | ArtVirtualResolution | ✅ | — | Set virtual grid resolution (LED only) |
-| 0x8140 | ArtManagementRequest | ✅ | — | Versioned Primus management request |
-| 0x8141 | ArtManagementReply | ✅ | — | Versioned Primus management reply |
-| 0x8200 | ArtIPConfig | ✅ | ✅ | Static IP / DHCP (NVS, reboot) |
-| 0x8210 | ArtShowInfo | ✅ | ✅ | Character/performer names (NVS): read / write / response, 143-byte packet, two 64-byte fields |
-| 0x8300 | ArtAudioCmd | — | ✅ | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
-| 0x8301 | ArtFtpCmd | — | ✅ | FTP server start/stop |
-| 0x8302 | ArtAudioStatus | — | ✅ | Unsolicited playback status from device → sender (UDP 6455) |
+UDP lanes: discovery ArtPoll **:6454**, ArtAudioCmd Show **:6456**, Setup **:6457**
+(ArtAddress / IP / show-info / ArtFtpCmd / ArtLanePorts `0x8220`), Watch telemetry **:6455**.
+Dual-listen accepts Setup/audio on legacy ports during migration.
+
+| Opcode | Name | LED (`primusV3_receiver`) | Radius (`radius_receiver`) | Lane | Purpose |
+|--------|------|:---:|:---:|------|---------|
+| 0x2000 | ArtPoll | ✅ | ✅ | :6454 | Discovery request |
+| 0x2100 | ArtPollReply | ✅ | ✅ | :6454 | Discovery reply (capability tag) |
+| 0x5000 | ArtDmx | ✅ | — | Show | Pixel data (LED only) |
+| 0x6000 | ArtAddress | ✅ | ✅ | Setup | Rename (NVS) |
+| 0x8100 | ArtOutputConfig | ✅ | — | Setup | Set output types (LED only) |
+| 0x8110 | ArtReceiveConfig | ✅ | — | Setup | Set receive mode / universe base (LED only) |
+| 0x8130 | ArtVirtualResolution | ✅ | — | Setup | Set virtual grid resolution (LED only) |
+| 0x8140 | ArtManagementRequest | ✅ | — | Setup | Versioned Primus management request |
+| 0x8141 | ArtManagementReply | ✅ | — | Setup | Versioned Primus management reply |
+| 0x8200 | ArtIPConfig | ✅ | ✅ | Setup | Static IP / DHCP (NVS, reboot) |
+| 0x8210 | ArtShowInfo | ✅ | ✅ | Setup | Character/performer names (NVS): read / write / response, 143-byte packet, two 64-byte fields |
+| 0x8220 | ArtLanePorts | ✅ | ✅ | Setup | Set Show/Setup/Watch lane ports (NVS) |
+| 0x8300 | ArtAudioCmd | — | ✅ | Show | play / loop / stop / pause / volume / test_tone / play_cue / loop_cue |
+| 0x8301 | ArtFtpCmd | — | ✅ | Setup | FTP server start/stop |
+| 0x8302 | ArtAudioStatus | — | ✅ | Watch | Unsolicited playback status from device → sender (UDP 6455) |
 
 > **Merge guardrail.** The `0x83xx` audio range (`ArtAudioCmd`, `ArtFtpCmd`, `ArtAudioStatus`)
-> came from the `radius-central` line and the `0x8140`/`0x8141` management pair from the Primus
-> DeviceManager line; all must coexist. If a future merge from `main` conflicts on the opcode
-> block in `artnet.py` / `primus_protocol.py` or either `config.h`, keep the **union** of both
-> sides and run `test_artnet_opcodes.py` — a green run proves the allocation is still
-> collision-free and firmware/sender are in sync. Never renumber the `0x83xx` block back into
-> `0x82xx` (the historical `0x8200` collision that forced the original remap).
+> came from the `radius-central` line, the `0x8140`/`0x8141` management pair from the Primus
+> DeviceManager line, and `0x8220` (`ArtLanePorts`) from the lane-port work; all must coexist.
+> If a future merge conflicts on the opcode block in `artnet.py` / `primus_protocol.py` or
+> either `config.h`, keep the **union** of both sides and run `test_artnet_opcodes.py` — a green
+> run proves the allocation is still collision-free and firmware/sender are in sync. Never
+> renumber the `0x83xx` block back into `0x82xx` (the historical `0x8200` collision that forced
+> the original remap).
 
 ### ArtAudioCmd (0x8300)
 
@@ -236,11 +275,11 @@ Cue numbers 1–255; firmware stores up to 64 entries. Changes require device re
 Discovery node report (dynamic):
 
 ```
-#0001 [####] PVRAD1|B:v1|IP:D|F:RA
-#0001 [####] PVRAD1|B:v1|IP:S:a.b.c.d:gw:mask|F:RA
+#0001 [####] PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:D|F:RIHAS
+#0001 [####] PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:S:a.b.c.d:gw:mask|F:RIHAS
 ```
 
-UDP 6455 back-channel:
+UDP 6455 Watch back-channel:
 
 - `PFP` — 7-byte packet rate telemetry
 - `PTR` — `[P][T][R][state][name_len][name…]` track name + playback state (0=stopped, 1=playing, 2=paused)

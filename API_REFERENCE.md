@@ -8,18 +8,16 @@ This document describes the network API exposed by PrimusV3 LED receiver nodes a
 
 | Function | Protocol | Port | Direction |
 |---|---|---|---|
-| **LED data** (ArtDmx) | UDP / Art-Net | 6454 | Sender → Node |
+| **LED data** (ArtDmx) | UDP / Art-Net | 6454 Show | Sender → Node |
 | **Discovery** (ArtPoll / ArtPollReply) | UDP / Art-Net | 6454 | Bidirectional |
-| **Device naming** (ArtAddress) | UDP / Art-Net | 6454 | Sender → Node |
-| **Output config** (custom 0x8100) | UDP / Art-Net | 6454 | Sender → Node |
-| **Receive mode** (custom 0x8110) | UDP / Art-Net | 6454 | Sender → Node |
-| **Virtual resolution** (custom 0x8130) | UDP / Art-Net | 6454 | Sender → Node |
-| **IP config** (custom 0x8200) | UDP / Art-Net | 6454 | Sender → Node |
-| **FPS telemetry** (custom) | UDP | 6455 | Node → Sender |
+| **Setup / management** (0x8140, ArtAddress, 0x8100/8110/8130, IP, show-info) | UDP / Art-Net | **6457 Setup** (default; dual-listen on 6454 during migrate) | Sender → Node |
+| **Radius ArtAudioCmd** (0x8300) | UDP / Art-Net | **6456 Show** | Sender → Node |
+| **Radius ArtFtpCmd / identity** | UDP / Art-Net | **6457 Setup** | Sender → Node |
+| **FPS / status telemetry** (PFP/PST/PTR) | UDP | 6455 Watch | Node → Sender |
 | **Sender HTTP API** | TCP / HTTP JSON | 8080 or auto-selected | Browser/tool → Sender |
 | **OSC cue control** | UDP / OSC | 53001 default | Show-control tool → Sender |
 
-Receiver communication is standard Art-Net 4 over IPv4 UDP, plus custom Art-Net opcodes for output/IP configuration and a small UDP FPS telemetry packet. No TCP, no HTTP, no proprietary LED-data framing is required to drive receiver nodes directly. The V3.6 sender also exposes a local HTTP JSON API for Primus Central and an inbound OSC listener for external cue triggers.
+V5 lane ports (Show / Setup / Watch) are documented in [docs/systems/PORT_ORGANIZATION.md](docs/systems/PORT_ORGANIZATION.md). Receivers advertise ports in ArtPollReply (`SHOW`/`AUD`/`MGMT`/`TELE`/`FTP`) and store overrides in NVS. Stock Eos continues to target Primus ArtDmx on **6454**.
 
 ---
 
@@ -74,8 +72,13 @@ for remote rename via ArtAddress, `I` for remote IP configuration via
 ArtIPConfig, `O` for remote output configuration via ArtOutputConfig, `M` for
 remote receive mode configuration via ArtReceiveConfig, `H` for
 the identify flash used by `POST /api/hello_device`, `B` for battery telemetry
-(UDP 6455 `PBT` packets), and `S` for receiver-backed show info storage
-(character/performer name) via `POST /api/device_show_info`. Receive layout is
+(UDP 6455 `PBT` packets), `S` for receiver-backed show info storage
+(character/performer name) via `POST /api/device_show_info`, and `L` to signal
+that the node binds a separate Setup lane. `L` matters because lane ports are
+advertised only when moved off their defaults (the full `SHOW:/MGMT:/TELE:`
+triple does not fit the 64-byte Node Report), so an `L` node with no lane token
+is read as "on the documented defaults" while a node without `L` is pre-lane
+firmware whose management still lives on the Show port. Receive layout is
 also reported as `U:S:<base>` (split: one universe per output starting at
 base) or `U:C:<base>` (combined: all outputs in one universe). Older nodes
 without this tag still fall back to the human-readable Long Name parser, and
@@ -443,6 +446,8 @@ The PrimusCentral sender (`python3 V5/sender/run.py --product primus`) serves a 
 | Route | Description |
 |---|---|
 | `GET /` | HTML control interface (Alpine.js SPA) |
+| `GET /api/server/status` | Operational detail about this Central: `pid`, `port`, `product`, `app_version`, `monitor_only`, `lan_enabled`, `client_session_count`, `live_output`, `uptime_seconds`. Separate from `/api/runtime` on purpose — `/api/runtime` is the discovery probe and must stay stable for older clients, so detail that changes shape lives here |
+| `POST /api/server/stop` | Ask this Central to shut down so another launcher can take the port. Returns `409` when `live_output` is true unless the body sets `{"force": true}`, so one app can never black out a show another is running |
 | `GET /api/runtime` | Sender runtime flags such as UI lifecycle ownership, `monitor_only` (true when this backend never auto-connects to devices or drives Art-Net output — DeviceManager's safety mode when it starts its own fresh backend), and `lan_enabled` (true when the HTTP server is bound to the LAN interface rather than loopback-only — DeviceManager's own fresh backend only, enabling its Mobile / Tablet View) |
 | `GET /api/state` | Full JSON state dump (look, devices, FPS, playback source) |
 | `GET /api/performance` | Rolling sender timing diagnostics, counters, and per-second rates for FPS/debug validation |
@@ -505,7 +510,7 @@ python3 V5/build_sender_app.py \
 
 Build-time overrides are `PRIMUSV3_CODESIGN_IDENTITY`, `PRIMUSV3_NOTARY_PROFILE`, and `PRIMUSV3_NOTARY_TIMEOUT`. Runtime/storage overrides are `PRIMUSV3_DATA_DIR`, `PRIMUSV3_USE_APP_DATA=1`, and `PRIMUSV3_TOOLS_DIR`. The macOS timing assertion override is `PRIMUSV3_DISABLE_MACOS_ACTIVITY=1`.
 
-The app bundle uses ID `com.socialbodylab.PrimusCentral` and output path `V5/dist/macos/PrimusCentral.app`. Release DMGs should be created from a clean staging directory containing only the app and an `/Applications` symlink, then signed, notarized, stapled, verified with `hdiutil verify`, and checksummed after stapling. The canonical command checklist lives in [V5/PACKAGING.md](V5/PACKAGING.md).
+PrimusCentral uses bundle ID `com.socialbodylab.PrimusCentral` and output path `V5/dist/macos/PrimusCentral.app`. RadiusCentral (`com.socialbodylab.RadiusCentral`) and DeviceManager (`com.socialbodylab.DeviceManager`) share the same V5 builder. Release DMGs are produced with `V5/build_sender_app.py --dmg` (clean staging with only the app and an `/Applications` symlink, then DMG sign/notarize/staple, `hdiutil verify`, and sha256 after stapling). The canonical command checklist lives in [V5/PACKAGING.md](V5/PACKAGING.md).
 
 ### POST Endpoints — Device Management
 

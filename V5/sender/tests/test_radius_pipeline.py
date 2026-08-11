@@ -17,10 +17,11 @@ import audio_cues
 def _capture_send():
     sent = {}
 
-    def fake(ip, packet, source_ip=None, port=artnet.ARTNET_PORT):
+    def fake(ip, packet, source_ip=None, dest_port=None):
         sent["ip"] = ip
         sent["packet"] = bytes(packet)
-        sent["port"] = port
+        # Mirror _send_udp_packet's default-port resolution so routing asserts hold.
+        sent["port"] = dest_port if dest_port is not None else artnet.ARTNET_PORT
 
     return sent, fake
 
@@ -96,11 +97,13 @@ class Port6456Routing(unittest.TestCase):
     def tearDown(self):
         artnet._send_udp_packet = self._orig
 
-    def test_audio_and_ftp_go_to_radius_port(self):
-        artnet.send_audio_cmd("1.2.3.4", 1, filename="a.wav")
-        self.assertEqual(self.sent["port"], artnet.RADIUS_ARTNET_PORT)
-        artnet.send_ftp_cmd("1.2.3.4", True)
-        self.assertEqual(self.sent["port"], artnet.RADIUS_ARTNET_PORT)
+    def test_audio_and_ftp_honor_caller_dest_port(self):
+        # Lane model: the caller (radius_state via device_show_port / device_setup_port)
+        # supplies the port; send_audio_cmd / send_ftp_cmd forward it unchanged.
+        artnet.send_audio_cmd("1.2.3.4", 1, filename="a.wav", dest_port=artnet.PORT_SHOW_RADIUS)
+        self.assertEqual(self.sent["port"], artnet.PORT_SHOW_RADIUS)
+        artnet.send_ftp_cmd("1.2.3.4", True, dest_port=artnet.PORT_SETUP)
+        self.assertEqual(self.sent["port"], artnet.PORT_SETUP)
 
     def test_osc_cue_uses_osc_port_and_pads(self):
         artnet.send_osc_cue("1.2.3.4", 12)
@@ -111,7 +114,7 @@ class Port6456Routing(unittest.TestCase):
     def test_device_mgmt_defaults_6454_radius_passes_6456(self):
         artnet.send_art_address("1.2.3.4", "Primus")
         self.assertEqual(self.sent["port"], artnet.ARTNET_PORT)
-        artnet.send_art_address("1.2.3.4", "Radius", port=artnet.RADIUS_ARTNET_PORT)
+        artnet.send_art_address("1.2.3.4", "Radius", dest_port=artnet.RADIUS_ARTNET_PORT)
         self.assertEqual(self.sent["port"], artnet.RADIUS_ARTNET_PORT)
 
 

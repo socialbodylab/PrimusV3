@@ -57,7 +57,7 @@ class RadiusArtNetTests(unittest.TestCase):
     def test_audio_cmd_packet_builder(self):
         sent = []
 
-        def fake_send(ip, packet, source_ip=None, port=None):
+        def fake_send(ip, packet, source_ip=None, dest_port=None):
             sent.append(bytes(packet))
 
         import artnet as artnet_mod
@@ -79,7 +79,7 @@ class RadiusArtNetTests(unittest.TestCase):
     def test_audio_cmd_with_duration(self):
         sent = []
 
-        def fake_send(ip, packet, source_ip=None, port=None):
+        def fake_send(ip, packet, source_ip=None, dest_port=None):
             sent.append(bytes(packet))
 
         import artnet as artnet_mod
@@ -112,7 +112,7 @@ class RadiusArtNetTests(unittest.TestCase):
         from contextlib import contextmanager
 
         @contextmanager
-        def fake_session(ip, source_ip=None, timeout=8.0):
+        def fake_session(ip, source_ip=None, timeout=8.0, dest_port=None):
             yield FakeFTP()
 
         import artnet as artnet_mod
@@ -123,7 +123,7 @@ class RadiusArtNetTests(unittest.TestCase):
     def test_ftp_cmd_packet_builder(self):
         sent = []
 
-        def fake_send(ip, packet, source_ip=None, port=None):
+        def fake_send(ip, packet, source_ip=None, dest_port=None):
             sent.append(bytes(packet))
 
         import artnet as artnet_mod

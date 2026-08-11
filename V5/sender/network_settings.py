@@ -26,6 +26,19 @@ SCUTIL = "/usr/sbin/scutil"
 AIRPORT = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
 POWERSHELL = "powershell.exe"
 
+# UDP lane defaults — docs/systems/PORT_ORGANIZATION.md. Kept in sync with the
+# artnet.py PORT_* constants; duplicated here (rather than imported) so this
+# module's DEFAULT_SETTINGS literal stays self-contained and dependency-light.
+LANE_PORT_KEYS = ("port_show_primus", "port_show_radius", "port_setup", "port_watch")
+DEFAULT_LANE_PORTS = {
+    "port_show_primus": 6454,
+    "port_show_radius": 6456,
+    "port_setup": 6457,
+    "port_watch": 6455,
+}
+LANE_PORT_MIN = 1024
+LANE_PORT_MAX = 65535
+
 DEFAULT_SETTINGS = {
     "preferred": {
         "id": "",
@@ -44,6 +57,7 @@ DEFAULT_SETTINGS = {
     "ssid_profiles": {},
     "service_profiles": {},
     "last_applied": {},
+    "lane_ports": dict(DEFAULT_LANE_PORTS),
 }
 
 
@@ -113,6 +127,17 @@ def _normalize_settings(settings=None):
             out[key] = settings[key]
     if isinstance(settings.get("last_applied"), dict):
         out["last_applied"] = settings["last_applied"]
+    lane_ports = dict(DEFAULT_LANE_PORTS)
+    saved_lane_ports = settings.get("lane_ports")
+    if isinstance(saved_lane_ports, dict):
+        for key in LANE_PORT_KEYS:
+            try:
+                value = int(saved_lane_ports.get(key, lane_ports[key]))
+            except (TypeError, ValueError):
+                continue
+            if LANE_PORT_MIN <= value <= LANE_PORT_MAX:
+                lane_ports[key] = value
+    out["lane_ports"] = lane_ports
     return out
 
 
@@ -125,6 +150,52 @@ def save_settings(settings):
     data[STATE_KEY] = _normalize_settings(settings)
     _write_state(data)
     return data[STATE_KEY]
+
+
+def _validate_lane_port_value(name, value):
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        raise NetworkSettingsError(400, f"{name} must be an integer")
+    if port < LANE_PORT_MIN or port > LANE_PORT_MAX:
+        raise NetworkSettingsError(400, f"{name} must be {LANE_PORT_MIN}-{LANE_PORT_MAX}")
+    return port
+
+
+def _validate_lane_ports_dict(data):
+    data = data or {}
+    ports = {}
+    for key in LANE_PORT_KEYS:
+        if key not in data:
+            raise NetworkSettingsError(400, f"{key} required")
+        ports[key] = _validate_lane_port_value(key, data[key])
+    show_primus = ports["port_show_primus"]
+    show_radius = ports["port_show_radius"]
+    setup = ports["port_setup"]
+    watch = ports["port_watch"]
+    # show_primus and show_radius may collide with each other freely, but
+    # Setup must never share a lane with either Show port or with Watch, and
+    # Watch must never share a lane with Setup.
+    if setup in (show_primus, show_radius, watch):
+        raise NetworkSettingsError(
+            400, "port_setup must differ from port_show_primus, port_show_radius, and port_watch")
+    if watch == setup:
+        raise NetworkSettingsError(400, "port_watch must differ from port_setup")
+    return ports
+
+
+def get_lane_ports():
+    """Current default UDP lane ports (Show/Setup/Watch) as an int dict."""
+    return dict(load_settings().get("lane_ports") or DEFAULT_LANE_PORTS)
+
+
+def set_lane_ports(data):
+    """Validate and persist new default UDP lane ports. Returns the saved dict."""
+    ports = _validate_lane_ports_dict(data)
+    settings = load_settings()
+    settings["lane_ports"] = ports
+    save_settings(settings)
+    return dict(ports)
 
 
 def _no_window_subprocess_kwargs():

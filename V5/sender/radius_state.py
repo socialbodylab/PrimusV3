@@ -9,8 +9,14 @@ import time
 
 from artnet import (
     parse_node_capabilities,
+    resolve_lane_ports,
+    device_show_port,
+    device_setup_port,
+    FPS_LISTEN_PORT,
     send_art_address,
     send_ip_config,
+    send_lane_ports,
+    set_primus_lane_ports,
     send_show_info,
     sync_show_info_to_device,
     sync_device_name_to_receiver,
@@ -97,7 +103,25 @@ def _normalize_capabilities(raw):
     if caps.get("device_class") == "radius":
         caps["hello"] = True
         caps["show_info"] = bool(caps.get("show_info"))
+    for key in ("port_show", "port_setup", "port_watch", "ftp_port"):
+        value = caps.get(key)
+        if value is None or value == "":
+            caps[key] = None
+        else:
+            try:
+                caps[key] = int(value)
+            except (TypeError, ValueError):
+                caps[key] = None
     return caps
+
+
+def _apply_lane_ports(dev, capabilities=None):
+    caps = _normalize_capabilities(capabilities or dev.get("capabilities"))
+    ports = resolve_lane_ports(caps, is_radius=True)
+    for key, value in ports.items():
+        if value is not None:
+            dev[key] = int(value)
+    dev["capabilities"] = caps
 
 
 def _capabilities_from_node(node_info):
@@ -298,7 +322,7 @@ class RadiusState:
                 if device_name:
                     sync_device_name_to_receiver(
                         ip, device_name, source_ip=self.artnet_source_ip,
-                        port=RADIUS_ARTNET_PORT)
+                        dest_port=device_setup_port(dev))
                     dev["name"] = str(device_name)[:17]
                 char = dev.get("character_name", "")
                 perf = dev.get("performer_name", "")
@@ -311,7 +335,7 @@ class RadiusState:
                 if character_name is not None or performer_name is not None:
                     sync_show_info_to_device(
                         ip, char, perf, source_ip=self.artnet_source_ip,
-                        port=RADIUS_ARTNET_PORT)
+                        dest_port=device_setup_port(dev))
                 show_info_store.persist_device_show_info(
                     show_info_store.radius_state_path(),
                     ip,
@@ -364,6 +388,11 @@ class RadiusState:
         caps = _capabilities_from_node(node_info)
         if caps != dev.get("capabilities"):
             dev["capabilities"] = caps
+            updated = True
+        before_ports = (dev.get("port_show"), dev.get("port_setup"), dev.get("port_watch"))
+        _apply_lane_ports(dev, caps)
+        after_ports = (dev.get("port_show"), dev.get("port_setup"), dev.get("port_watch"))
+        if before_ports != after_ports:
             updated = True
         for key in ("hardware_profile", "hardware_label", "firmware_version"):
             value = node_info.get(key) or caps.get(key)
@@ -443,6 +472,7 @@ class RadiusState:
                 "current_track": "",
                 "playback_state": 0,
             }
+            _apply_lane_ports(dev, caps)
             show_info_store.apply_persisted_show_info(show_info_store.radius_state_path(), dev, node_info)
             self.devices.append(dev)
             if auto_save:
@@ -497,7 +527,7 @@ class RadiusState:
             try:
                 ok, error = sync_device_name_to_receiver(
                     dev["ip"], new_name, source_ip=self.artnet_source_ip,
-                    port=RADIUS_ARTNET_PORT)
+                    dest_port=device_setup_port(dev))
             except OSError as error:
                 dev["transport_error"] = str(error)
                 return {"ok": False, "error": dev.get("transport_error")}
@@ -523,8 +553,7 @@ class RadiusState:
             dev = self.devices[di]
             send_ip_config(
                 dev["ip"], 1, static_ip=static_ip, gateway=gateway, subnet=subnet,
-                source_ip=self.artnet_source_ip,
-                port=RADIUS_ARTNET_PORT,
+                source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
             )
             dev["ip_mode"] = "static"
             dev["static_ip"] = static_ip
@@ -538,13 +567,81 @@ class RadiusState:
             if not (0 <= di < len(self.devices)):
                 return False
             dev = self.devices[di]
-            send_ip_config(dev["ip"], 0, source_ip=self.artnet_source_ip, port=RADIUS_ARTNET_PORT)
+            send_ip_config(
+                dev["ip"], 0, source_ip=self.artnet_source_ip,
+                dest_port=device_setup_port(dev))
             dev["ip_mode"] = "dhcp"
             dev["static_ip"] = None
             dev["gateway"] = None
             dev["subnet"] = None
             _save_devices(self.devices)
             return True
+
+    def get_device_lane_ports(self, di):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            return {
+                "ok": True,
+                "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+                "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+                "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
+                "ftp_port": dev.get("ftp_port"),
+                "is_radius": bool(dev.get("is_radius")),
+            }
+
+    def set_device_lane_ports(self, di, port_show, port_setup, port_watch):
+        try:
+            port_show = int(port_show)
+            port_setup = int(port_setup)
+            port_watch = int(port_watch)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "ports must be integers", "http_status": 400}
+        for name, value in (
+            ("port_show", port_show), ("port_setup", port_setup), ("port_watch", port_watch)
+        ):
+            if value < 1 or value > 65535:
+                return {"ok": False, "error": f"{name} must be 1-65535", "http_status": 400}
+        if port_setup in (port_show, port_watch):
+            return {
+                "ok": False,
+                "error": "port_setup must differ from port_show and port_watch",
+                "http_status": 400,
+            }
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return {"ok": False, "error": "invalid device index", "http_status": 400}
+            dev = self.devices[di]
+            try:
+                if dev.get("is_radius"):
+                    send_lane_ports(
+                        dev["ip"], port_show, port_setup, port_watch,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
+                    )
+                else:
+                    set_primus_lane_ports(
+                        dev["ip"], port_show, port_setup, port_watch,
+                        source_ip=self.artnet_source_ip, dest_port=device_setup_port(dev),
+                    )
+            except Exception as error:
+                dev["transport_error"] = str(error)
+                return {"ok": False, "error": dev.get("transport_error")}
+            dev["port_show"] = port_show
+            dev["port_setup"] = port_setup
+            dev["port_watch"] = port_watch
+            caps = _normalize_capabilities(dev.get("capabilities"))
+            caps["port_show"] = port_show
+            caps["port_setup"] = port_setup
+            caps["port_watch"] = port_watch
+            dev["capabilities"] = caps
+            _save_devices(self.devices)
+            return {
+                "ok": True,
+                "port_show": port_show,
+                "port_setup": port_setup,
+                "port_watch": port_watch,
+            }
 
     def device_capability_status(self, di, capability):
         with self.lock:
@@ -560,16 +657,22 @@ class RadiusState:
                 return None
             return self.devices[di]["ip"]
 
+    def _device_ref(self, di):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return None
+            return self.devices[di]
+
     def send_audio_command(self, di, cmd, filename="", volume=100, duration=0):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             return False
         code = AUDIO_CMD_MAP.get(str(cmd).lower())
         if code is None:
             return False
         send_audio_cmd(
-            ip, code, filename=filename, volume=volume, duration=duration,
-            source_ip=self.artnet_source_ip,
+            dev["ip"], code, filename=filename, volume=volume, duration=duration,
+            source_ip=self.artnet_source_ip, dest_port=device_show_port(dev),
         )
         self.performance.increment("audio_commands")
         return True
@@ -584,7 +687,7 @@ class RadiusState:
                 dev.get("character_name", ""),
                 dev.get("performer_name", ""),
                 source_ip=self.artnet_source_ip,
-                port=RADIUS_ARTNET_PORT,
+                dest_port=device_setup_port(dev),
             )
         except OSError as error:
             dev["transport_error"] = str(error)
@@ -642,12 +745,12 @@ class RadiusState:
             return {"ok": True, "applied_to_device": applied_to_device}
 
     def hello_device(self, di, volume=80):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             return False
         send_audio_cmd(
-            ip, AUDIO_CMD_TEST_TONE, volume=int(volume),
-            source_ip=self.artnet_source_ip,
+            dev["ip"], AUDIO_CMD_TEST_TONE, volume=int(volume),
+            source_ip=self.artnet_source_ip, dest_port=device_show_port(dev),
         )
         self.performance.increment("audio_commands")
         return True
@@ -662,11 +765,11 @@ class RadiusState:
         results = {}
         with self.lock:
             snapshot = [
-                (d["ip"], d.get("connected", False), d.get("is_radius", False))
+                (d["ip"], d.get("connected", False), d.get("is_radius", False), device_show_port(d))
                 for d in self.devices
             ]
         actions = cue.get("actions") or {}
-        for ip, connected, is_radius in snapshot:
+        for ip, connected, is_radius, port_show in snapshot:
             if not is_radius:
                 continue
             action = actions.get(ip) or {}
@@ -687,7 +790,7 @@ class RadiusState:
             try:
                 volume = action.get("volume")
                 duration = action.get("duration") or 0
-                kwargs = {"source_ip": self.artnet_source_ip}
+                kwargs = {"source_ip": self.artnet_source_ip, "dest_port": port_show}
                 if volume is not None:
                     kwargs["volume"] = int(volume)
                 else:
@@ -706,41 +809,52 @@ class RadiusState:
         return results
 
     def ftp_download(self, di, path):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             raise ValueError("invalid device index")
-        return ftp_download(ip, path, source_ip=self.artnet_source_ip)
+        return ftp_download(
+            dev["ip"], path, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
 
     def ftp_list_dir(self, di, path="/"):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             return []
-        return ftp_list_dir(ip, path, source_ip=self.artnet_source_ip)
+        return ftp_list_dir(
+            dev["ip"], path, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
 
     def ftp_upload(self, di, path, data, progress_callback=None):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             raise ValueError("invalid device index")
-        ftp_upload(ip, path, data, source_ip=self.artnet_source_ip,
-                   progress_callback=progress_callback)
+        ftp_upload(dev["ip"], path, data, source_ip=self.artnet_source_ip,
+                   progress_callback=progress_callback,
+                   dest_port=device_setup_port(dev))
 
     def ftp_rename(self, di, src, dst):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             raise ValueError("invalid device index")
-        ftp_rename(ip, src, dst, source_ip=self.artnet_source_ip)
+        ftp_rename(
+            dev["ip"], src, dst, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
 
     def ftp_delete(self, di, path, is_dir=False):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             raise ValueError("invalid device index")
-        ftp_delete(ip, path, is_dir=is_dir, source_ip=self.artnet_source_ip)
+        ftp_delete(
+            dev["ip"], path, is_dir=is_dir, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
 
     def ftp_mkdir(self, di, path):
-        ip = self._device_ip(di)
-        if not ip:
+        dev = self._device_ref(di)
+        if not dev or not dev.get("ip"):
             raise ValueError("invalid device index")
-        ftp_mkdir(ip, path, source_ip=self.artnet_source_ip)
+        ftp_mkdir(
+            dev["ip"], path, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
 
     def _merge_telemetry_unlocked(self, dev):
         listener = self.telemetry_listener
@@ -791,6 +905,23 @@ class RadiusState:
                 "product": "radius",
                 "devices": devices,
             }
+
+    def has_live_playback(self):
+        """True when any receiver reports audio playing.
+
+        Radius has no sender-side "driving output" flag the way Primus does --
+        playback lives on the device and arrives via PTR telemetry -- so the
+        device view is the only honest signal. Used as the UI-lifecycle idle
+        guard so closing the last window mid-cue does not kill the server.
+        """
+        with self.lock:
+            for dev in self.devices:
+                try:
+                    if int(dev.get("playback_state") or 0) > 0:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+        return False
 
     def get_performance_json(self):
         return self.performance.snapshot()

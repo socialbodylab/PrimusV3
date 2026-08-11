@@ -76,12 +76,21 @@
 #define DEFAULT_GATEWAY        192, 168, 1, 1
 #define DEFAULT_SUBNET         255, 255, 255, 0
 
-#define ARTNET_PORT              6456   // Radius on its own port — keeps LED/3rd-party 6454 traffic off Radius nodes
+// UDP lane ports (Show / Setup / Watch) — docs/systems/PORT_ORGANIZATION.md
+#define PORT_DISCOVERY_DEFAULT   6454   // ArtPoll bootstrap (always)
+#define PORT_SHOW_DEFAULT        6456   // ArtAudioCmd live show
+#define PORT_SETUP_DEFAULT       6457   // FTP gate / identity / IP
+#define PORT_WATCH_DEFAULT       6455   // PTR / PFP telemetry destination
+#ifndef PORT_DUAL_LISTEN
+#define PORT_DUAL_LISTEN         1      // accept Setup/audio on legacy ports during migrate
+#endif
+#define ARTNET_PORT              PORT_DISCOVERY_DEFAULT
 #define ARTNET_OPCODE_POLL       0x2000
 #define ARTNET_OPCODE_POLLREPLY  0x2100
 #define ARTNET_OPCODE_ADDRESS    0x6000
 #define ARTNET_OPCODE_IP_CONFIG  0x8200
 #define ARTNET_OPCODE_SHOW_INFO  0x8210
+#define ARTNET_OPCODE_LANE_PORTS 0x8220  // Vendor-defined: set Show/Setup/Watch ports
 #define ARTNET_OPCODE_AUDIO_CMD  0x8300
 #define ARTNET_OPCODE_FTP_CMD    0x8301
 #define ARTNET_OPCODE_AUDIO_STATUS 0x8302
@@ -124,8 +133,8 @@
 #define NODE_CAPS_FEATURES "RIHAS"
 #endif
 
-#define FPS_REPORT_PORT         6455
-#define AUDIO_REPORT_PORT       6455
+#define FPS_REPORT_PORT         PORT_WATCH_DEFAULT
+#define AUDIO_REPORT_PORT       PORT_WATCH_DEFAULT
 #define OSC_PORT                53001
 #define FPS_BACKCHANNEL_ENABLED true
 #define TRACK_TELEMETRY_ENABLED true

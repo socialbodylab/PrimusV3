@@ -25,16 +25,28 @@ from controller import CueList
 from mixer import load_look, compute_look_frame
 from effects import blend_pixels
 from osc_control import OscControlServer
-from paths import ensure_runtime_data, is_bundled, log_path, default_frontend_path, sender_product
-from network_settings import get_artnet_interface
+from paths import (
+    app_version,
+    ensure_runtime_data,
+    is_bundled,
+    log_path,
+    default_frontend_path,
+    sender_product,
+)
+from network_settings import get_artnet_interface, get_lane_ports
 from central_launcher import (
     CentralPortInUseByCentral,
+    MISMATCH_MONITOR_ONLY,
+    MISMATCH_WRONG_PRODUCT,
     frontend_path_for,
     probe_central_server,
     register_central_server,
+    stop_running_central,
     try_attach_before_start,
     unregister_central_server,
+    wait_for_port_release,
 )
+from launcher_dialog import choose as dialog_choose, notify as dialog_notify
 from browser_launcher import DedicatedBrowser
 from ui_focus import UiFocusServer
 from server import create_server
@@ -57,6 +69,61 @@ def _ui_has_live_output(server):
         ControllerState.SOURCE_MIXER,
         ControllerState.SOURCE_DESIGNER,
     )
+
+
+def _attach_mismatch_handler(host="127.0.0.1"):
+    """Decide what to do when the running Central cannot serve this launcher.
+
+    Returns a callable for ``try_attach_before_start(on_mismatch=...)``. The
+    whole point is that the user sees the choice: packaged apps are windowed
+    with no console, so the previous behaviour -- attach anyway, or exit
+    silently -- was indistinguishable from a failed launch.
+    """
+    app_name = _launcher_display_name()
+
+    def handler(mismatch, port, runtime):
+        if mismatch["reason"] == MISMATCH_MONITOR_ONLY:
+            choice = dialog_choose(
+                app_name,
+                "Another Central server is already running in Monitor Only mode "
+                "(started by DeviceManager), so it will not drive lights.\n\n"
+                f"{app_name} needs to send output. Restart the shared server in "
+                "full mode?",
+                ["Restart in full mode", "Open read-only", "Cancel"],
+                "Restart in full mode",
+            )
+            if choice == "Open read-only":
+                return "attach"
+            if choice != "Restart in full mode":
+                return "abort"
+            ok, message = stop_running_central(host, port)
+            if not ok:
+                dialog_notify(
+                    app_name,
+                    f"Could not stop the running server on port {port}: {message}")
+                return "abort"
+            if not wait_for_port_release(host, port):
+                dialog_notify(
+                    app_name,
+                    f"The server on port {port} did not shut down in time. "
+                    "Quit it manually and try again.")
+                return "abort"
+            return "start"
+
+        if mismatch["reason"] == MISMATCH_WRONG_PRODUCT:
+            backend = mismatch.get("backend_product") or "another product"
+            choice = dialog_choose(
+                app_name,
+                f"A {backend} Central server is already running on port {port}. "
+                f"{app_name} cannot share it.\n\n"
+                f"Open the running {backend} interface instead?",
+                ["Open running server", "Cancel"],
+                "Cancel",
+            )
+            return "attach" if choice == "Open running server" else "abort"
+        return "abort"
+
+    return handler
 
 
 def _handle_sigterm(signum, frame):
@@ -147,24 +214,32 @@ def _kill_existing():
             except ProcessLookupError:
                 break
     if killed:
-        _wait_for_telemetry_port()
+        _wait_for_telemetry_port(_watch_port())
 
 
-def _wait_for_telemetry_port(timeout=3.0):
-    """Wait until UDP 6455 is free for PrimusTelemetryListener."""
+def _watch_port():
+    try:
+        return int(get_lane_ports().get("port_watch") or FPS_LISTEN_PORT)
+    except Exception:
+        return FPS_LISTEN_PORT
+
+
+def _wait_for_telemetry_port(port=None, timeout=3.0):
+    """Wait until the Watch-lane UDP port is free for PrimusTelemetryListener."""
     import socket
+    port = int(port or FPS_LISTEN_PORT)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            probe.bind(("0.0.0.0", FPS_LISTEN_PORT))
+            probe.bind(("0.0.0.0", port))
             probe.close()
             return True
         except OSError:
             probe.close()
             time.sleep(0.1)
-    print(f"WARNING: telemetry port {FPS_LISTEN_PORT} still busy after replacing prior sender.")
+    print(f"WARNING: telemetry port {port} still busy after replacing prior sender.")
     return False
 
 
@@ -454,12 +529,19 @@ def main():
     _configure_app_logging()
 
     frontend_path = frontend_path_for(args.frontend, sender_product())
+    # DeviceManager only watches; the show frontends drive DMX. Only the latter
+    # are incompatible with a monitor-only backend.
+    needs_output = not args.monitor_only and str(args.frontend or "").lower() != "devices"
+    on_mismatch = _attach_mismatch_handler()
     if not args.replace and try_attach_before_start(
         port=args.port,
         frontend_path=frontend_path,
         no_browser=args.no_browser,
         open_browser=_open_browser,
         launcher_name=_launcher_display_name(),
+        need_product="primus",
+        needs_output=needs_output,
+        on_mismatch=on_mismatch,
     ):
         return
 
@@ -467,7 +549,7 @@ def main():
     if args.replace:
         _kill_existing()
 
-    fps_listener = PrimusTelemetryListener()
+    fps_listener = PrimusTelemetryListener(listen_port=_watch_port())
     fps_thread = threading.Thread(target=fps_listener.run, daemon=True)
     fps_thread.start()
 
@@ -484,25 +566,44 @@ def main():
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
     ui_focus_server = None
     bind_host = "0.0.0.0" if args.lan else "127.0.0.1"
-    try:
-        server = _create_server_with_fallback(
-            bind_host, args.port, state, cue_list,
-            ui_lifecycle_enabled=ui_lifecycle_enabled,
-            osc_service=osc_service)
-    except CentralPortInUseByCentral:
-        if try_attach_before_start(
-            port=args.port,
-            frontend_path=frontend_path,
-            no_browser=args.no_browser,
-            open_browser=_open_browser,
-            launcher_name=_launcher_display_name(),
-        ):
-            osc_service.stop()
-            fps_listener.stop()
-            return
-        raise
+
+    # Two passes: the mismatch handler may stop a running server and ask us to
+    # bind again. Bounded so a flapping server cannot spin here forever.
+    server = None
+    for attempt in range(2):
+        try:
+            server = _create_server_with_fallback(
+                bind_host, args.port, state, cue_list,
+                ui_lifecycle_enabled=ui_lifecycle_enabled,
+                osc_service=osc_service)
+            break
+        except CentralPortInUseByCentral:
+            if try_attach_before_start(
+                port=args.port,
+                frontend_path=frontend_path,
+                no_browser=args.no_browser,
+                open_browser=_open_browser,
+                launcher_name=_launcher_display_name(),
+                need_product="primus",
+                needs_output=needs_output,
+                on_mismatch=on_mismatch,
+            ):
+                osc_service.stop()
+                fps_listener.stop()
+                return
+            if attempt == 0:
+                # Handler stopped the old server; retry the bind.
+                continue
+            raise
+    if server is None:
+        osc_service.stop()
+        fps_listener.stop()
+        raise SystemExit(1)
     port = server.server_address[1]
     server.lan_enabled = args.lan
+    # Shared by the auto-shutdown monitor and /api/server/stop so both agree on
+    # whether it is safe to quit.
+    server.live_output_fn = _ui_has_live_output
     if not args.no_browser:
         server.ui_focus_callback = _dedicated_browser.focus
         ui_focus_server = UiFocusServer(port, _dedicated_browser.focus)
@@ -517,7 +618,12 @@ def main():
         lan_ip = (lan_interface or {}).get("source_ip")
         if lan_ip:
             lan_url = f"http://{lan_ip}:{port}{frontend_path}"
-    register_central_server(port, sender_product())
+    register_central_server(
+        port, sender_product(),
+        monitor_only=bool(args.monitor_only),
+        lan_enabled=bool(args.lan),
+        app_version=app_version(),
+    )
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
     anim.start()

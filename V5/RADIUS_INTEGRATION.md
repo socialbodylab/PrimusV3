@@ -25,6 +25,70 @@ flowchart LR
 - **RadiusCentral** continues to use `RadiusState` for its own device list; show-info edits there also persist in `.radius_state.json`.
 - **Playback telemetry (RadiusCentral)** is now event-driven **`0x8302` ArtAudioStatus** (UDP 6455): `RadiusTelemetryListener` ingests it (plus `PBT` battery), exposing `current_track`/`playback_state` on the device. The periodic PTR heartbeat was removed from firmware (PTR functions retained as a fallback). **DeviceManager** ingests the same `0x8302` in `PrimusTelemetryListener` (with a PTR fallback branch), so its Radius now-playing is event-driven too.
 
+## Concurrency limitation — RadiusCentral cannot run alongside PrimusCentral
+
+**Status:** known limitation as of v0.97, verified on macOS. Read this before
+changing how RadiusCentral launches.
+
+PrimusCentral and DeviceManager share one backend on purpose — DeviceManager is
+a frontend on the Primus server, not a second process. RadiusCentral is a
+different *product*, and there is no working co-existence story for it. Starting
+it while a Primus Central is running does **not** fail; it silently attaches to
+the wrong backend:
+
+```text
+$ python3 V5/sender/run_radius.py --no-browser
+Radius Central V5: Central already running on port 8080 (backend: primus)
+  View URL: http://127.0.0.1:8080/radius
+```
+
+Observed against that Primus backend:
+
+| Probe | Result |
+|-------|--------|
+| `GET /radius` | `200` — the UI loads and looks healthy |
+| `GET /api/state` | Primus state: clips/looks/cues, **no** audio/ftp/track keys |
+| `GET /api/audio/cue_map` | `400` |
+| `radius_state.py` / `.radius_state.json` | never loaded |
+
+### Two independent causes
+
+1. **The launcher does not check product.** `find_running_central_server()` in
+   `central_launcher.py` returns any live Central regardless of product, and
+   `candidate_ports()` probes the requested port, then the registry port, then
+   `8080` — so even `--port 8081` attaches to a Primus server on 8080.
+   `central_server.json` stores a single `{port, product, pid}`: it is a
+   one-server registry, not a multi-server one.
+
+2. **The Watch lane is a single-owner socket.** The telemetry listener binds
+   `0.0.0.0:6455` with `SO_REUSEADDR` only. A second backend cannot take it:
+
+   ```text
+   second bind on 6455 FAILED: [Errno 48] Address already in use
+   ```
+
+   This is the deeper blocker. Fixing only cause 1 moves the failure rather than
+   removing it, and adding `SO_REUSEPORT` would be *worse* — telemetry would be
+   split arbitrarily between two processes with no way to route a packet to the
+   backend that owns that device.
+
+### Preferred direction
+
+Make RadiusCentral a **third frontend on one shared backend**, the same way
+DeviceManager already is, with the single 6455 listener demuxing by magic:
+`PST`/`PFP` → Primus, `PTR` → Radius. This removes the port conflict by
+construction instead of working around it, and the precedent already exists —
+see the `PrimusTelemetryListener` note above, which handles Radius `PTR` on the
+primus-product server today precisely to avoid a second listener.
+
+The real work is that the backend selects one product globally through
+`sender_product()` and would need to hold `ControllerState` and `RadiusState`
+at once.
+
+Independently and cheaply: the launcher should **fail loudly on product
+mismatch** rather than attaching. The current failure is invisible, which is the
+worst property it could have.
+
 ## Firmware (`V5/Arduino/radius_receiver/`)
 
 Unified **V1 + V2** sketch, built through the consolidated `upload.sh`

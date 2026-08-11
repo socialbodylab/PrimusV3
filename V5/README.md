@@ -56,7 +56,7 @@ V5/
     primusV3_receiver/   Primus LED firmware (profiles v1, v2, v3)
     radius_receiver/     Radius audio firmware (unified V1 + V2 sketch)
     upload.sh            Compile/upload script — all profiles (v1/v2/v3, rv1/rv2)
-  build_sender_app.py  PyInstaller packaging (--product primus|radius)
+  build_sender_app.py  PyInstaller packaging (--product primus|radius|devices, --dmg)
   ARCHITECTURE.md      Unified backend roadmap
   assets/              App icon
   dist/                Build output
@@ -144,28 +144,35 @@ Pull sync and conflict resolution are **not** implemented in V5 (push-only).
 
 ## Packaging
 
-**RadiusCentral:**
+Local unsigned builds:
 
 ```bash
 python3 V5/build_sender_app.py --target macos --product radius --name RadiusCentral
+python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py --target macos --product devices --name DeviceManager
 ```
 
-**PrimusCentral (from V5 unified codebase):**
+Signed macOS release with GitHub-ready DMG (add `--dmg`; reuse the shared `PrimusCentral Notary` profile for all three apps):
 
 ```bash
-python3 V5/build_sender_app.py --target macos --product primus --name PrimusCentral
+python3 V5/build_sender_app.py \
+  --target macos --product radius --name RadiusCentral \
+  --sign-identity "Developer ID Application: Nicholas Puckett (SAV2V7GXQ5)" \
+  --notary-profile "PrimusCentral Notary" \
+  --notary-timeout 1h \
+  --dmg
 ```
 
-Windows release build:
+Windows PrimusCentral release build:
 
 ```powershell
 py V5\build_sender_app.py --target windows --product primus --windows-installer
 ```
 
-Output: `V5/dist/macos/PrimusCentral.app`, `RadiusCentral.app`, or `V5\dist\windows\PrimusCentral.exe`
-Bundle IDs: `com.socialbodylab.PrimusCentral` / `com.socialbodylab.RadiusCentral`
+Outputs: `V5/dist/macos/<App>.app`, `<App>-<ver>-macOS-arm64.dmg` + `.sha256`, or `V5\dist\windows\PrimusCentral.exe`.
+Bundle IDs: `com.socialbodylab.RadiusCentral` / `PrimusCentral` / `DeviceManager`.
 
-See [PACKAGING.md](PACKAGING.md) for signing and release details.
+See [PACKAGING.md](PACKAGING.md) for DMG retries, LaunchServices validation, and GitHub release upload.
 
 ## Protocol
 
@@ -182,7 +189,7 @@ See [PACKAGING.md](PACKAGING.md) for signing and release details.
 
 **Device cue map:** `/cues.json` on SD card (loaded at boot). Keys are cue numbers as strings; values are either a WAV filename string or `{"file": "name.wav", "duration": 30}`. Max 64 entries. Edited from the Cue Map panel or via `GET/POST /api/audio/cue_map`.
 
-Capability tag: `PVRAD1|B:v1|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info. Optional Marius tokens `MC:` / `MP:` on V2 when configured.
+Capability tag: `PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:D|F:RIHAS` (V2 uses `B:v2`) where `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info. Optional Marius tokens `MC:` / `MP:` on V2 when configured. ArtAudioCmd listens on **:6456**; Setup (FTP/identity/IP) on **:6457**.
 
 Track telemetry on UDP 6455: magic `PTR` + playback state + track name. FPS telemetry uses the shared `PFP` packet format on the same port.
 

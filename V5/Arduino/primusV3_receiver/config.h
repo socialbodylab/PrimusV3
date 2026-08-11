@@ -22,7 +22,7 @@
 //  Firmware Info
 // =====================================================================
 #define FIRMWARE_NAME    "PrimusV3.6"
-#define FIRMWARE_VERSION "3.14.0"
+#define FIRMWARE_VERSION "3.14.1"
 
 // =====================================================================
 //  Board Profile
@@ -78,7 +78,7 @@ enum OutputType {
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP   // Collar (72 px strip)
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A13
-  #define BOARD_BATTERY_FEATURES  "RIOHBMSG"
+  #define BOARD_BATTERY_FEATURES  "RIOHBMSGL"
   #ifndef DEFAULT_SHOW_CHARACTER_NAME
   #define DEFAULT_SHOW_CHARACTER_NAME "Character"
   #endif
@@ -102,7 +102,7 @@ enum OutputType {
   #define OUTPUT1_PHYSICAL_PORT   1
   #define OUTPUT0_DEFAULT_TYPE    OUTPUT_SMALL_GRID
   #define OUTPUT1_DEFAULT_TYPE    OUTPUT_LONG_STRIP
-  #define BOARD_BATTERY_FEATURES  "RIOHMSG"
+  #define BOARD_BATTERY_FEATURES  "RIOHMSGL"
 #else
   #define BOARD_PROFILE_ID        "v3_1_reverse_tft"
   #define BOARD_PROFILE_CODE      "v31"
@@ -119,7 +119,7 @@ enum OutputType {
   #define BOARD_OUTPUT_WIFI_GATED 1
   #define BOARD_BATTERY_MONITOR   1
   #define BOARD_BATTERY_PIN       A4   // GPIO14 — 5V rail via 100k/100k divider
-  #define BOARD_BATTERY_FEATURES  "RIOHBMSG"
+  #define BOARD_BATTERY_FEATURES  "RIOHBMSGL"
   #define BOARD_BATTERY_TYPE_RAIL 1
   #define BOARD_BATTERY_ADC_SCALE_NUM  2
   #define BOARD_BATTERY_ADC_SCALE_DEN  1
@@ -133,7 +133,7 @@ enum OutputType {
   #define BOARD_BATTERY_MONITOR   0
 #endif
 #ifndef BOARD_BATTERY_FEATURES
-  #define BOARD_BATTERY_FEATURES  "RIOHMSG"
+  #define BOARD_BATTERY_FEATURES  "RIOHMSGL"
 #endif
 #ifndef BOARD_OUTPUT_WIFI_GATED
   #define BOARD_OUTPUT_WIFI_GATED 0
@@ -395,9 +395,16 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define DEFAULT_SUBNET         255, 255, 255, 0
 
 // =====================================================================
-//  Art-Net
+//  Art-Net / UDP lane ports (Show / Setup / Watch)
+//  See docs/systems/PORT_ORGANIZATION.md
 // =====================================================================
-#define ARTNET_PORT            6454
+#define PORT_SHOW_DEFAULT      6454
+#define PORT_SETUP_DEFAULT     6457
+#define PORT_WATCH_DEFAULT     6455
+#ifndef PORT_DUAL_LISTEN
+#define PORT_DUAL_LISTEN       1   // accept Setup opcodes on Show during migrate
+#endif
+#define ARTNET_PORT            PORT_SHOW_DEFAULT
 #define ARTNET_OPCODE_DMX      0x5000
 #define ARTNET_OPCODE_POLL     0x2000
 #define ARTNET_OPCODE_POLLREPLY 0x2100
@@ -409,6 +416,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define ARTNET_OPCODE_MANAGEMENT_REPLY   0x8141 // Versioned Primus management reply
 #define ARTNET_OPCODE_IP_CONFIG    0x8200  // Vendor-defined: set static/DHCP IP
 #define ARTNET_OPCODE_SHOW_INFO    0x8210  // Vendor-defined: read/write show metadata
+#define ARTNET_OPCODE_LANE_PORTS   0x8220  // Vendor-defined: set Show/Setup/Watch ports (Radius; Primus uses mgmt 0x17)
 #define SHOW_INFO_FIELD_LEN        64
 #define SHOW_INFO_MODE_READ        0
 #define SHOW_INFO_MODE_WRITE       1
@@ -430,7 +438,7 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 #define NODE_CAPS_PREFIX   "PV3CAP1"            // versioned capability tag in ArtPollReply NodeReport
 #define FIRMWARE_VERSION_H 3
 #define FIRMWARE_VERSION_L 14
-#define FIRMWARE_VERSION_PATCH 0
+#define FIRMWARE_VERSION_PATCH 1
 #define OEM_CODE           0xFFFF                // generic / unregistered
 #define ESTA_CODE          0x0000                // no ESTA manufacturer ID
 
@@ -438,8 +446,8 @@ inline uint8_t countActiveOutputs(const OutputConfig outputs[NUM_OUTPUTS]) {
 // and output assignments already stored on deployed receivers.
 #define PERSISTENCE_NAMESPACE "primus35"
 
-// Explicit-target unified status back-channel.
-#define STATUS_REPORT_PORT       6455
+// Explicit-target unified status back-channel (Watch lane).
+#define STATUS_REPORT_PORT       PORT_WATCH_DEFAULT
 #define STATUS_PROTOCOL_VERSION  1
 #define STATUS_PACKET_LEN        28
 #define MANAGEMENT_PROTOCOL_VERSION 1

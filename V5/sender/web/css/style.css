@@ -814,6 +814,14 @@ body {
     font-weight: 600;
 }
 
+/* Node whose Show lane has been moved off 6454 — a stock Art-Net console
+   (Eos) sends to 6454 and will silently miss this device. */
+.device-lane-warning {
+    color: var(--warning);
+    font-size: 11px;
+    font-weight: 600;
+}
+
 .device-capability-row {
     display: flex;
     flex-direction: column;
@@ -4629,6 +4637,12 @@ input[type="color"] {
 
 .dm-row-receive {
     padding: 6px 0;
+    border-top: 1px solid var(--border);
+}
+
+.dm-row-lanes {
+    flex-wrap: wrap;
+    padding: 4px 0;
     border-top: 1px solid var(--border);
 }
 
