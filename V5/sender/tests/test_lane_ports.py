@@ -149,6 +149,13 @@ class LanePortCapabilityTests(unittest.TestCase):
         self.assertEqual(device_setup_port(primus), 6457)
         self.assertEqual(device_show_port(radius), 6456)
         self.assertEqual(device_setup_port(radius), 6457)
+        # Pre-lane Radius node (no advertised lane ports, e.g. older F:RA
+        # firmware) must resolve audio/FTP/management to the Radius show port
+        # 6456, not the 6454 discovery/Primus default — otherwise the node goes
+        # silent. This is the regression the main-lane merge introduced.
+        radius_prelane = {"is_radius": True}
+        self.assertEqual(device_show_port(radius_prelane), 6456)
+        self.assertEqual(device_setup_port(radius_prelane), 6456)
 
 
 class GetConfigLanePortsTests(unittest.TestCase):

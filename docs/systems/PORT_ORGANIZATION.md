@@ -97,6 +97,8 @@ Transitional dual-accept (FtpCmd on 6456 **or** 6457) is acceptable during migra
 
 Primus `portShow` default 6454; Radius live-audio listen default 6456. A device only binds the ports its product needs.
 
+> **Pre-lane fallback (sender-side).** A Radius node that advertises no lane token — e.g. older `F:RA` firmware, or new firmware sitting on all defaults — is assumed to run ArtAudio/FTP/management on **6456** (its Show port), *not* the 6454 discovery port. `resolve_lane_ports(is_radius=True)` defaults a missing Show/Setup lane to `PORT_SHOW_RADIUS` (6456). Defaulting these to 6454 makes the node go silent — verified on real hardware during the lane-port merge. Primus pre-lane nodes still fall back to their 6454 Show port.
+
 **On sender**
 
 | Field | Role |

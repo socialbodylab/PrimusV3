@@ -1432,7 +1432,10 @@ def resolve_lane_ports(capabilities=None, is_radius=False):
     missing token means "default" for lane-aware nodes (F: contains L) and
     "pre-lane-split firmware" otherwise:
     Missing MGMT + lane-aware → Setup 6457. Missing MGMT + legacy → Setup = Show.
-    Missing AUD on Radius → Show stays 6454 (legacy V5 Radius on discovery port).
+    Missing AUD on Radius → Show defaults to 6456 (PORT_SHOW_RADIUS). Pre-lane
+    Radius firmware runs ArtAudio/FTP/management on its own 6456 port (config.h
+    PORT_SHOW_DEFAULT), off the 6454 discovery/LED port — routing them to 6454
+    makes the node go silent (verified on real hardware).
     """
     caps = capabilities or {}
     if is_radius:
