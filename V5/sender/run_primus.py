@@ -38,10 +38,12 @@ from central_launcher import (
     CentralPortInUseByCentral,
     MISMATCH_MONITOR_ONLY,
     MISMATCH_WRONG_PRODUCT,
+    describe_backend,
     frontend_path_for,
     probe_central_server,
     register_central_server,
     stop_running_central,
+    supports_remote_stop,
     try_attach_before_start,
     unregister_central_server,
     wait_for_port_release,
@@ -81,8 +83,30 @@ def _attach_mismatch_handler(host="127.0.0.1"):
     """
     app_name = _launcher_display_name()
 
+    def _cannot_restart_remotely(backend, port):
+        """Old server on the port: say so, and say what to do about it.
+
+        Offering "Restart in full mode" against a pre-0.98 server produced the
+        worst outcome available -- the stop 404s, we abort, and the old server
+        keeps the port, so every subsequent launch of either app fails the same
+        silent way. Never offer an action we cannot carry out.
+        """
+        choice = dialog_choose(
+            app_name,
+            f"{backend} is already running on port {port} in Monitor Only mode, "
+            "so it will not drive lights.\n\n"
+            "That version is too old to be restarted from here. Quit it from its "
+            f"own icon in the Dock, then open {app_name} again.",
+            ["Open read-only", "Cancel"],
+            "Cancel",
+        )
+        return "attach" if choice == "Open read-only" else "abort"
+
     def handler(mismatch, port, runtime):
         if mismatch["reason"] == MISMATCH_MONITOR_ONLY:
+            backend = describe_backend(runtime)
+            if not supports_remote_stop(runtime):
+                return _cannot_restart_remotely(backend, port)
             choice = dialog_choose(
                 app_name,
                 "Another Central server is already running in Monitor Only mode "
@@ -98,15 +122,21 @@ def _attach_mismatch_handler(host="127.0.0.1"):
                 return "abort"
             ok, message = stop_running_central(host, port)
             if not ok:
+                # A 404 here means the server advertised server_control but does
+                # not actually serve the route -- same practical situation as an
+                # old server, so give the same actionable instruction.
+                if "404" in str(message):
+                    return _cannot_restart_remotely(backend, port)
                 dialog_notify(
                     app_name,
-                    f"Could not stop the running server on port {port}: {message}")
+                    f"Could not stop {backend} on port {port}: {message}\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
                 return "abort"
             if not wait_for_port_release(host, port):
                 dialog_notify(
                     app_name,
-                    f"The server on port {port} did not shut down in time. "
-                    "Quit it manually and try again.")
+                    f"{backend} on port {port} did not shut down in time.\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
                 return "abort"
             return "start"
 

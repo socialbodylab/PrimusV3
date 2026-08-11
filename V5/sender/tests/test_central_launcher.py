@@ -224,5 +224,43 @@ class RegistryCapabilityTests(unittest.TestCase):
         self.assertFalse(payload["lan_enabled"])
 
 
+class RemoteStopCapabilityTests(unittest.TestCase):
+    """A launcher must not offer a restart it cannot perform.
+
+    Servers before 0.98 have no POST /api/server/stop and answer 404. The
+    launcher used to try anyway, abort on failure, and leave the old server
+    holding the port -- after which every launch of either app failed the same
+    silent way and both looked broken.
+    """
+
+    def test_missing_flag_means_no_remote_stop(self):
+        self.assertFalse(central_launcher.supports_remote_stop(
+            {"product": "primus", "app_version": "0.97", "monitor_only": True}))
+
+    def test_flag_present_means_remote_stop(self):
+        self.assertTrue(central_launcher.supports_remote_stop(
+            {"product": "primus", "app_version": "0.98", "server_control": True}))
+
+    def test_non_dict_runtime_is_not_stoppable(self):
+        self.assertFalse(central_launcher.supports_remote_stop(None))
+        self.assertFalse(central_launcher.supports_remote_stop("nope"))
+
+    def test_describe_backend_names_monitor_only_as_devicemanager(self):
+        label = central_launcher.describe_backend(
+            {"product": "primus", "app_version": "0.97", "monitor_only": True})
+        self.assertIn("DeviceManager", label)
+        self.assertIn("0.97", label)
+
+    def test_describe_backend_names_products(self):
+        self.assertIn("PrimusCentral", central_launcher.describe_backend(
+            {"product": "primus", "app_version": "0.98"}))
+        self.assertIn("RadiusCentral", central_launcher.describe_backend(
+            {"product": "radius", "app_version": "0.98"}))
+
+    def test_describe_backend_tolerates_junk(self):
+        self.assertIsInstance(central_launcher.describe_backend({}), str)
+        self.assertIsInstance(central_launcher.describe_backend(None), str)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -255,6 +255,12 @@ class Handler(BaseHTTPRequestHandler):
                 "default_frontend": default_frontend_path(),
                 "monitor_only": bool(getattr(self._device_state(), "monitor_only", False)),
                 "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
+                # Advertise that POST /api/server/stop exists. A launcher must
+                # never assume it: servers before 0.98 answer that route with
+                # 404, and a launcher that tried anyway aborted with a generic
+                # failure while the old server kept holding the port -- both
+                # apps then looked dead. Absent means "cannot stop remotely".
+                "server_control": True,
             })
             return
         if path == "/api/server/status":

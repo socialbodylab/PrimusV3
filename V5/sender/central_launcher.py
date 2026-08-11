@@ -471,6 +471,33 @@ def stop_running_central(host="127.0.0.1", port=DEFAULT_HTTP_PORT, force=False,
         return False, str(exc)
 
 
+def supports_remote_stop(runtime):
+    """True when the running Central advertises POST /api/server/stop.
+
+    Servers before 0.98 have no such route and answer 404. Callers must check
+    this before offering to restart a running server: attempting the stop and
+    failing leaves the old server holding the port with nothing explaining why,
+    which reads to the user as both apps refusing to launch.
+    """
+    if not isinstance(runtime, dict):
+        return False
+    return bool(runtime.get("server_control"))
+
+
+def describe_backend(runtime):
+    """Short human label for a running Central, for dialogs and errors."""
+    if not isinstance(runtime, dict):
+        return "a Central server"
+    product = str(runtime.get("product") or "").strip().lower()
+    version = str(runtime.get("app_version") or "").strip()
+    name = {"primus": "PrimusCentral", "radius": "RadiusCentral"}.get(product)
+    if name is None:
+        name = "a Central server"
+    if runtime.get("monitor_only"):
+        name = "DeviceManager"
+    return f"{name} v{version}" if version else name
+
+
 def wait_for_port_release(host="127.0.0.1", port=DEFAULT_HTTP_PORT, timeout=15.0):
     """Block until no Central answers on ``port``. True if it went away."""
     deadline = time.monotonic() + max(0.0, float(timeout))
