@@ -1294,25 +1294,63 @@ def _device_blackout_info(dev):
     return info
 
 
-def _queue_device_frame_sends(send_queue, di, dev, frame_buffers):
+def _output_frame_cache_key(oi, output):
+    """Per-frame cache key covering every field the wiring + transport
+    pipeline reads from an output descriptor. Two outputs with equal keys
+    produce identical wired pixels and transport bytes for the same source
+    pixels."""
+    grid = output.get("grid")
+    return (
+        oi,
+        output.get("type"),
+        int(output.get("count") or 0),
+        resolve_virtual_pixels(output),
+        tuple(grid) if grid else None,
+        int(output.get("grid_rotation", 0) or 0),
+        output.get("start_corner"),
+        output.get("scan_pattern"),
+        output.get("traversal_axis"),
+    )
+
+
+def _queue_device_frame_sends(send_queue, di, dev, frame_buffers,
+                              transport_cache=None):
     """Append Art-Net sends for one device frame.
 
-    frame_buffers maps output index -> rgb bytes for outputs with pixel data.
+    frame_buffers maps output index -> wired RGB pixel tuples for outputs
+    with pixel data (transport downsampling/packing happens here, so pixels
+    are never round-tripped through an intermediate byte buffer).
+
+    transport_cache, when given, memoizes packed transport bytes across
+    devices whose outputs share a descriptor. Only valid when every device
+    in the frame renders the same source pixels per output index (the
+    shared-look path) — per-device frames must pass None.
     """
     outputs = dev.get("outputs", [])
     receive_mode = dev.get("receive_mode", "split")
     sender = dev["sender"]
+
+    def transport_for(oi, output, pixels):
+        if transport_cache is None:
+            return transport_rgb_bytes(output, pixels=pixels)
+        key = _output_frame_cache_key(oi, output)
+        cached = transport_cache.get(key)
+        if cached is None:
+            cached = transport_rgb_bytes(output, pixels=pixels)
+            transport_cache[key] = cached
+        return cached
+
     if receive_mode == "combined":
         combined = bytearray()
         for oi, output in enumerate(outputs):
             virtual = resolve_virtual_pixels(output)
             if virtual <= 0:
                 continue
-            data = frame_buffers.get(oi)
-            if data is None:
+            pixels = frame_buffers.get(oi)
+            if pixels is None:
                 combined.extend(bytes(virtual * 3))
             else:
-                transport = transport_rgb_bytes(output, rgb_bytes=data)
+                transport = transport_for(oi, output, pixels)
                 expected = virtual * 3
                 if len(transport) >= expected:
                     combined.extend(transport[:expected])
@@ -1324,11 +1362,11 @@ def _queue_device_frame_sends(send_queue, di, dev, frame_buffers):
                 (di, sender, dev.get("base_universe", 0), bytes(combined)))
         return
 
-    for oi, data in frame_buffers.items():
+    for oi, pixels in frame_buffers.items():
         if oi >= len(outputs):
             continue
         output = outputs[oi]
-        transport = transport_rgb_bytes(output, rgb_bytes=data)
+        transport = transport_for(oi, output, pixels)
         if transport:
             send_queue.append((di, sender, output["universe"], transport))
 
@@ -1758,6 +1796,18 @@ class ControllerState:
                 _save_device_groups(self.device_groups)
         return refreshed
 
+    def save_devices(self):
+        """Persist the device list (and groups) once.
+
+        For callers that batch several auto_save=False mutations — e.g. the
+        periodic network sync, which used to write the whole state file once
+        per discovered node. Groups are saved too because an IP change during
+        refresh rewrites group membership.
+        """
+        with self.lock:
+            _save_devices(self.devices)
+            _save_device_groups(self.device_groups)
+
     def _playback_target_info_unlocked(self):
         total = len(self.devices)
         connected_total = sum(1 for dev in self.devices if dev["connected"])
@@ -1923,140 +1973,12 @@ class ControllerState:
                 "playback": self._playback_status_unlocked(),
             }
             for dev in self.devices:
-                rx = None
-                telemetry_age_seconds = None
-                receiver_online = False
-                if self.fps_listener:
-                    rx, telemetry_age_seconds, receiver_online = (
-                        self.fps_listener.get_telemetry_status(dev["ip"]))
-                d = {
-                    "name": dev["name"],
-                    "character_name": _normalize_show_info_value(dev.get("character_name")),
-                    "performer_name": _normalize_show_info_value(dev.get("performer_name")),
-                    "ip": dev["ip"],
-                    "mac": dev.get("mac"),
-                    "device_uid": dev.get("device_uid") or "ip:{}".format(dev["ip"]),
-                    "is_radius": bool(dev.get("is_radius")),
-                    "is_audio": bool(dev.get("is_radius")),
-                    "base_universe": dev.get("base_universe", 0),
-                    "receive_mode": dev.get("receive_mode", "split"),
-                    "hardware_profile": dev.get("hardware_profile", "unknown"),
-                    "hardware_label": dev.get("hardware_label", "Unknown hardware"),
-                    "firmware_version": dev.get("firmware_version"),
-                    "live_firmware_version": None,
-                    "battery_mv": None,
-                    "battery_pct": None,
-                    "battery_power_mode": None,
-                    "battery_warning": None,
-                    "ip_mode": dev.get("ip_mode", "unknown"),
-                    "static_ip": dev.get("static_ip"),
-                    "gateway": dev.get("gateway"),
-                    "subnet": dev.get("subnet"),
-                    "ip_config_pending": dev.get("ip_config_pending"),
-                    "connected": dev["connected"],
-                    "transport_error": dev.get("transport_error"),
-                    "receiver_fps": rx.get("fps") if rx else None,
-                    "receiver_pkt_rate": rx.get("pkt_rate") if rx else None,
-                    "receiver_online": receiver_online,
-                    "telemetry_age_seconds": telemetry_age_seconds,
-                    "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
-                    "management_supported": bool(dev.get("management_supported")),
-                    "management_protocol": dev.get("management_protocol"),
-                    "management_protocol_version": dev.get(
-                        "management_protocol_version"),
-                    "max_pixels_per_port": dev.get(
-                        "max_pixels_per_port", MAX_PHYSICAL_PIXELS),
-                    "max_combined_pixels": dev.get(
-                        "max_combined_pixels", MAX_COMBINED_VIRTUAL_PIXELS),
-                    "operating_mode": dev.get("operating_mode"),
-                    "production_mode": bool(dev.get("production_mode")),
-                    "management_locked": bool(dev.get("management_locked")),
-                    "unlock_window_open": bool(dev.get("unlock_window_open")),
-                    "unlock_remaining_seconds": int(
-                        dev.get("unlock_remaining_seconds") or 0),
-                    "telemetry_target": dev.get("telemetry_target"),
-                    "telemetry_configured": bool(dev.get("telemetry_configured")),
-                    # Resolved, not raw: the UI prefills its lane editor from these
-                    # and warns when Show has moved off 6454, so it needs the port
-                    # actually in use rather than None for a node on defaults.
-                    "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
-                    "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
-                    "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
-                    "outputs": [],
-                    "descriptor_config": [],
-                }
-                if rx:
-                    if "live_firmware_version" in rx:
-                        d["live_firmware_version"] = rx.get("live_firmware_version")
-                    if "battery_mv" in rx:
-                        d["battery_mv"] = rx.get("battery_mv")
-                    if "battery_pct" in rx:
-                        d["battery_pct"] = rx.get("battery_pct")
-                    if "battery_power_mode" in rx:
-                        d["battery_power_mode"] = rx.get("battery_power_mode")
-                    if "battery_warning" in rx:
-                        d["battery_warning"] = rx.get("battery_warning")
-                    for key in (
-                        "protocol_version",
-                        "sequence",
-                        "uptime_seconds",
-                        "status_flags",
-                        "status_flag_wifi_connected",
-                        "status_flag_static_ip",
-                        "status_flag_output_power",
-                        "status_flag_test_active",
-                        "status_flag_telemetry_configured",
-                        "status_flag_production",
-                        "status_flag_unlock_window_open",
-                        "status_flag_battery_valid",
-                        "wifi_connected",
-                        "output_power_enabled",
-                        "test_mode_active",
-                        "heartbeat_age_seconds",
-                        "heartbeat_fresh",
-                        "rendered_fps_x10",
-                        "packet_rate_x10",
-                        "rssi_dbm",
-                        "telemetry_sequence_wraps",
-                        "telemetry_packets_lost",
-                        "telemetry_duplicate_packets",
-                        "telemetry_out_of_order_packets",
-                        "telemetry_reboot_count",
-                        "telemetry_status_packets_accepted",
-                        "telemetry_packet_loss_rate",
-                        "telemetry_last_sequence_gap",
-                        "management_locked",
-                        "production_mode",
-                        "operating_mode",
-                        "unlock_window_open",
-                        "unlock_remaining_seconds",
-                        "telemetry_configured",
-                    ):
-                        if key in rx:
-                            d[key] = rx.get(key)
-                if dev.get("is_radius"):
-                    if rx:
-                        if "current_track" in rx:
-                            d["current_track"] = rx.get("current_track") or ""
-                        if "playback_state" in rx:
-                            d["playback_state"] = rx.get("playback_state", 0)
-                        # PRS-specific status (Radius firmware 4.16+)
-                        for key in (
-                            "sd_ready",
-                            "ftp_running",
-                            "audio_playing",
-                            "audio_looping",
-                            "marius_configured",
-                            "marius_connected",
-                        ):
-                            if key in rx:
-                                d[key] = rx.get(key)
-                    out["devices"].append(d)
-                    continue
-                for o in dev.get("outputs", []):
-                    serialized = _serialize_output_json(o)
-                    d["outputs"].append(serialized)
-                    d["descriptor_config"].append(serialized)
+                d = self._device_json_unlocked(dev)
+                if not d["is_radius"]:
+                    for o in dev.get("outputs", []):
+                        serialized = _serialize_output_json(o)
+                        d["outputs"].append(serialized)
+                        d["descriptor_config"].append(serialized)
                 out["devices"].append(d)
         lock_released = time.perf_counter()
         self.performance.observe_many((
@@ -2065,59 +1987,131 @@ class ControllerState:
         ))
         return out
 
-    def get_radius_json(self):
-        """Radius-shaped view of the unified device list.
+    def _device_json_unlocked(self, dev):
+        """Serialize one device for /api/state, shared by both product views.
 
-        Serves GET /api/state?product=radius on the shared backend. ALL
-        devices are included so array indices stay aligned with the
-        unified list (every frontend addresses devices by index); the
-        RadiusCentral UI hides non-radius entries client-side.
+        Returns the primus-shaped device dict minus outputs/descriptor_config
+        (left as empty lists — get_json fills them for non-radius devices;
+        the radius view never needs them).
         """
-        full = self.get_json()
-        devices = []
-        for d in full.get("devices", []):
-            item = {
-                "name": d.get("name"),
-                "character_name": d.get("character_name", ""),
-                "performer_name": d.get("performer_name", ""),
-                "ip": d.get("ip"),
-                "mac": d.get("mac"),
-                "device_uid": d.get("device_uid"),
-                "connected": bool(d.get("connected")),
-                "is_radius": bool(d.get("is_radius")),
-                "is_audio": bool(d.get("is_radius")),
-                "hardware_profile": d.get("hardware_profile"),
-                "hardware_label": d.get("hardware_label"),
-                "firmware_version": d.get("firmware_version"),
-                "live_firmware_version": d.get("live_firmware_version"),
-                "capabilities": d.get("capabilities") or {},
-                "ip_mode": d.get("ip_mode"),
-                "static_ip": d.get("static_ip"),
-                "gateway": d.get("gateway"),
-                "subnet": d.get("subnet"),
-                "ip_config_pending": d.get("ip_config_pending"),
-                "transport_error": d.get("transport_error"),
-                "receiver_online": bool(d.get("receiver_online")),
-                "telemetry_age_seconds": d.get("telemetry_age_seconds"),
-                "battery_mv": d.get("battery_mv"),
-                "battery_pct": d.get("battery_pct"),
-                "battery_power_mode": d.get("battery_power_mode"),
-                "battery_warning": d.get("battery_warning"),
-                "port_show": d.get("port_show"),
-                "port_setup": d.get("port_setup"),
-                "port_watch": d.get("port_watch"),
-                "current_track": d.get("current_track", ""),
-                "playback_state": d.get("playback_state", 0),
-            }
-            if d.get("receiver_fps") is not None:
-                item["fps"] = d.get("receiver_fps")
-            if d.get("receiver_pkt_rate") is not None:
-                item["pkt_rate"] = d.get("receiver_pkt_rate")
+        rx = None
+        telemetry_age_seconds = None
+        receiver_online = False
+        if self.fps_listener:
+            rx, telemetry_age_seconds, receiver_online = (
+                self.fps_listener.get_telemetry_status(dev["ip"]))
+        d = {
+            "name": dev["name"],
+            "character_name": _normalize_show_info_value(dev.get("character_name")),
+            "performer_name": _normalize_show_info_value(dev.get("performer_name")),
+            "ip": dev["ip"],
+            "mac": dev.get("mac"),
+            "device_uid": dev.get("device_uid") or "ip:{}".format(dev["ip"]),
+            "is_radius": bool(dev.get("is_radius")),
+            "is_audio": bool(dev.get("is_radius")),
+            "base_universe": dev.get("base_universe", 0),
+            "receive_mode": dev.get("receive_mode", "split"),
+            "hardware_profile": dev.get("hardware_profile", "unknown"),
+            "hardware_label": dev.get("hardware_label", "Unknown hardware"),
+            "firmware_version": dev.get("firmware_version"),
+            "live_firmware_version": None,
+            "battery_mv": None,
+            "battery_pct": None,
+            "battery_power_mode": None,
+            "battery_warning": None,
+            "ip_mode": dev.get("ip_mode", "unknown"),
+            "static_ip": dev.get("static_ip"),
+            "gateway": dev.get("gateway"),
+            "subnet": dev.get("subnet"),
+            "ip_config_pending": dev.get("ip_config_pending"),
+            "connected": dev["connected"],
+            "transport_error": dev.get("transport_error"),
+            "receiver_fps": rx.get("fps") if rx else None,
+            "receiver_pkt_rate": rx.get("pkt_rate") if rx else None,
+            "receiver_online": receiver_online,
+            "telemetry_age_seconds": telemetry_age_seconds,
+            "capabilities": _normalize_device_capabilities(dev.get("capabilities")),
+            "management_supported": bool(dev.get("management_supported")),
+            "management_protocol": dev.get("management_protocol"),
+            "management_protocol_version": dev.get(
+                "management_protocol_version"),
+            "max_pixels_per_port": dev.get(
+                "max_pixels_per_port", MAX_PHYSICAL_PIXELS),
+            "max_combined_pixels": dev.get(
+                "max_combined_pixels", MAX_COMBINED_VIRTUAL_PIXELS),
+            "operating_mode": dev.get("operating_mode"),
+            "production_mode": bool(dev.get("production_mode")),
+            "management_locked": bool(dev.get("management_locked")),
+            "unlock_window_open": bool(dev.get("unlock_window_open")),
+            "unlock_remaining_seconds": int(
+                dev.get("unlock_remaining_seconds") or 0),
+            "telemetry_target": dev.get("telemetry_target"),
+            "telemetry_configured": bool(dev.get("telemetry_configured")),
+            # Resolved, not raw: the UI prefills its lane editor from these
+            # and warns when Show has moved off 6454, so it needs the port
+            # actually in use rather than None for a node on defaults.
+            "port_show": device_show_port(dev, is_radius=dev.get("is_radius")),
+            "port_setup": device_setup_port(dev, is_radius=dev.get("is_radius")),
+            "port_watch": int(dev.get("port_watch") or FPS_LISTEN_PORT),
+            "outputs": [],
+            "descriptor_config": [],
+        }
+        if rx:
+            if "live_firmware_version" in rx:
+                d["live_firmware_version"] = rx.get("live_firmware_version")
+            if "battery_mv" in rx:
+                d["battery_mv"] = rx.get("battery_mv")
+            if "battery_pct" in rx:
+                d["battery_pct"] = rx.get("battery_pct")
+            if "battery_power_mode" in rx:
+                d["battery_power_mode"] = rx.get("battery_power_mode")
+            if "battery_warning" in rx:
+                d["battery_warning"] = rx.get("battery_warning")
             for key in (
-                "rssi_dbm",
+                "protocol_version",
+                "sequence",
                 "uptime_seconds",
+                "status_flags",
+                "status_flag_wifi_connected",
+                "status_flag_static_ip",
+                "status_flag_output_power",
+                "status_flag_test_active",
+                "status_flag_telemetry_configured",
+                "status_flag_production",
+                "status_flag_unlock_window_open",
+                "status_flag_battery_valid",
                 "wifi_connected",
+                "output_power_enabled",
                 "test_mode_active",
+                "heartbeat_age_seconds",
+                "heartbeat_fresh",
+                "rendered_fps_x10",
+                "packet_rate_x10",
+                "rssi_dbm",
+                "telemetry_sequence_wraps",
+                "telemetry_packets_lost",
+                "telemetry_duplicate_packets",
+                "telemetry_out_of_order_packets",
+                "telemetry_reboot_count",
+                "telemetry_status_packets_accepted",
+                "telemetry_packet_loss_rate",
+                "telemetry_last_sequence_gap",
+                "management_locked",
+                "production_mode",
+                "operating_mode",
+                "unlock_window_open",
+                "unlock_remaining_seconds",
+                "telemetry_configured",
+            ):
+                if key in rx:
+                    d[key] = rx.get(key)
+        if dev.get("is_radius") and rx:
+            if "current_track" in rx:
+                d["current_track"] = rx.get("current_track") or ""
+            if "playback_state" in rx:
+                d["playback_state"] = rx.get("playback_state", 0)
+            # PRS-specific status (Radius firmware 4.16+)
+            for key in (
                 "sd_ready",
                 "ftp_running",
                 "audio_playing",
@@ -2125,14 +2119,96 @@ class ControllerState:
                 "marius_configured",
                 "marius_connected",
             ):
-                if key in d:
-                    item[key] = d.get(key)
-            devices.append(item)
+                if key in rx:
+                    d[key] = rx.get(key)
+        return d
+
+    def get_radius_json(self):
+        """Radius-shaped view of the unified device list.
+
+        Serves GET /api/state?product=radius on the shared backend. ALL
+        devices are included so array indices stay aligned with the
+        unified list (every frontend addresses devices by index); the
+        RadiusCentral UI hides non-radius entries client-side.
+
+        Walks the device list directly through the same per-device helper as
+        get_json — the radius view has no use for the active-look pixel
+        serialization or the per-device output descriptors that get_json
+        builds, and this runs ~2x/second per radius frontend under
+        state.lock.
+        """
+        lock_start = time.perf_counter()
+        devices = []
+        with self.lock:
+            lock_acquired = time.perf_counter()
+            for dev in self.devices:
+                d = self._device_json_unlocked(dev)
+                devices.append(self._radius_item_from_device_json(d))
+        lock_released = time.perf_counter()
+        self.performance.observe_many((
+            ("api_state_lock_wait_ms", (lock_acquired - lock_start) * 1000.0),
+            ("api_state_lock_held_ms", (lock_released - lock_acquired) * 1000.0),
+        ))
         return {
             "product": "radius",
             "products": ["primus", "radius"],
             "devices": devices,
         }
+
+    @staticmethod
+    def _radius_item_from_device_json(d):
+        item = {
+            "name": d.get("name"),
+            "character_name": d.get("character_name", ""),
+            "performer_name": d.get("performer_name", ""),
+            "ip": d.get("ip"),
+            "mac": d.get("mac"),
+            "device_uid": d.get("device_uid"),
+            "connected": bool(d.get("connected")),
+            "is_radius": bool(d.get("is_radius")),
+            "is_audio": bool(d.get("is_radius")),
+            "hardware_profile": d.get("hardware_profile"),
+            "hardware_label": d.get("hardware_label"),
+            "firmware_version": d.get("firmware_version"),
+            "live_firmware_version": d.get("live_firmware_version"),
+            "capabilities": d.get("capabilities") or {},
+            "ip_mode": d.get("ip_mode"),
+            "static_ip": d.get("static_ip"),
+            "gateway": d.get("gateway"),
+            "subnet": d.get("subnet"),
+            "ip_config_pending": d.get("ip_config_pending"),
+            "transport_error": d.get("transport_error"),
+            "receiver_online": bool(d.get("receiver_online")),
+            "telemetry_age_seconds": d.get("telemetry_age_seconds"),
+            "battery_mv": d.get("battery_mv"),
+            "battery_pct": d.get("battery_pct"),
+            "battery_power_mode": d.get("battery_power_mode"),
+            "battery_warning": d.get("battery_warning"),
+            "port_show": d.get("port_show"),
+            "port_setup": d.get("port_setup"),
+            "port_watch": d.get("port_watch"),
+            "current_track": d.get("current_track", ""),
+            "playback_state": d.get("playback_state", 0),
+        }
+        if d.get("receiver_fps") is not None:
+            item["fps"] = d.get("receiver_fps")
+        if d.get("receiver_pkt_rate") is not None:
+            item["pkt_rate"] = d.get("receiver_pkt_rate")
+        for key in (
+            "rssi_dbm",
+            "uptime_seconds",
+            "wifi_connected",
+            "test_mode_active",
+            "sd_ready",
+            "ftp_running",
+            "audio_playing",
+            "audio_looping",
+            "marius_configured",
+            "marius_connected",
+        ):
+            if key in d:
+                item[key] = d.get(key)
+        return item
 
     # ------------------------------------------------------------------
     #  Update from API
@@ -4488,6 +4564,12 @@ class ControllerState:
             dev_filter = self._mixer_preview_device_filter
             ctrl_ips = self._controller_device_ips if self.playback_source == self.SOURCE_CONTROLLER else None
             devices_sent = set()
+            # Per-frame memoization for the shared-look path: devices whose
+            # outputs share a descriptor render identical wired pixels and
+            # transport bytes, so do that work once per descriptor per frame
+            # instead of once per device.
+            wired_cache = {}
+            transport_cache = {}
             for di, dev in enumerate(self.devices):
                 if not dev.get("connected"):
                     continue
@@ -4529,6 +4611,7 @@ class ControllerState:
                         frames = self._override_default_frames
                     if not frames:
                         continue
+                    # Per-device frames: no cross-device caching (pixels differ).
                     frame_buffers = {}
                     for oi, o in enumerate(dev["outputs"]):
                         if oi >= len(frames):
@@ -4537,12 +4620,7 @@ class ControllerState:
                         pixels = frame.get("pixels") or []
                         if not pixels:
                             continue
-                        send_pixels = _apply_descriptor_wiring(pixels, o)
-
-                        buf = bytearray()
-                        for r, g, b in send_pixels:
-                            buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
-                        frame_buffers[oi] = bytes(buf)
+                        frame_buffers[oi] = _apply_descriptor_wiring(pixels, o)
                     if frame_buffers:
                         _queue_device_frame_sends(send_queue, di, dev, frame_buffers)
                         devices_sent.add(di)
@@ -4554,14 +4632,15 @@ class ControllerState:
                     lo = self.active_look["outputs"][oi]
                     if lo["type"] == "none" or not lo["pixels"]:
                         continue
-                    send_pixels = _apply_descriptor_wiring(lo["pixels"], o)
-
-                    buf = bytearray()
-                    for r, g, b in send_pixels:
-                        buf.extend((r & 0xFF, g & 0xFF, b & 0xFF))
-                    frame_buffers[oi] = bytes(buf)
+                    key = _output_frame_cache_key(oi, o)
+                    send_pixels = wired_cache.get(key)
+                    if send_pixels is None:
+                        send_pixels = _apply_descriptor_wiring(lo["pixels"], o)
+                        wired_cache[key] = send_pixels
+                    frame_buffers[oi] = send_pixels
                 if frame_buffers:
-                    _queue_device_frame_sends(send_queue, di, dev, frame_buffers)
+                    _queue_device_frame_sends(
+                        send_queue, di, dev, frame_buffers, transport_cache)
                     devices_sent.add(di)
 
             # Keepalive blackout so receivers learn sender IP and report telemetry
@@ -4646,14 +4725,23 @@ class ControllerState:
         ))
 
     def shutdown(self):
+        """Blackout and release every LED device.
+
+        Callers must stop (and ideally join) the animation thread first —
+        a tick that runs after this repaints the frame blackout just
+        cleared, so blackout must be the last DMX any receiver sees. The
+        lock keeps still-running HTTP handler threads from resizing the
+        device list mid-iteration.
+        """
         self.running = False
-        for dev in self.devices:
-            if dev.get("is_radius"):
-                continue
-            if dev["sender"].connected:
-                info = _device_blackout_info(dev)
-                dev["sender"].blackout(info)
-                dev["sender"].disconnect()
+        with self.lock:
+            for dev in self.devices:
+                if dev.get("is_radius"):
+                    continue
+                if dev["sender"].connected:
+                    info = _device_blackout_info(dev)
+                    dev["sender"].blackout(info)
+                    dev["sender"].disconnect()
 
 
 # ======================================================================

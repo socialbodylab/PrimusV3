@@ -782,9 +782,15 @@ def main():
             ui_focus_server.stop()
         unregister_central_server()
         osc_service.stop()
+        # Ordering matters: close the HTTP listener, stop and join the
+        # animation thread, THEN blackout. A tick that fires after
+        # state.shutdown() would repaint the pixels blackout just cleared,
+        # so blackout must be the last frame a receiver sees.
+        server.server_close()
+        state.running = False
+        anim.join(timeout=2.0)
         state.shutdown()
         fps_listener.stop()
-        server.server_close()
         if browser_profile_root:
             _remove_dedicated_browser_profiles(browser_profile_root)
         if _MACOS_ACTIVITY_TOKEN is not None:

@@ -350,6 +350,12 @@ class RadiusState:
                 )
             _save_devices(self.devices)
 
+    def save_devices(self):
+        """Persist the device list once, for callers that batched several
+        auto_save=False mutations (e.g. the periodic network sync)."""
+        with self.lock:
+            _save_devices(self.devices)
+
     def refresh_devices_from_nodes(self, nodes, auto_save=True):
         refreshed = []
         with self.lock:

@@ -146,43 +146,67 @@ class ControllerRadiusOpsTests(unittest.TestCase):
         self.assertFalse(st.radius_has_live_playback())
 
 
+class _TelemetryListener:
+    """Minimal FPS-listener stand-in keyed by device IP."""
+
+    def __init__(self, telemetry=None):
+        self.telemetry = telemetry or {}
+
+    def get_telemetry_status(self, ip):
+        rx = self.telemetry.get(ip)
+        if rx is None:
+            return None, None, False
+        return rx, 1.0, True
+
+
+def _serialization_state(devices, telemetry=None):
+    import threading
+
+    st = ControllerState.__new__(ControllerState)
+    st.lock = threading.Lock()
+    st.devices = devices
+    st.artnet_source_ip = None
+    st.fps_listener = _TelemetryListener(telemetry)
+    st.performance = state_mod.PerformanceStats()
+    # Enough playback/look state for get_json to serialize.
+    st.fps = 30
+    st.active_look = {"name": "Look 1", "outputs": []}
+    st.device_groups = []
+    st.playback_source = ControllerState.SOURCE_IDLE
+    st._override_pixels = None
+    st._mixer_preview_device_filter = None
+    st._mixer_preview_playing = False
+    st._controller_device_ips = None
+    return st
+
+
 class RadiusJsonViewTests(unittest.TestCase):
-    def test_get_radius_json_keeps_indices_aligned(self):
-        st = ControllerState.__new__(ControllerState)
+    def _devices_and_telemetry(self):
         primus_dev = {
             "name": "P1",
             "ip": "192.168.8.60",
             "connected": True,
             "is_radius": False,
+            "capabilities": {},
+            "outputs": [],
         }
         radius_dev = _radius_device(current_track="song.wav", playback_state=1)
-        full = {
-            "devices": [
-                {
-                    "name": "P1",
-                    "ip": "192.168.8.60",
-                    "is_radius": False,
-                    "connected": True,
-                    "capabilities": {},
-                },
-                {
-                    "name": "R1",
-                    "ip": "192.168.8.50",
-                    "is_radius": True,
-                    "connected": True,
-                    "capabilities": radius_dev["capabilities"],
-                    "current_track": "song.wav",
-                    "playback_state": 1,
-                    "battery_pct": 76,
-                    "receiver_fps": 0,
-                    "receiver_pkt_rate": 4,
-                    "receiver_online": True,
-                    "sd_ready": True,
-                },
-            ]
+        telemetry = {
+            "192.168.8.50": {
+                "fps": 0,
+                "pkt_rate": 4,
+                "battery_pct": 76,
+                "current_track": "song.wav",
+                "playback_state": 1,
+                "sd_ready": True,
+            },
         }
-        with patch.object(ControllerState, "get_json", return_value=full):
-            payload = st.get_radius_json()
+        return [primus_dev, radius_dev], telemetry
+
+    def test_get_radius_json_keeps_indices_aligned(self):
+        devices, telemetry = self._devices_and_telemetry()
+        st = _serialization_state(devices, telemetry)
+        payload = st.get_radius_json()
         self.assertEqual(payload["product"], "radius")
         self.assertIn("radius", payload["products"])
         self.assertEqual(len(payload["devices"]), 2)
@@ -195,6 +219,37 @@ class RadiusJsonViewTests(unittest.TestCase):
         self.assertEqual(radius_item["pkt_rate"], 4)
         self.assertTrue(radius_item["receiver_online"])
         self.assertTrue(radius_item["sd_ready"])
+
+    def test_radius_view_matches_primus_view_per_device(self):
+        # Both product views serialize each device through the same
+        # _device_json_unlocked helper, so the fields they share must agree.
+        devices, telemetry = self._devices_and_telemetry()
+        st = _serialization_state(devices, telemetry)
+        full = st.get_json()
+        radius = st.get_radius_json()
+        self.assertEqual(len(full["devices"]), len(radius["devices"]))
+        for full_dev, radius_item in zip(full["devices"], radius["devices"]):
+            for key in (
+                "name", "ip", "is_radius", "is_audio", "connected",
+                "battery_pct", "receiver_online", "hardware_profile",
+                "firmware_version", "capabilities",
+            ):
+                self.assertEqual(radius_item[key], full_dev[key], key)
+            self.assertEqual(
+                radius_item.get("fps"), full_dev.get("receiver_fps"))
+            self.assertEqual(
+                radius_item.get("pkt_rate"), full_dev.get("receiver_pkt_rate"))
+
+    def test_radius_view_skips_look_and_output_serialization(self):
+        # The whole point of the direct walk: the radius view never builds
+        # the active-look pixel payload or per-device output descriptors.
+        devices, telemetry = self._devices_and_telemetry()
+        st = _serialization_state(devices, telemetry)
+        payload = st.get_radius_json()
+        self.assertNotIn("look", payload)
+        for item in payload["devices"]:
+            self.assertNotIn("outputs", item)
+            self.assertNotIn("descriptor_config", item)
 
 
 class PrsPacketTests(unittest.TestCase):
