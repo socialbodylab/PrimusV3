@@ -2099,6 +2099,7 @@ class ControllerState:
                 "rssi_dbm",
                 "uptime_seconds",
                 "wifi_connected",
+                "test_mode_active",
                 "sd_ready",
                 "ftp_running",
                 "audio_playing",

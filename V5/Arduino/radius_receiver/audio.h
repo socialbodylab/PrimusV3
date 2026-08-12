@@ -23,12 +23,17 @@ uint8_t  _audioPlaybackState    = TRACK_STATE_STOPPED;
 uint8_t  _lastAppliedVolume     = 255;
 uint16_t _audioDuration         = 0;
 uint32_t _audioStartMillis      = 0;
+// pausePlaying(true) clears the library's playingMusic flag, which makes a
+// paused track indistinguishable from a finished one inside audioUpdate().
+// Track paused explicitly so loop-restart / natural-end cleanup never fire
+// on a track that is merely paused.
+bool     _audioPaused           = false;
 
 Adafruit_VS1053_FilePlayer _musicMaker(
   MM_CS_PIN, MM_DCS_PIN, MM_DREQ_PIN, MM_SDCS_PIN);
 
 bool audioIsPlaying() {
-  return _musicMaker.playingMusic;
+  return _musicMaker.playingMusic || _audioPaused;
 }
 
 static void _notifyTrack(uint8_t state) {
@@ -99,6 +104,7 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
     _musicMaker.stopPlaying();
     delay(20);
   }
+  _audioPaused = false;
 
   strncpy(_audioCurrentFile, filename, 32);
   _audioCurrentFile[32] = '\0';
@@ -126,6 +132,7 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
 
 void audioStop() {
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  _audioPaused = false;
   _musicMaker.setVolume(254, 254);
   _audioCurrentFile[0] = '\0';
   _audioLooping = false;
@@ -138,7 +145,9 @@ void audioStop() {
 }
 
 void audioPause() {
+  if (!_musicMaker.playingMusic) return;  // nothing playing (or already paused)
   _musicMaker.pausePlaying(true);
+  _audioPaused = true;
   _musicMaker.setVolume(254, 254);
   _notifyTrack(TRACK_STATE_PAUSED);
   Serial.println("[Audio] Paused");
@@ -151,6 +160,7 @@ void audioSetVolume(uint8_t volume) {
 void audioTestTone() {
   if (!_audioHwReady) return;
   if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  _audioPaused = false;
   _audioCurrentFile[0] = '\0';
   _audioLooping = false;
   _audioDuration = 0;
@@ -179,6 +189,10 @@ void audioUpdate() {
 
   if (_musicMaker.playingMusic) {
     _musicMaker.feedBuffer();
+  } else if (_audioPaused) {
+    // Paused: the codec holds position and the library's playingMusic flag
+    // is false. This is NOT a track end — without this branch a paused
+    // looping track restarts itself and a paused one-shot gets cleaned up.
   } else {
     if (_audioLooping && _audioCurrentFile[0] != '\0') {
       char trackPath[34];
