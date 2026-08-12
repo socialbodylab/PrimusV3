@@ -159,6 +159,15 @@ flowchart TB
 | `7` | ⚠️ Loop cue by number — same volume-byte reuse |
 | *anything else* | ⚠️ **STOP.** The `switch` default is `audioStop()`, so a malformed or future-versioned packet silences the costume rather than being ignored |
 
+**Filename limit is 64 characters (firmware 4.18+).** Firmware 4.17 and
+earlier truncated the ArtAudioCmd filename at 32 characters on receive — and
+the sender did the same on send — so any track whose name exceeded 32 chars
+failed with "file not found" while short names worked (found on hardware
+2026-08-12 with real show files like `Radius_Overature_soundscapetocrackle.wav`).
+All filename buffers (ArtAudioCmd parse, audio player, `/cues.json` entries,
+Marius actions, sender packet builder) now agree on 64, matching the PTR
+telemetry clamp and the show-info field length.
+
 **Volume byte (13) maps linearly onto the VS1053's full 127 dB attenuation
 range**: `attenuation = (100 − volume) × 254 / 100` half-dB steps. That makes
 the bottom half of the scale effectively silent — verified on hardware

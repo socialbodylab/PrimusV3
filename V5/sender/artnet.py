@@ -2492,7 +2492,9 @@ def _query_show_info_unlocked(ip, timeout=0.35, sock=None, source_ip=None):
 # ======================================================================
 
 def send_audio_cmd(ip, cmd, filename="", volume=100, duration=0, source_ip=None, dest_port=None):
-    name_bytes = filename.encode("ascii", errors="replace")[:32] + b'\x00'
+    # 64-char filename limit matches firmware 4.18+ buffers and the PTR
+    # telemetry clamp. Firmware 4.17 and earlier truncates at 32 on receive.
+    name_bytes = filename.encode("ascii", errors="replace")[:64] + b'\x00'
     if duration and duration > 0:
         name_bytes += struct.pack("<H", min(int(duration), 65535))
     pkt = bytearray(14 + len(name_bytes))

@@ -12,7 +12,7 @@
 #define CUES_MAX 64
 
 struct AudioCue {
-  char     filename[33];
+  char     filename[65];
   uint16_t duration;
 };
 
@@ -48,13 +48,13 @@ void cuesLoad() {
     cue.filename[0] = '\0';
 
     if (kv.value().is<const char*>()) {
-      strncpy(cue.filename, kv.value().as<const char*>(), 32);
-      cue.filename[32] = '\0';
+      strncpy(cue.filename, kv.value().as<const char*>(), 64);
+      cue.filename[64] = '\0';
     } else if (kv.value().is<JsonObject>()) {
       JsonObject obj = kv.value().as<JsonObject>();
       const char* fn = obj["file"] | "";
-      strncpy(cue.filename, fn, 32);
-      cue.filename[32] = '\0';
+      strncpy(cue.filename, fn, 64);
+      cue.filename[64] = '\0';
       cue.duration = obj["duration"] | 0;
     } else {
       continue;

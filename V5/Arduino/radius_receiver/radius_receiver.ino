@@ -731,9 +731,9 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
 
   uint8_t cmd = data[12];
   uint8_t volume = data[13];
-  char filename[33] = {0};
+  char filename[65] = {0};
   uint16_t fnLen = len - 14;
-  if (fnLen > 32) fnLen = 32;
+  if (fnLen > 64) fnLen = 64;
   memcpy(filename, data + 14, fnLen);
 
   uint16_t duration = 0;

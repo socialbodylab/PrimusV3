@@ -14,7 +14,7 @@
 
 extern bool sdBusy;
 
-char     _audioCurrentFile[33] = {0};
+char     _audioCurrentFile[65] = {0};
 uint8_t  _audioVolume           = 80;
 bool     _audioLooping          = false;
 bool     _audioSdReady          = false;
@@ -80,7 +80,7 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
     return false;
   }
 
-  char trackPath[34];
+  char trackPath[66];
   snprintf(trackPath, sizeof(trackPath), "%s%s", filename[0] == '/' ? "" : "/", filename);
 
   {
@@ -106,8 +106,8 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
   }
   _audioPaused = false;
 
-  strncpy(_audioCurrentFile, filename, 32);
-  _audioCurrentFile[32] = '\0';
+  strncpy(_audioCurrentFile, filename, 64);
+  _audioCurrentFile[64] = '\0';
   _audioLooping = false;
   _audioDuration = duration;
   _audioStartMillis = millis();
@@ -195,7 +195,7 @@ void audioUpdate() {
     // looping track restarts itself and a paused one-shot gets cleaned up.
   } else {
     if (_audioLooping && _audioCurrentFile[0] != '\0') {
-      char trackPath[34];
+      char trackPath[66];
       snprintf(trackPath, sizeof(trackPath), "%s%s",
                _audioCurrentFile[0] == '/' ? "" : "/", _audioCurrentFile);
       if (_musicMaker.startPlayingFile(trackPath)) {
