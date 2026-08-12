@@ -2538,7 +2538,13 @@ def send_lane_ports(ip, port_show, port_setup, port_watch, source_ip=None, dest_
 def list_audio_files(ip, source_ip=None, dest_port=None):
     try:
         entries = ftp_list_dir(ip, "/", source_ip=source_ip, dest_port=dest_port)
-        return sorted(e["name"] for e in entries if e["name"].lower().endswith(".wav"))
+        return sorted(
+            e["name"] for e in entries
+            if e["name"].lower().endswith(".wav")
+            # Skip macOS metadata junk: "._foo.wav" AppleDouble files are not
+            # audio even though they carry the extension.
+            and not e["name"].startswith(".")
+        )
     except Exception as exc:
         print(f"[audio] FTP list failed for {ip}: {exc}")
         return []
@@ -2590,6 +2596,29 @@ def _ftp_session(ip, source_ip=None, timeout=8.0, dest_port=None):
 
 
 def _parse_list_line(line):
+    """Parse one FTP LIST line from a receiver.
+
+    SimpleFTPServer's LIST format varies by library version: older builds
+    emit a space-padded unix `ls -l` line (9 whitespace fields including a
+    group column), newer builds emit tab-separated fields with no group
+    (perms, nlink, owner, size, "Jan 01 00:00", name). Parse tabs first —
+    tab-splitting also keeps filenames with spaces intact.
+    """
+    if "\t" in line:
+        parts = [p for p in line.split("\t") if p.strip()]
+        if len(parts) < 3:
+            return None
+        size = 0
+        for token in (p.strip() for p in parts[1:-1]):
+            if token.isdigit():
+                # nlink comes first and is overwritten; the size column is
+                # the last standalone numeric field before the date.
+                size = int(token)
+        return {
+            "name": parts[-1].strip(),
+            "is_dir": parts[0].lstrip().startswith("d"),
+            "size": size,
+        }
     parts = line.split(None, 8)
     if len(parts) < 9:
         return None

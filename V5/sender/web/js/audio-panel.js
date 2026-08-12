@@ -78,7 +78,11 @@ document.addEventListener("alpine:init", () => {
             this.loading = { ...this.loading, [di]: true };
             try {
                 const result = await api("POST", "/api/audio/files", { device: di, path });
-                this.entries = { ...this.entries, [di]: result.entries || [] };
+                // Hide dotfiles: SD cards loaded from a Mac accumulate
+                // .Spotlight-V100 / .Trashes dirs and "._foo.wav"
+                // AppleDouble files that are not real audio.
+                const entries = (result.entries || []).filter(e => !e.name.startsWith("."));
+                this.entries = { ...this.entries, [di]: entries };
             } catch (e) {
                 console.error("[audio] dir list failed:", e);
                 this.entries = { ...this.entries, [di]: [] };

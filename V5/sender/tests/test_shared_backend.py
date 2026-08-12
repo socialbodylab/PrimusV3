@@ -246,6 +246,39 @@ class PrsPacketTests(unittest.TestCase):
         self.assertTrue(merged["sd_ready"])
 
 
+class FtpListParseTests(unittest.TestCase):
+    def test_legacy_space_padded_unix_format(self):
+        line = "-rw-r--r--    1 owner group     220544 Jan  1 00:00 hwtest.wav"
+        parsed = artnet._parse_list_line(line)
+        self.assertEqual(parsed["name"], "hwtest.wav")
+        self.assertFalse(parsed["is_dir"])
+        self.assertEqual(parsed["size"], 220544)
+
+    def test_tab_separated_no_group_format(self):
+        # Newer SimpleFTPServer builds (observed on hardware 2026-08-12):
+        # perms, nlink, owner, size, date, name — tab-separated, no group.
+        line = "-rw-rw-r--\t1\tradius\t19902420\tJan 01 00:00\tpairing2.wav"
+        parsed = artnet._parse_list_line(line)
+        self.assertEqual(parsed["name"], "pairing2.wav")
+        self.assertFalse(parsed["is_dir"])
+        self.assertEqual(parsed["size"], 19902420)
+
+    def test_tab_separated_directory(self):
+        line = "drwxrwsr-x\t2\tradius\t4096\tJan 01 00:00\t.Spotlight-V100"
+        parsed = artnet._parse_list_line(line)
+        self.assertEqual(parsed["name"], ".Spotlight-V100")
+        self.assertTrue(parsed["is_dir"])
+
+    def test_tab_separated_name_with_spaces(self):
+        line = "-rw-rw-r--\t1\tradius\t1024\tJan 01 00:00\tmy cue file.wav"
+        parsed = artnet._parse_list_line(line)
+        self.assertEqual(parsed["name"], "my cue file.wav")
+        self.assertEqual(parsed["size"], 1024)
+
+    def test_unparseable_line_dropped(self):
+        self.assertIsNone(artnet._parse_list_line("garbage"))
+
+
 class EvaluateServerProductsTests(unittest.TestCase):
     def _runtime(self, **overrides):
         runtime = {
