@@ -37,24 +37,31 @@ class BrowserAttachTests(unittest.TestCase):
         self.assertEqual(result, "using existing browser window")
         launch.assert_not_called()
 
-    def test_open_attach_skips_default_browser(self):
+    def test_open_attach_launches_when_no_window_exists(self):
+        # Attach means "make this frontend visible": with no window of our
+        # own to focus, we must open one. The old behavior (report failure,
+        # open nothing) made a windowed launcher attaching a different
+        # frontend look exactly like a crashed app.
         with mock.patch.object(self.browser, "focus", return_value=False), \
              mock.patch.object(self.browser, "has_tracked_browser", return_value=False), \
-             mock.patch.object(self.browser, "launch") as launch, \
+             mock.patch.object(self.browser, "launch",
+                               return_value="opened dedicated window") as launch, \
              mock.patch.object(browser_launcher.webbrowser, "open_new") as open_new:
             result = self.browser.open("http://127.0.0.1:8080/devices", attach=True)
 
-        self.assertEqual(result, "could not raise existing browser window")
-        launch.assert_not_called()
+        self.assertEqual(result, "opened dedicated window")
+        launch.assert_called_once_with("http://127.0.0.1:8080/devices", cleanup_stale=True)
         open_new.assert_not_called()
 
-    def test_open_attach_never_launches_without_tracked_browser(self):
+    def test_open_attach_falls_back_to_default_browser(self):
         with mock.patch.object(self.browser, "focus", return_value=False), \
              mock.patch.object(self.browser, "has_tracked_browser", return_value=False), \
-             mock.patch.object(self.browser, "launch") as launch:
-            self.browser.open("http://127.0.0.1:8080/devices", attach=True)
+             mock.patch.object(self.browser, "launch", return_value=None), \
+             mock.patch.object(browser_launcher.webbrowser, "open_new") as open_new:
+            result = self.browser.open("http://127.0.0.1:8080/devices", attach=True)
 
-        launch.assert_not_called()
+        self.assertEqual(result, "opened default browser")
+        open_new.assert_called_once_with("http://127.0.0.1:8080/devices")
 
     def test_resolve_profile_dir_reuses_tracked_profile_on_attach(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -345,9 +345,9 @@ def find_running_central_server(requested_port=DEFAULT_HTTP_PORT, host="127.0.0.
     return None
 
 
-def _raise_existing_ui(host, port, url, open_browser):
-    """Focus an existing UI without opening a new browser window."""
-    if request_ui_focus(port, host=host):
+def _raise_existing_ui(host, port, url, open_browser, focus_allowed=True):
+    """Focus this frontend's UI, or open one when none exists."""
+    if focus_allowed and request_ui_focus(port, host=host):
         return "raised existing browser window"
     result = open_browser(url, attach=True)
     if result == "raised existing browser window":
@@ -389,6 +389,7 @@ def attach_to_running_central(
     open_browser,
     launcher_name,
     host="127.0.0.1",
+    server_default_frontend=None,
 ):
     """Open ``frontend_path`` against an already-running Central on ``port``."""
     url = build_central_url(port, frontend_path, host=host)
@@ -401,7 +402,18 @@ def attach_to_running_central(
     if no_browser:
         print("  Browser: not opened (--no-browser)")
     else:
-        browser_result = _raise_existing_ui(host, port, url, open_browser)
+        # The "focus the existing window" shortcut is only valid when this
+        # launcher's frontend is the one the server's own window shows.
+        # A different frontend attaching (DeviceManager onto a running
+        # RadiusCentral, say) must get its OWN window — raising the other
+        # app's window left this launcher exiting with nothing on screen.
+        same_frontend = (
+            server_default_frontend is None
+            or str(frontend_path or "").rstrip("/")
+            == str(server_default_frontend or "").rstrip("/")
+        )
+        browser_result = _raise_existing_ui(
+            host, port, url, open_browser, focus_allowed=same_frontend)
         print(f"  Browser: {browser_result}")
         if "could not" in str(browser_result).lower():
             # This is the silent-launch failure: the app attached correctly but
@@ -470,6 +482,7 @@ def try_attach_before_start(
         open_browser=open_browser,
         launcher_name=launcher_name,
         host=host,
+        server_default_frontend=runtime.get("default_frontend"),
     )
 
 

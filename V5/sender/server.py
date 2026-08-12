@@ -2034,6 +2034,17 @@ def _run_sync_job(job, state, cues_data):
 class PrimusThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
+    def handle_error(self, request, client_address):
+        # Keep-alive connections end with a reset/broken pipe whenever a
+        # browser closes one — that is normal connection churn, not an
+        # error, and the default handler printed a full traceback per
+        # occurrence (several per minute per client).
+        import sys as _sys
+        exc = _sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
 
 def create_server(host, port, state, cue_list=None, ui_lifecycle_enabled=False, osc_service=None):
     """Create and return a threaded HTTP server bound to host:port."""

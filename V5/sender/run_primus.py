@@ -62,6 +62,20 @@ _dedicated_browser = DedicatedBrowser(DEDICATED_BROWSER_PROFILE_ROOT, ("PRIMUS_B
 _MACOS_ACTIVITY_TOKEN = None
 
 
+def _select_dedicated_browser(frontend_path):
+    """Give each frontend its own dedicated-browser profile.
+
+    All three launchers run through this module now, and sharing one
+    Chromium profile meant one app's window focus/track state stomped
+    another's — a DeviceManager attach could end up focusing the
+    RadiusCentral window instead of opening its own.
+    """
+    global _dedicated_browser
+    name = str(frontend_path or "").strip("/").strip().lower() or "primus"
+    _dedicated_browser = DedicatedBrowser(
+        f"primusv5-{name}-browser-profiles", ("PRIMUS_BROWSER",))
+
+
 def _ui_has_live_output(server):
     state = getattr(server, "controller_state", None)
     if state is None:
@@ -621,6 +635,7 @@ def main():
     _configure_app_logging()
 
     frontend_path = frontend_path_for(args.frontend, sender_product())
+    _select_dedicated_browser(frontend_path)
     # DeviceManager only watches; the show frontends drive DMX. Only the latter
     # are incompatible with a monitor-only backend.
     needs_output = not args.monitor_only and str(args.frontend or "").lower() != "devices"

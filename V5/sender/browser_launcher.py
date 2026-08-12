@@ -33,7 +33,15 @@ class DedicatedBrowser:
                 return "raised existing browser window"
             if self.has_tracked_browser():
                 return "using existing browser window"
-            return "could not raise existing browser window"
+            # No window of ours exists — attach means "make this frontend
+            # visible", so open one rather than reporting failure. (A
+            # windowed launcher that attaches without surfacing a window
+            # looks exactly like a crashed app.)
+            result = self.launch(url, cleanup_stale=True)
+            if result:
+                return result
+            webbrowser.open_new(url)
+            return "opened default browser"
         result = self.launch(url, cleanup_stale=True)
         if result:
             return result
