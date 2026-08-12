@@ -66,7 +66,7 @@ class IsCompatibleNodeTests(unittest.TestCase):
 class SyncNetworkDevicesTests(unittest.TestCase):
     @patch("server.discover_artnet_nodes")
     @patch("server.sender_product")
-    def test_sync_adds_compatible_nodes_and_connects_online(self, mock_product, mock_discover):
+    def test_sync_adds_compatible_nodes_without_connecting(self, mock_product, mock_discover):
         mock_product.return_value = "primus"
         mock_discover.return_value = [
             {
@@ -98,9 +98,11 @@ class SyncNetworkDevicesTests(unittest.TestCase):
         )
         state.refresh_devices_from_nodes.assert_called_once()
         self.assertEqual(state.add_device_from_node.call_count, 2)
-        state.connect_all.assert_called_once_with(
-            only_ips={"192.168.1.10", "192.168.1.11"},
-        )
+        # Sync is discovery-only: connecting arms DMX (incl. keepalive
+        # frames) and must always be an explicit operator action, because
+        # production color data usually comes from an external console.
+        state.connect_all.assert_not_called()
+        self.assertEqual(result["connected"], [])
         self.assertEqual(len(result["added"]), 2)
         added_ips = {item["ip"] for item in result["added"]}
         self.assertEqual(added_ips, {"192.168.1.10", "192.168.1.11"})

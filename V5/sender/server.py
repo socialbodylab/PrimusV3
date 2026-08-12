@@ -103,22 +103,15 @@ def _sync_network_devices(device_state, interface=None):
                 "device_index": result.get("device_index"),
             })
 
-    if getattr(device_state, "monitor_only", False):
-        # Discovery only — never open an output connection automatically.
-        # Otherwise the per-frame send loop would start streaming DMX
-        # (including idle keepalive frames) to devices this instance has no
-        # business driving, e.g. receivers a console like EOS is already
-        # controlling on the same network.
-        connected = []
-    else:
-        online_ips = {node.get("ip") for node in nodes if node.get("ip")}
-        connect_results = device_state.connect_all(
-            only_ips=online_ips if online_ips else None,
-        )
-        connected = [
-            result for result in connect_results
-            if result.get("ok") and not result.get("skipped")
-        ]
+    # Sync is discovery + refresh ONLY — it never opens an output
+    # connection. Connecting is what arms DMX to a device (including
+    # per-frame keepalive blackout frames), and in production the color
+    # data usually comes from an external console (EOS, TouchDesigner):
+    # a background sync that auto-connects would fight it. Connecting is
+    # always an explicit operator action (/api/connect, Connect All).
+    # This is also what made the old monitor_only mode unnecessary — every
+    # backend is passive until an operator arms output.
+    connected = []
     return {
         "added": added,
         "skipped": skipped,

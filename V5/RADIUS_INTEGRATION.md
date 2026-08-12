@@ -20,7 +20,7 @@ flowchart LR
 ```
 
 - **DeviceManager** always runs `product: primus` with `ControllerState`, but discovery now accepts **both** `PV3CAP1` Primus nodes and `PVRAD1` Radius nodes.
-- Radius records in `ControllerState` carry `is_radius: true` and **never** get an `ArtNetSender` — no DMX is streamed to them, including under `monitor_only`.
+- Radius records in `ControllerState` carry `is_radius: true` and **never** get an `ArtNetSender` — no DMX is streamed to them. (Monitoring is passive for every backend now: the periodic sync never auto-connects any device, so the old `monitor_only` mode is gone.)
 - **Show info** (character/performer names) routes through `show_info_store.py`:
   - Primus devices → `.primus_state.json` `device_show_info`
   - Radius devices in mixed monitoring → `.radius_state.json` `device_show_info`
