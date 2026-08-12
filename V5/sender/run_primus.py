@@ -716,6 +716,11 @@ def main():
             lan_url = f"http://{lan_ip}:{port}{frontend_path}"
     register_central_server(
         port, sender_product(),
+        # Record the address the server is actually reachable at: a --lan
+        # server that registers itself as 127.0.0.1 lies to every reader,
+        # and future remote discovery depends on the registry telling the
+        # truth (see V5/REMOTE_BACKEND_NOTES.md).
+        host=(lan_ip if args.lan and lan_ip else "127.0.0.1"),
         monitor_only=bool(args.monitor_only),
         lan_enabled=bool(args.lan),
         app_version=app_version(),
@@ -779,6 +784,13 @@ def main():
         server.server_close()
         if browser_profile_root:
             _remove_dedicated_browser_profiles(browser_profile_root)
+        if _MACOS_ACTIVITY_TOKEN is not None:
+            # run_radius always cleaned this up; run_primus leaked the
+            # caffeinate child on every shutdown.
+            try:
+                _MACOS_ACTIVITY_TOKEN.terminate()
+            except Exception:
+                pass
         print("Done.")
 
 

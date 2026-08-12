@@ -66,19 +66,27 @@ def _server_control_commands():
     import json
     import urllib.request
 
-    from central_launcher import find_running_central_server, stop_running_central
+    from central_launcher import (
+        find_running_central_server,
+        read_registry,
+        stop_running_central,
+    )
 
     found = find_running_central_server()
     if not found:
         print("No Central server is running.")
         sys.exit(0 if want_status else 1)
     port, runtime = found
+    # The registry records where the server is actually reachable; only
+    # fall back to loopback when it has nothing to say.
+    registry = read_registry() or {}
+    host = str(registry.get("host") or "127.0.0.1")
 
     if want_status:
         status = None
         try:
             with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/api/server/status", timeout=2.0) as response:
+                    f"http://{host}:{port}/api/server/status", timeout=2.0) as response:
                 status = json.loads(response.read().decode("utf-8"))
         except Exception:
             status = None
@@ -94,7 +102,7 @@ def _server_control_commands():
         sys.exit(0)
 
     force = "--force" in sys.argv
-    ok, message = stop_running_central(port=port, force=force)
+    ok, message = stop_running_central(host=host, port=port, force=force)
     if ok:
         print(f"Stopped Central server on port {port}.")
         sys.exit(0)

@@ -121,6 +121,15 @@ def _sync_network_devices(device_state, interface=None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    # HTTP/1.1 keep-alive: the UIs poll several times per second, and
+    # without persistent connections every poll pays a TCP handshake —
+    # invisible on loopback, real cost for network clients. Every response
+    # path sets Content-Length, which keep-alive requires.
+    protocol_version = "HTTP/1.1"
+    # Reap idle or hung keep-alive connections so they don't pin a server
+    # thread forever.
+    timeout = 65
+
     controller_state = None
     primus_state = None
     radius_state = None
@@ -1690,11 +1699,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
-        self.close_connection = True
 
     def _serve_static(self, url_path):
         path = url_path.split("?")[0]

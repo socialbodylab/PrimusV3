@@ -80,6 +80,15 @@ document.addEventListener("alpine:init", () => {
 
         get mobileAccessUrl() {
             if (!this.runtime?.lan_enabled) return null;
+            // Prefer the address this page was actually served from: the
+            // Art-Net NIC's IP is not necessarily the HTTP-reachable address
+            // (a dedicated backend machine may separate the two). Fall back
+            // to the interface IP only when we're browsing via loopback.
+            const host = window.location.hostname;
+            const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+            if (!isLoopback) {
+                return `http://${host}:${window.location.port}/devices?mode=mobile`;
+            }
             const iface = this.network?.selected_interface || this.network?.recommended_interface;
             const ip = iface?.source_ip;
             if (!ip) return null;
