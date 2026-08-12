@@ -149,6 +149,10 @@ void audioPause() {
   _musicMaker.pausePlaying(true);
   _audioPaused = true;
   _musicMaker.setVolume(254, 254);
+  // The hardware is now muted behind _applyVolume's back — invalidate its
+  // cache or the next play at an unchanged volume skips the volume write
+  // and plays silently.
+  _lastAppliedVolume = 255;
   _notifyTrack(TRACK_STATE_PAUSED);
   Serial.println("[Audio] Paused");
 }
@@ -171,6 +175,9 @@ void audioTestTone() {
   // Do NOT call setVolume() here. sineTest() calls reset() internally which
   // can leave DREQ low briefly; sciWrite() does not check DREQ, so any SCI
   // write immediately after sineTest() may be dropped and corrupt VS1053 state.
+  // But reset() DID change the hardware volume — invalidate _applyVolume's
+  // cache so the next play re-applies the requested volume.
+  _lastAppliedVolume = 255;
   Serial.println("[Audio] Test tone complete");
 }
 
@@ -203,6 +210,10 @@ void audioUpdate() {
       }
     } else if (_audioCurrentFile[0] != '\0') {
       _musicMaker.setVolume(254, 254);
+      // Natural track end mutes the codec directly (hiss-kill) —
+      // invalidate _applyVolume's cache so the next play re-applies the
+      // real volume instead of matching the cached value and staying muted.
+      _lastAppliedVolume = 255;
       _audioCurrentFile[0] = '\0';
       _audioDuration = 0;
       sdBusy = false;
