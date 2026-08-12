@@ -221,7 +221,7 @@ def _configure_app_logging():
     sys.stdout = log_file
     sys.stderr = log_file
     print()
-    print(f"PrimusCentral started {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{_launcher_display_name()} started {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 def _begin_macos_low_latency_activity():
