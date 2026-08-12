@@ -90,8 +90,8 @@ class ReceiveModeHelperTests(unittest.TestCase):
             0,
             dev,
             {
-                0: bytes([255, 0, 0, 0, 255, 0]),
-                1: bytes([0, 0, 255]),
+                0: [(255, 0, 0), (0, 255, 0)],
+                1: [(0, 0, 255)],
             },
         )
         self.assertEqual(len(send_queue), 1)

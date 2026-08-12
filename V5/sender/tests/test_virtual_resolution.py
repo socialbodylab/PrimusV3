@@ -89,8 +89,8 @@ class VirtualResolutionTransportTests(unittest.TestCase):
             ],
         }
         frame_buffers = {
-            0: bytes([255, 0, 0] * 32),
-            1: bytes([0, 255, 0] * 72),
+            0: [(255, 0, 0)] * 32,
+            1: [(0, 255, 0)] * 72,
         }
         send_queue = []
         _queue_device_frame_sends(send_queue, 0, dev, frame_buffers)
@@ -99,6 +99,39 @@ class VirtualResolutionTransportTests(unittest.TestCase):
         self.assertEqual(universe, 104)
         self.assertEqual(len(payload), (1 + 72) * 3)
         self.assertEqual(payload[:3], bytes([255, 0, 0]))
+
+    def test_transport_pads_short_pixel_frames_to_physical(self):
+        # A look rendered at a lower resolution than the device output must
+        # still blank the remaining physical LEDs (parity with the old
+        # byte-buffer path, which zero-padded before downsampling).
+        output = {"type": "long_strip", "count": 72, "virtual_pixels": 72}
+        data = transport_rgb_bytes(output, pixels=[(255, 0, 0)] * 30)
+        self.assertEqual(len(data), 72 * 3)
+        self.assertEqual(data[:3], bytes([255, 0, 0]))
+        self.assertEqual(data[30 * 3:], bytes((72 - 30) * 3))
+
+    def test_shared_transport_cache_packs_identical_outputs_once(self):
+        # Devices whose outputs share a descriptor reuse the packed
+        # transport bytes within a frame instead of re-downsampling.
+        outputs = [{"type": "long_strip", "count": 72, "virtual_pixels": 36,
+                    "universe": 5}]
+        pixels = [(9, 9, 9)] * 72
+        cache = {}
+        first_queue = []
+        second_queue = []
+        with mock.patch(
+                "state.transport_rgb_bytes",
+                wraps=transport_rgb_bytes) as transport:
+            for queue in (first_queue, second_queue):
+                dev = {
+                    "receive_mode": "split",
+                    "sender": object(),
+                    "outputs": [dict(outputs[0])],
+                }
+                _queue_device_frame_sends(queue, 0, dev, {0: pixels}, cache)
+        self.assertEqual(transport.call_count, 1)
+        self.assertEqual(first_queue[0][3], second_queue[0][3])
+        self.assertEqual(len(first_queue[0][3]), 36 * 3)
 
 
 class VirtualResolutionDiscoveryTests(unittest.TestCase):

@@ -64,6 +64,9 @@ DEBUG_API_TIMING = os.environ.get("PRIMUSV3_DEBUG_API_TIMING") == "1"
 _WEB_DIR = web_dir()
 _sync_lock = threading.Lock()
 _sync_job = None
+# Coalescing guard for /api/devices/sync (see _sync_network_devices).
+_device_sync_lock = threading.Lock()
+_device_sync_inflight = None
 _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 
 
@@ -81,27 +84,87 @@ def _safe_ftp_path(path):
 
 
 def _sync_network_devices(device_state, interface=None):
-    """Discover nodes, add compatible new devices, and connect all online targets."""
+    """Discover nodes and add/refresh devices, coalescing overlapping calls.
+
+    Every frontend runs its own 20 s auto-sync, so with three UIs open the
+    calls overlap; each full pass costs a 3.5 s discovery sweep plus a
+    Setup-lane config round trip per management-capable node, all serialized
+    behind _artnet_query_lock. Instead of piling a second (and third) sweep
+    behind the first, late arrivals wait for the in-flight pass and return
+    its result — the network state they'd re-measure seconds later is the
+    same.
+    """
+    global _device_sync_inflight
+    with _device_sync_lock:
+        job = _device_sync_inflight
+        if job is None:
+            job = {"event": threading.Event(), "result": None}
+            _device_sync_inflight = job
+            is_runner = True
+        else:
+            is_runner = False
+
+    if not is_runner:
+        job["event"].wait()
+        result = job["result"]
+        if result is None:
+            # The in-flight pass died on an exception; report an empty pass
+            # rather than propagating someone else's error.
+            result = {"added": [], "skipped": [], "connected": [], "nodes": []}
+        return result
+
+    try:
+        result = _run_device_sync(device_state, interface=interface)
+        job["result"] = result
+        return result
+    finally:
+        with _device_sync_lock:
+            _device_sync_inflight = None
+        job["event"].set()
+
+
+def _run_device_sync(device_state, interface=None):
+    """Discover nodes, add compatible new devices, refresh known ones."""
     product = sender_product()
     known_ips = device_state.discovery_targets()
     nodes = discover_artnet_nodes(known_ips=known_ips, timeout=3.5, interface=interface)
-    if nodes:
-        device_state.refresh_devices_from_nodes(nodes)
 
+    # add_device_from_node already refreshes an existing device (including a
+    # management config round trip for capable nodes), so compatible nodes go
+    # through it alone — a separate refresh pre-pass would do every node's
+    # work twice. Saves are batched: one state-file write per sync instead of
+    # one per node.
     added = []
     skipped = []
+    incompatible = []
+    changed = False
     for node in nodes or []:
         node_ip = node.get("ip")
         if not is_compatible_node(node, product):
             skipped.append({"ip": node_ip, "reason": "incompatible"})
+            incompatible.append(node)
             continue
-        result = device_state.add_device_from_node(node)
-        if result.get("status") == "added":
+        result = device_state.add_device_from_node(node, auto_save=False)
+        status = result.get("status")
+        if status in ("added", "updated"):
+            changed = True
+        if status == "added":
             added.append({
                 "ip": node_ip,
                 "name": node.get("short_name") or node_ip,
                 "device_index": result.get("device_index"),
             })
+
+    # An incompatible reply can still belong to a device we already track
+    # (e.g. a garbled node report from flaky firmware) — keep refreshing
+    # those so its IP/telemetry stay current.
+    if incompatible:
+        refreshed = device_state.refresh_devices_from_nodes(
+            incompatible, auto_save=False)
+        changed = changed or bool(refreshed)
+
+    if changed:
+        device_state.save_devices()
 
     # Sync is discovery + refresh ONLY — it never opens an output
     # connection. Connecting is what arms DMX to a device (including
