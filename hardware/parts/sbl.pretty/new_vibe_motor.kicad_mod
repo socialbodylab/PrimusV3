@@ -1,0 +1,131 @@
+(footprint "new_vibe_motor"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0 -0.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "14898501-90d4-4187-b629-8fb1259e779e")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "new_vibe_motor"
+		(at 6.95 4.3 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "abb9efd7-000c-4b8c-a3c3-6452cb18b459")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "a10b779f-020a-4d11-9e41-83f1f3ce4b38")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "aa35729d-af1d-469a-a9bd-627525201eee")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(fp_rect
+		(start -5.27 8.73)
+		(end -2.73 11.27)
+		(stroke
+			(width 0.2)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "43321d65-92ba-4c24-a2ac-51b13714eef1")
+	)
+	(fp_rect
+		(start 2.73 8.73)
+		(end 5.27 11.27)
+		(stroke
+			(width 0.2)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "7d1482f7-3aca-4129-ab73-8538456dac09")
+	)
+	(fp_circle
+		(center 0 0)
+		(end 5.2 0)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "a3acfcf4-9b15-480e-848a-42e66a4b79d3")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 10.34 2.64 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "e8f27bb6-47b5-415e-86b5-7fabb647d989")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" thru_hole rect
+		(at -4 10)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "15dd1b50-7072-4f56-a410-ce10d786fdb0")
+	)
+	(pad "2" thru_hole rect
+		(at 4 10)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "55fab541-1029-4e2b-a0a6-130d6be4b327")
+	)
+	(group ""
+		(uuid "2781fcbd-beb1-42bc-99ad-226add74a94f")
+		(members "9d0b5bd0-62b3-42fc-a137-d7ed53ace133" "c21c7676-08b4-46f1-be78-f2deea06bacc")
+	)
+	(group ""
+		(uuid "9d0b5bd0-62b3-42fc-a137-d7ed53ace133")
+		(members "55fab541-1029-4e2b-a0a6-130d6be4b327" "7d1482f7-3aca-4129-ab73-8538456dac09")
+	)
+	(group ""
+		(uuid "c21c7676-08b4-46f1-be78-f2deea06bacc")
+		(members "15dd1b50-7072-4f56-a410-ce10d786fdb0" "43321d65-92ba-4c24-a2ac-51b13714eef1")
+	)
+	(embedded_fonts no)
+)

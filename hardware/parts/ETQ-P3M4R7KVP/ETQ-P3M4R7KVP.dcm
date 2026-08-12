@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP ETQ-P3M4R7KVP
+D Series/Type: Power Choke Coil for Automotive-LP (MC type) , Size [L] (mm): 5.05.5, Height (mm): 3, Inductance (H): 4.7, DC Resistance [Typ.] (at 20) (m): 45.6, Rated Current [Typ.] (T=40K, FR4, t=1.6 mm,Four-layer PWB) (A): 3.4, AEC-Q200 compliant
+K
+F https://industrial.panasonic.com/cdbs/www-data/pdf/AGL0000/AGL0000C63.pdf
+$ENDCMP
+#
+#End Doc Library
