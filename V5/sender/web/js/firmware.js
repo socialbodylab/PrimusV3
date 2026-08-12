@@ -84,7 +84,11 @@ document.addEventListener("alpine:init", () => {
         },
 
         get showPrimusFirmwareUpdates() {
-            return !this.multiFamily || this.family === "primus";
+            // The GitHub firmware-update panel tracks the Primus receiver
+            // firmware only. Key it off the *resolved* family in both modes —
+            // single-family mode previously always showed it, even when the
+            // active profile list was radius-only (e.g. RadiusCentral).
+            return this.activeFamilyLabel === "Primus";
         },
 
         get activeFamilyLabel() {

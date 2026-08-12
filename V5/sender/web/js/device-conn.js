@@ -1038,6 +1038,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         showBattery(dev) {
+            if (isRadiusDevice(dev)) {
+                // Radius battery telemetry arrives over the Watch lane
+                // regardless of connect state; show it only when data is
+                // actually present (pre-PRS firmware never reports it).
+                return dev?.battery_pct != null || dev?.battery_mv != null;
+            }
             return connProduct() === "primus" && !!dev?.capabilities?.battery && !!dev?.connected;
         },
 
@@ -1080,7 +1086,15 @@ document.addEventListener("alpine:init", () => {
         // for Device Manager's monitoring view — telemetry comes from the UDP 6455
         // listener regardless of connect state, so these don't gate on dev.connected.
         monitorFpsLabel(dev) {
-            if (isRadiusDevice(dev)) return "";
+            if (isRadiusDevice(dev)) {
+                // Radius nodes report render FPS via PTR/PRS telemetry (field
+                // "fps" in the radius state shape). Old firmware without that
+                // data stays blank rather than showing "waiting".
+                if (!dev?.receiver_online) return "";
+                const fps = dev?.fps ?? dev?.receiver_fps;
+                if (fps != null) return `${fps} fps · live`;
+                return "live";
+            }
             if (dev?.receiver_online) {
                 if (dev?.receiver_fps != null) {
                     return `${dev.receiver_fps} fps · live`;
@@ -1104,7 +1118,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         monitorShowBattery(dev) {
-            return !isRadiusDevice(dev) && !!dev?.capabilities?.battery;
+            if (isRadiusDevice(dev)) {
+                // Show only when battery telemetry actually arrived (PRS,
+                // Radius firmware 4.16+); old firmware stays blank.
+                return dev?.battery_pct != null || dev?.battery_mv != null;
+            }
+            return !!dev?.capabilities?.battery;
         },
 
         // ---- Performer grouping helpers (additive; used by Device Manager) ----

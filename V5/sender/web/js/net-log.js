@@ -29,12 +29,37 @@ document.addEventListener("alpine:init", () => {
         },
 
         init() {
+            // Poll only while the Net Log tab is actually visible — a
+            // hidden panel polling at 2 Hz forever is wasted work on a show
+            // machine. app-radius dispatches primus:mode-changed on every
+            // tab switch.
+            document.addEventListener("primus:mode-changed", event => {
+                if (event.detail?.mode === "log") {
+                    this._startPolling();
+                } else {
+                    this._stopPolling();
+                }
+            });
+            if (Alpine.store("app")?.mode === "log") {
+                this._startPolling();
+            }
+        },
+
+        _startPolling() {
+            if (this._timer) return;
             this.poll();
             this._timer = setInterval(() => this.poll(), 500);
         },
 
+        _stopPolling() {
+            if (this._timer) {
+                clearInterval(this._timer);
+                this._timer = null;
+            }
+        },
+
         destroy() {
-            clearInterval(this._timer);
+            this._stopPolling();
         },
 
         async poll() {
@@ -74,7 +99,7 @@ document.addEventListener("alpine:init", () => {
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
             const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-            a.download = `primus-netlog-${ts}.json`;
+            a.download = `radius-netlog-${ts}.json`;
             a.click();
             URL.revokeObjectURL(a.href);
         },

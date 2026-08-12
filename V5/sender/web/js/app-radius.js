@@ -70,7 +70,12 @@ document.addEventListener("alpine:init", () => {
         get audioStatus() {
             const devices = this.radiusDevices;
             const connected = devices.filter(d => d.connected).length;
-            const playing = devices.filter(d => d.connected && d.current_track).length;
+            // Prefer live playback_state telemetry (0 stopped / 1 playing /
+            // 2 paused); current_track alone can be a stale leftover.
+            const playing = devices.filter(d =>
+                d.connected && (d.receiver_online
+                    ? d.playback_state === 1
+                    : !!d.current_track)).length;
             return {
                 connected,
                 total: devices.length,
@@ -191,6 +196,37 @@ document.addEventListener("alpine:init", () => {
                 "playback-chip-idle": !status.playing,
                 "playback-chip-controller": status.playing > 0,
             };
+        },
+
+        // ── Inline two-step confirm (replaces window.confirm) ─────────
+        // First call arms the control (button flips to "Sure?"); a second
+        // call within the hold window confirms. Arm state auto-clears.
+        armed: {},
+        _armTimers: {},
+
+        requestConfirm(key, holdMs = 3500) {
+            if (this.armed[key]) {
+                this.disarmConfirm(key);
+                return true;
+            }
+            this.armed = { ...this.armed, [key]: true };
+            clearTimeout(this._armTimers[key]);
+            this._armTimers[key] = setTimeout(() => this.disarmConfirm(key), holdMs);
+            return false;
+        },
+
+        disarmConfirm(key) {
+            clearTimeout(this._armTimers[key]);
+            delete this._armTimers[key];
+            if (this.armed[key]) {
+                const next = { ...this.armed };
+                delete next[key];
+                this.armed = next;
+            }
+        },
+
+        isArmed(key) {
+            return !!this.armed[key];
         },
 
         showNotice(message, level = "info", timeout = 3200) {

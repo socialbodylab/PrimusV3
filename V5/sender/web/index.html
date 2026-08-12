@@ -113,6 +113,20 @@
                                x-init="$nextTick(() => { $el.focus(); $el.select() })">
                     </template>
                     <span class="audio-badge" x-show="dev.is_radius" title="Radius audio node">&#9834;</span>
+                    <div class="device-stats">
+                        <span class="dm-status-pill"
+                              :class="$store.conn.monitorStatusClass(dev)"
+                              x-text="$store.conn.monitorStatusLabel(dev)"></span>
+                        <span class="device-fps"
+                              x-show="$store.conn.monitorFpsLabel(dev)"
+                              :class="$store.conn.monitorLiveClass(dev)"
+                              x-text="$store.conn.monitorFpsLabel(dev)"></span>
+                        <span class="device-battery"
+                              x-show="$store.conn.showBattery(dev)"
+                              :class="$store.conn.batteryClass(dev)"
+                              :title="$store.conn.batteryTitle(dev)"
+                              x-text="$store.conn.batteryLabel(dev)"></span>
+                    </div>
                 </div>
                 <div class="device-identity" x-show="$store.conn.showInfoEnabled(dev)" x-cloak>
                     <div class="device-identity-note text-sm text-muted"
@@ -180,10 +194,16 @@
                           :title="$store.conn.networkModeTitle(dev)"
                           x-text="$store.conn.networkModeLabel(dev)"></span>
                     <span class="device-profile" x-text="$store.conn.hardwareLabel(dev)"></span>
+                    <span class="device-fw-version"
+                          x-show="$store.conn.firmwareLabel(dev) !== '—'"
+                          x-text="'FW ' + $store.conn.firmwareLabel(dev)"></span>
                     <span class="device-transport-error" x-show="dev.transport_error" x-text="dev.transport_error"></span>
                 </div>
-                <div class="device-now-playing text-sm text-muted" x-show="dev.current_track">
-                    Now: <span x-text="dev.current_track"></span>
+                <div class="device-now-playing text-sm text-muted"
+                     x-show="dev.receiver_online && (dev.playback_state === 1 || dev.playback_state === 2)">
+                    <span x-text="dev.playback_state === 2 ? '&#8214;' : (dev.audio_looping ? '&#8634;' : '&#9654;')"></span>
+                    <span x-text="dev.current_track"></span>
+                    <span x-text="dev.playback_state === 2 ? '(paused)' : ''"></span>
                 </div>
                 <div class="btn-group device-actions device-actions-primary">
                     <button class="btn btn-sm device-action-main"
@@ -293,11 +313,20 @@
                               x-text="getVolume(dev.di)"></span>
                     </div>
                 </div>
-                <div class="audio-now-playing" x-show="playing[dev.di]">
-                    <span x-text="playing[dev.di]?.cmd === 'loop' ? '&#8634;' : '&#9654;'"></span>
-                    <span x-text="playing[dev.di]?.file"></span>
+                <div class="audio-now-playing" x-show="nowPlaying(dev.di)">
+                    <span x-text="nowPlayingIcon(dev.di)"></span>
+                    <span x-text="nowPlaying(dev.di)?.file"></span>
+                    <span class="text-muted" style="font-size:11px"
+                          x-text="nowPlayingStateLabel(dev.di)"></span>
                 </div>
-                <div class="audio-fm">
+                <div class="audio-fm-toggle-row" style="margin-top:6px">
+                    <button class="btn btn-sm"
+                            @click="toggleFm(dev.di)"
+                            x-text="fmOpen[dev.di] ? '&#9662; SD Files' : '&#9656; SD Files'"></button>
+                    <span class="text-muted" style="font-size:11px"
+                          x-show="!fmOpen[dev.di]">Expand to browse the SD card</span>
+                </div>
+                <div class="audio-fm" x-show="fmOpen[dev.di]" x-cloak>
                     <div class="audio-fm-toolbar">
                         <div class="audio-fm-breadcrumb">
                             <span class="audio-fm-crumb" @click="navigateTo(dev.di, '/')">SD</span>
@@ -377,8 +406,10 @@
                                     <div class="btn-group">
                                         <button class="btn btn-sm" title="Rename"
                                                 @click="startRename(dev.di, entry.name)">&#9998;</button>
-                                        <button class="btn btn-sm btn-danger" title="Delete"
-                                                @click="deleteEntry(dev.di, entry)">&#10005;</button>
+                                        <button class="btn btn-sm btn-danger"
+                                                :title="$store.app.isArmed(deleteKey(dev.di, entry.name)) ? 'Click again to delete' : 'Delete'"
+                                                @click="deleteEntry(dev.di, entry)"
+                                                x-text="$store.app.isArmed(deleteKey(dev.di, entry.name)) ? 'Sure?' : '✕'"></button>
                                     </div>
                                 </template>
                                 <template x-if="isRenaming(dev.di, entry.name)">
@@ -448,7 +479,10 @@
                     <div class="cues-library-row">
                         <span class="text-sm" x-text="f.name"></span>
                         <span class="text-muted" style="font-size:11px" x-text="formatSize(f.size)"></span>
-                        <button class="btn btn-sm btn-danger" @click="deleteProjectFile(f.name)">✕</button>
+                        <button class="btn btn-sm btn-danger"
+                                :title="$store.app.isArmed('project-file-del-' + f.name) ? 'Click again to remove' : 'Remove from library'"
+                                @click="deleteProjectFile(f.name)"
+                                x-text="$store.app.isArmed('project-file-del-' + f.name) ? 'Sure?' : '✕'"></button>
                     </div>
                 </template>
             </div>
@@ -477,22 +511,29 @@
             <p class="text-muted text-sm mt-4">No cues yet. Click "+ Cue" to add one.</p>
         </template>
 
-        <template x-for="(cue, idx) in sortedCues" :key="cue.number">
+        <template x-for="(cue, idx) in sortedCues" :key="cue.id">
             <div class="cue-card">
 
                 <div class="cue-card-header">
                     <div class="flex items-center gap-2">
                         <span class="form-label" style="margin:0;white-space:nowrap">Cue</span>
                         <input type="number" class="form-input" min="1" max="255" style="width:60px"
+                               :style="isDuplicateNumber(cue) ? 'border-color:var(--danger)' : ''"
                                :value="cue.number"
-                               @change="updateCueField(idx, 'number', parseInt($event.target.value) || 1)">
+                               @change="updateCueNumber(idx, $event)">
+                        <span class="text-sm" style="color:var(--danger);white-space:nowrap"
+                              x-show="isDuplicateNumber(cue)"
+                              title="Two cues share this number — only the first will fire">⚠ duplicate</span>
                         <input type="text" class="form-input" placeholder="note…" style="flex:1"
                                :value="cue.note"
                                @input="updateCueField(idx, 'note', $event.target.value)">
                     </div>
                     <div class="btn-group">
                         <button class="btn btn-sm btn-primary" @click="fireCue(idx)">▶ Fire</button>
-                        <button class="btn btn-sm btn-danger" @click="removeCue(idx)">✕</button>
+                        <button class="btn btn-sm btn-danger"
+                                :title="$store.app.isArmed('cue-remove-' + cue.id) ? 'Click again to remove' : 'Remove cue'"
+                                @click="removeCue(idx)"
+                                x-text="$store.app.isArmed('cue-remove-' + cue.id) ? 'Sure?' : '✕'"></button>
                     </div>
                 </div>
 
@@ -780,151 +821,189 @@
             <p class="text-sm text-muted">Download Arduino CLI, install ESP32 board support, and prepare the receiver firmware libraries before compiling or uploading.</p>
         </div>
 
-        <div class="firmware-grid firmware-workflow-grid">
-            <div class="output-section firmware-section">
-                <div class="output-header">
-                    <span class="output-name">Device Version</span>
-                    <span class="text-sm text-muted" x-text="profileLabel()"></span>
-                </div>
-                <div class="sub-mode-toggle firmware-profile-toggle">
-                    <template x-for="item in profiles" :key="item.id">
-                        <button class="sub-mode-btn"
-                                :class="{ active: profile === item.id }"
-                                :disabled="running"
-                                @click="setProfile(item.id)">
-                            <span x-text="item.label"></span>
-                        </button>
-                    </template>
-                </div>
-                <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+        <!-- Step 1: Firmware version + device profile -->
+        <div class="output-section firmware-section dm-firmware-step">
+            <div class="output-header">
+                <span class="output-name">Step 1 — Firmware Profile</span>
             </div>
 
-            <div class="output-section firmware-section firmware-device-section">
-                <div class="output-header">
-                    <span class="output-name">Device</span>
-                    <button class="btn btn-sm" @click="scanPorts()" :disabled="!available || running">Refresh Devices</button>
+            <div class="dm-firmware-choice-stack" x-show="multiFamily" x-cloak>
+                <div class="dm-firmware-choice-block dm-firmware-choice-block-primary">
+                    <div class="dm-firmware-choice-heading">
+                        <span class="dm-firmware-choice-label">Product</span>
+                        <span class="dm-firmware-choice-hint">Choose the receiver family you are flashing</span>
+                    </div>
+                    <div class="sub-mode-toggle dm-firmware-family-toggle">
+                        <button type="button" class="sub-mode-btn" :class="{ active: family === 'primus' }" :disabled="running" @click="setFamily('primus')">Primus</button>
+                        <button type="button" class="sub-mode-btn" :class="{ active: family === 'radius' }" :disabled="running" @click="setFamily('radius')">Radius</button>
+                    </div>
                 </div>
-                <div class="firmware-target-summary" x-text="targetSummary()"></div>
-                <div class="firmware-port-list">
-                    <template x-if="candidatePorts.length === 0">
-                        <div class="firmware-empty-state">No firmware devices found. Refresh after connecting a receiver over USB.</div>
-                    </template>
-                    <button type="button" class="firmware-port-row firmware-port-all"
-                            :class="{ 'firmware-port-selected': portMode === 'all' }"
-                            x-show="candidatePorts.length > 0"
-                            :disabled="running || candidatePorts.length === 0"
-                            @click="selectAllDevices()">
-                        <span class="firmware-port-address">All Available Devices</span>
-                        <span class="firmware-port-board" x-text="candidatePorts.length + ' detected'"></span>
-                        <span class="firmware-port-badge">All</span>
-                        <span class="firmware-port-reason">Upload the selected firmware version to every detected ESP32-like port.</span>
+
+                <div class="dm-firmware-choice-block">
+                    <div class="dm-firmware-choice-heading">
+                        <span class="dm-firmware-choice-label">Board profile</span>
+                    </div>
+                    <div class="sub-mode-toggle firmware-profile-toggle dm-firmware-profile-toggle">
+                        <template x-for="item in familyProfiles" :key="item.id">
+                            <button class="sub-mode-btn" :class="{ active: profile === item.id }" :disabled="running" @click="setProfile(item.id)">
+                                <span x-text="item.label"></span>
+                            </button>
+                        </template>
+                    </div>
+                    <div class="firmware-profile-copy" x-text="profileDetail()"></div>
+                </div>
+            </div>
+
+            <div class="dm-firmware-version-panel">
+                <div class="dm-firmware-version-header" x-show="showPrimusFirmwareUpdates" x-cloak>
+                    <span class="dm-firmware-choice-label">Firmware version</span>
+                    <div class="firmware-version-actions">
+                        <button class="btn btn-sm" @click="checkForUpdates(true)" :disabled="running || checkingUpdates">Check for Updates</button>
+                        <button class="btn btn-sm btn-primary" x-show="updateAvailable" @click="downloadFirmware()" :disabled="running || checkingUpdates">Download &amp; Install</button>
+                    </div>
+                </div>
+                <div class="firmware-version-grid" x-show="showPrimusFirmwareUpdates" x-cloak>
+                    <div class="firmware-version-item">
+                        <span class="firmware-version-label">Installed</span>
+                        <span class="firmware-version-value" x-text="installedFirmwareLabel()"></span>
+                    </div>
+                    <div class="firmware-version-item">
+                        <span class="firmware-version-label">Latest on GitHub</span>
+                        <span class="firmware-version-value" x-text="remoteFirmwareLabel()"></span>
+                    </div>
+                    <div class="firmware-version-item">
+                        <span class="firmware-version-label">Status</span>
+                        <span class="firmware-status-pill firmware-version-status" :class="updateStatusClass()" x-text="updateStatusLabel()"></span>
+                    </div>
+                </div>
+                <div class="firmware-version-note text-sm text-muted" x-show="updateError && showPrimusFirmwareUpdates" x-text="updateError"></div>
+                <div class="firmware-version-note text-sm text-muted" x-show="!showPrimusFirmwareUpdates" x-cloak>
+                    Radius firmware is built from <code>V5/Arduino/radius_receiver/</code>.
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Device / port selection -->
+        <div class="output-section firmware-section firmware-device-section dm-firmware-step">
+            <div class="output-header">
+                <span class="output-name">Step 2 — Device</span>
+                <button class="btn btn-sm" @click="scanPorts()" :disabled="!available || running">Refresh Devices</button>
+            </div>
+            <div class="firmware-target-summary" x-text="targetSummary()"></div>
+            <div class="firmware-port-list">
+                <template x-if="candidatePorts.length === 0">
+                    <div class="firmware-empty-state">No firmware devices found. Refresh after connecting a receiver over USB.</div>
+                </template>
+                <button type="button" class="firmware-port-row firmware-port-all"
+                        :class="{ 'firmware-port-selected': portMode === 'all' }"
+                        x-show="candidatePorts.length > 0"
+                        :disabled="running || candidatePorts.length === 0"
+                        @click="selectAllDevices()">
+                    <span class="firmware-port-address">All Available Devices</span>
+                    <span class="firmware-port-board" x-text="candidatePorts.length + ' detected'"></span>
+                    <span class="firmware-port-badge">All</span>
+                    <span class="firmware-port-reason">Upload the selected firmware version to every detected ESP32-like port.</span>
+                </button>
+                <template x-for="port in candidatePorts" :key="port.address">
+                    <button type="button" class="firmware-port-row" :class="portRowClass(port)" :disabled="running" @click="selectPort(port)">
+                        <span class="firmware-port-address" x-text="port.address"></span>
+                        <span class="firmware-port-board" x-text="port.board"></span>
+                        <span class="firmware-port-badge" x-text="portBadge(port)"></span>
+                        <span class="firmware-port-reason" x-text="port.reason"></span>
                     </button>
-                    <template x-for="port in candidatePorts" :key="port.address">
-                        <button type="button" class="firmware-port-row"
-                                :class="portRowClass(port)"
-                                :disabled="running"
-                                @click="selectPort(port)">
-                            <span class="firmware-port-address" x-text="port.address"></span>
-                            <span class="firmware-port-board" x-text="port.board"></span>
-                            <span class="firmware-port-badge" x-text="portBadge(port)"></span>
-                            <span class="firmware-port-reason" x-text="port.reason"></span>
-                        </button>
-                    </template>
-                </div>
+                </template>
             </div>
+        </div>
 
-            <div class="output-section firmware-section">
-                <div class="output-header">
-                    <span class="output-name">Overrides</span>
-                </div>
-                <div class="firmware-override-toggles">
-                    <label class="firmware-inline-check">
-                        <input type="checkbox" x-model="nameEnabled" :disabled="running">
-                        <span>Use custom name</span>
-                    </label>
-                    <label class="firmware-inline-check">
-                        <input type="checkbox" x-model="wifiEnabled" :disabled="running">
-                        <span>Use custom credentials</span>
-                    </label>
-                    <label class="firmware-inline-check">
-                        <input type="checkbox" x-model="characterNameEnabled" :disabled="running">
-                        <span>Use custom character name</span>
-                    </label>
-                    <label class="firmware-inline-check">
-                        <input type="checkbox" x-model="performerNameEnabled" :disabled="running">
-                        <span>Use custom performer name</span>
-                    </label>
+        <!-- Step 3: Overrides (collapsed by default) -->
+        <details class="output-section firmware-section dm-firmware-step">
+            <summary class="output-header dm-firmware-step-summary">
+                <span class="output-name">Step 3 — Overrides (optional)</span>
+                <span class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></span>
+            </summary>
+            <div class="firmware-override-toggles">
+                <label class="firmware-inline-check">
+                    <input type="checkbox" x-model="nameEnabled" :disabled="running">
+                    <span>Use custom name</span>
+                </label>
+                <label class="firmware-inline-check">
+                    <input type="checkbox" x-model="wifiEnabled" :disabled="running">
+                    <span>Use custom credentials</span>
+                </label>
+                <label class="firmware-inline-check">
+                    <input type="checkbox" x-model="characterNameEnabled" :disabled="running">
+                    <span>Use custom character name</span>
+                </label>
+                <label class="firmware-inline-check">
+                    <input type="checkbox" x-model="performerNameEnabled" :disabled="running">
+                    <span>Use custom performer name</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Device Name</label>
+                <input class="form-input" type="text" maxlength="17" x-model="deviceName" :disabled="running || !nameEnabled" :placeholder="deviceNamePlaceholder" autocomplete="off">
+            </div>
+            <div class="firmware-form-grid">
+                <div class="form-group">
+                    <label class="form-label">Character Name</label>
+                    <input class="form-input" type="text" maxlength="64" x-model="characterName" :disabled="running || !characterNameEnabled" placeholder="Character" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Device Name</label>
-                    <input class="form-input" type="text" maxlength="17"
-                           x-model="deviceName" :disabled="running || !nameEnabled"
-                           placeholder="Radius" autocomplete="off">
+                    <label class="form-label">Performer Name</label>
+                    <input class="form-input" type="text" maxlength="64" x-model="performerName" :disabled="running || !performerNameEnabled" placeholder="Performer" autocomplete="off">
                 </div>
-                <div class="firmware-form-grid">
-                    <div class="form-group">
-                        <label class="form-label">Character Name</label>
-                        <input class="form-input" type="text" maxlength="64"
-                               x-model="characterName" :disabled="running || !characterNameEnabled"
-                               placeholder="Character" autocomplete="off">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Performer Name</label>
-                        <input class="form-input" type="text" maxlength="64"
-                               x-model="performerName" :disabled="running || !performerNameEnabled"
-                               placeholder="Performer" autocomplete="off">
-                    </div>
-                </div>
-                <div class="firmware-form-grid">
-                    <div class="form-group">
-                        <label class="form-label">SSID</label>
-                        <input class="form-input" type="text" x-model="wifiSsid" :disabled="running || !wifiEnabled" autocomplete="off">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Password</label>
-                        <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
-                    </div>
-                </div>
-                <div class="firmware-ip-mode-row" role="group" aria-label="Firmware IP override mode">
-                    <button type="button" class="seg-btn"
-                            :class="{ active: ipMode === 'keep' }"
-                            :disabled="running"
-                            @click="ipMode = 'keep'">Keep IP Setting</button>
-                    <button type="button" class="seg-btn"
-                            :class="{ active: ipMode === 'static' }"
-                            :disabled="running"
-                            @click="ipMode = 'static'">Set Static IP</button>
-                    <button type="button" class="seg-btn"
-                            :class="{ active: ipMode === 'dhcp' }"
-                            :disabled="running"
-                            @click="ipMode = 'dhcp'">Use DHCP</button>
-                </div>
-                <div class="firmware-form-grid" x-show="ipMode === 'static'" x-cloak>
-                    <div class="form-group">
-                        <label class="form-label">Static IP</label>
-                        <input class="form-input" type="text" x-model="staticIp" :disabled="running" autocomplete="off" placeholder="192.168.1.50">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Gateway</label>
-                        <input class="form-input" type="text" x-model="gateway" :disabled="running" autocomplete="off" placeholder="192.168.1.1">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Subnet</label>
-                        <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
-                    </div>
-                </div>
-                <div class="firmware-override-summary" :class="overrideSummaryClass" x-text="overrideSummary()"></div>
             </div>
+            <div class="firmware-form-grid">
+                <div class="form-group">
+                    <label class="form-label">SSID</label>
+                    <input class="form-input" type="text" x-model="wifiSsid" :disabled="running || !wifiEnabled" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input class="form-input" type="text" x-model="wifiPassword" :disabled="running || !wifiEnabled" autocomplete="off" spellcheck="false">
+                </div>
+            </div>
+            <div class="firmware-ip-mode-row" role="group" aria-label="Firmware IP override mode">
+                <button type="button" class="seg-btn" :class="{ active: ipMode === 'keep' }" :disabled="running" @click="ipMode = 'keep'">Keep IP Setting</button>
+                <button type="button" class="seg-btn" :class="{ active: ipMode === 'static' }" :disabled="running" @click="ipMode = 'static'">Set Static IP</button>
+                <button type="button" class="seg-btn" :class="{ active: ipMode === 'dhcp' }" :disabled="running" @click="ipMode = 'dhcp'">Use DHCP</button>
+            </div>
+            <div class="firmware-form-grid" x-show="ipMode === 'static'" x-cloak>
+                <div class="form-group">
+                    <label class="form-label">Static IP</label>
+                    <input class="form-input" type="text" x-model="staticIp" :disabled="running" autocomplete="off" placeholder="192.168.1.50">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Gateway</label>
+                    <input class="form-input" type="text" x-model="gateway" :disabled="running" autocomplete="off" placeholder="192.168.1.1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Subnet</label>
+                    <input class="form-input" type="text" x-model="subnet" :disabled="running" autocomplete="off" placeholder="255.255.255.0">
+                </div>
+            </div>
+            <div class="firmware-ip-mode-row" role="group" aria-label="Default receive mode" x-show="showReceiveModeOverrides" x-cloak>
+                <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'keep' }" :disabled="running" @click="receiveModeMode = 'keep'">Keep Receive Default</button>
+                <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'split' }" :disabled="running" @click="receiveModeMode = 'split'">Split</button>
+                <button type="button" class="seg-btn" :class="{ active: receiveModeMode === 'combined' }" :disabled="running" @click="receiveModeMode = 'combined'">Combined</button>
+            </div>
+            <div class="form-group" x-show="showReceiveModeOverrides && receiveModeMode !== 'keep'" x-cloak>
+                <label class="form-label">Base Universe</label>
+                <input class="form-input" type="number" min="0" max="32767" x-model.number="receiveBaseUniverse" :disabled="running" placeholder="0">
+                <div class="text-sm text-muted" style="margin-top:4px" x-show="receiveModeMode === 'combined'">Combined mode supports at most 170 pixels across both outputs.</div>
+                <div class="text-sm text-muted" style="margin-top:4px">Baked into NVS at flash time. Remote changes remain available after firmware v3.8+.</div>
+            </div>
+        </details>
 
-            <div class="output-section firmware-section firmware-actions-section">
-                <div class="output-header">
-                    <span class="output-name">Compile / Upload</span>
-                    <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
-                </div>
-                <div class="firmware-actions">
-                    <button class="btn" @click="startJob('compile')" :disabled="!canCompile">Compile</button>
-                    <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
-                </div>
+        <!-- Step 4: Compile / Upload -->
+        <div class="output-section firmware-section firmware-actions-section dm-firmware-step">
+            <div class="output-header">
+                <span class="output-name">Step 4 — Compile / Upload</span>
+                <span class="text-sm text-muted" x-text="selectedPortLabel"></span>
+            </div>
+            <div class="firmware-actions">
+                <button class="btn" @click="startJob('compile')" :disabled="!canCompile">Compile</button>
+                <button class="btn btn-primary" @click="startJob('upload')" :disabled="!canUpload">Upload</button>
             </div>
         </div>
 
@@ -934,12 +1013,36 @@
                 <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
             </div>
             <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
-            <div class="firmware-log" x-ref="firmwareLog" x-show="activeJob" x-cloak>
+            <div class="firmware-log" x-show="activeJob" x-ref="firmwareLog" x-cloak>
+                <div class="firmware-log-line firmware-log-waiting text-muted" x-show="showJobWaitingPlaceholder">Job running — waiting for output...</div>
                 <template x-for="(line, idx) in outputLines" :key="idx">
                     <div class="firmware-log-line" x-text="line"></div>
                 </template>
             </div>
             <div class="firmware-empty-state" x-show="!activeJob">No firmware job has run yet.</div>
+        </div>
+
+        <div class="output-section firmware-log-section">
+            <div class="output-header">
+                <span class="output-name">Serial Monitor</span>
+                <span class="text-sm text-muted" x-text="serialActive ? ('Monitoring ' + serialPort) : monitorPortLabel"></span>
+            </div>
+            <div class="firmware-actions">
+                <select class="form-input form-input-sm firmware-monitor-port" x-model="monitorPort" :disabled="serialActive || running">
+                    <option value="">Select port...</option>
+                    <template x-for="port in candidatePorts" :key="port.address">
+                        <option :value="port.address" x-text="port.address"></option>
+                    </template>
+                </select>
+                <button class="btn btn-sm" @click="startSerialMonitor()" :disabled="!canStartSerial">Start</button>
+                <button class="btn btn-sm" @click="stopSerialMonitor()" :disabled="!serialActive">Stop</button>
+            </div>
+            <div class="firmware-log firmware-serial-log" x-ref="serialLog" x-show="serialOutputLines.length" x-cloak>
+                <template x-for="(line, idx) in serialOutputLines" :key="'serial-' + idx">
+                    <div class="firmware-log-line" x-text="line"></div>
+                </template>
+            </div>
+            <div class="firmware-empty-state" x-show="!serialOutputLines.length">Connect a device over USB and start the monitor to view serial output.</div>
         </div>
     </div>
 
