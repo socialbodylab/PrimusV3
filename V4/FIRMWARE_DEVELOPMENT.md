@@ -1,6 +1,6 @@
 # V4 Firmware Development
 
-Canonical firmware for **both** Primus LED receivers and Radius audio receivers lives under `V4/Arduino/`. Upload profiles are selected in the sender Firmware panel or via the upload scripts below.
+**Historical track.** Canonical firmware for both Primus LED receivers and Radius audio receivers now lives under `V5/Arduino/` (see `V5/FIRMWARE_REFERENCE.md`); the V5 Radius firmware (4.16+) merges this tree's audio/tracing fixes with the V5 lane-port work and adds `PRS` battery/status telemetry. The `V4/Arduino/` tree documented below is kept as a source reference. Upload profiles are selected in the sender Firmware panel or via the upload scripts below.
 
 Packaged PrimusCentral apps bundle this source as a bootstrap fallback. On PrimusCentral,
 the Firmware page can check GitHub releases for `PrimusReceiverFirmware-<version>.zip`

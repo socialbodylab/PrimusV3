@@ -40,6 +40,7 @@ extern IPAddress senderIP;
 extern bool      senderKnown;
 extern bool      wifiConnected;
 extern WiFiUDP   udp;
+bool audioIsPlaying();  // defined in audio.h (same translation unit)
 
 // ── NUS UUIDs ─────────────────────────────────────────────────────────
 #define NUS_SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -629,6 +630,10 @@ void mariusUpdate() {
             break;
 
         case MARIUS_CONNECTING:
+            // NimBLE connect can block up to ~5 s — never let it interrupt
+            // live playback (VS1053 FIFO drains in ~11.6 ms). Stay in
+            // CONNECTING and try again once the track has finished.
+            if (audioIsPlaying()) break;
             if (_mariusConnect()) {
                 _mariusState = MARIUS_CONNECTED;
             } else {

@@ -181,9 +181,11 @@ Any ArtAudioCmd arriving while FTP is running stops the FTP server first; conver
 | Primus | Management reply | `0x8141` | requester **:6454 literal** | ≤256 B | Every `0x8140` request, ACK or NACK |
 | Primus | ShowInfo response | `0x8210` | requester **:6454 literal** | 143 B | On read, or after successful write |
 | Primus | Unified status | `PST` | telemetry target : `portWatch` | 28 B | ~1 Hz + 0–250 ms jitter |
-| Radius | ArtPollReply | `0x2100` | requester : `portDiscovery` | — | On ArtPoll |
-| Radius | Audio status | `0x8302` | sender | — | After every ArtAudioCmd and OSC cue |
-| Radius | Track telemetry | `PTR` / `PFP` | sender : `portWatch` | — | Current filename / rate |
+| Radius | ArtPollReply | `0x2100` | requester : `portDiscovery` | 239 B | On ArtPoll |
+| Radius | Audio status | `0x8302` | sender : `portWatch` | 46 B | After every ArtAudioCmd and OSC cue |
+| Radius | Track telemetry | `PTR` | sender : `portWatch` | 5–69 B | Play/stop/pause edges + 1 Hz heartbeat while playing |
+| Radius | Packet rate | `PFP` | sender : `portWatch` | 7 B | 1 Hz |
+| Radius | Unified status | `PRS` | sender : `portWatch` | 17 B | 1 Hz + MAC jitter, anti-phase to `PTR`/`PFP` (firmware 4.16+) |
 
 ⚠️ **Primus pins all three reply paths to literal `PORT_SHOW_DEFAULT` (6454)** — `ino:1315`, `:1474`, `:1578` — rather than the runtime `portShow`. Move Primus's Show lane via mgmt `0x17` and it listens on the new port but keeps answering on the old one. Radius discovery replies follow `portDiscovery` and do not have this problem.
 
@@ -322,6 +324,53 @@ Sent only when a telemetry target has been configured **and** WiFi is up. The se
 
 ---
 
+## 11b. Radius telemetry packets — `PTR` / `PFP` / `PRS`, to Watch 6455
+
+All three are unicast from `udpFps` to the latched `senderIP` at `portWatch`, sent only when a sender is known and WiFi is up. `senderIP` latches from the first Art-Net packet seen and re-latches whenever an ArtAudioCmd (`0x8300`) or ArtFtpCmd (`0x8301`) arrives from a different address; ArtPoll never re-latches (WiFiUDP cannot distinguish a unicast poll from a broadcast sweep, and a passive discovery tool must not steal the telemetry stream).
+
+### `PTR` — track telemetry (**frozen — do not change**)
+
+Sent on every play/stop/pause/loop transition, plus a 1 Hz heartbeat while playing, plus a stop-edge packet when playback ends on its own. Parsed by `RadiusTelemetryListener` and feeds `has_live_playback()`, so this layout is byte-for-byte frozen.
+
+| Offset | Field | Encoding |
+|---|---|---|
+| 0–2 | magic `'P','T','R'` | ASCII |
+| 3 | playback state | u8 — 0 stopped · 1 playing · 2 paused |
+| 4 | filename length | u8, ≤ 64 |
+| 5… | filename | bytes, **no NUL terminator**; total packet = 5 + length |
+
+### `PFP` — packet rate (**frozen — do not change**)
+
+1 Hz. Same 7-byte shape as the legacy Primus packet; the FPS field is always 0 on Radius.
+
+| Offset | Field | Encoding |
+|---|---|---|
+| 0–2 | magic `'P','F','P'` | ASCII |
+| 3–4 | FPS | u16 BE — **always 0 on Radius** |
+| 5–6 | packet rate | u16 BE, packets/s |
+
+### `PRS` — unified status, 17 B (firmware 4.16+)
+
+1 Hz with MAC-derived boot jitter (`((mac[4]<<8)|mac[5]) % 251` ms) plus a +500 ms phase offset so it lands anti-phase to the `PTR`/`PFP` tick, with a catch-up clamp after stalls (sineTest, WiFi reconnect) so missed packets are never bursted. Deliberately a new magic: `PST` is owned by Primus (reboot heuristics), `PBT` had no flags word.
+
+| Offset | Field | Encoding | Notes |
+|---|---|---|---|
+| 0–2 | magic `'P','R','S'` | ASCII | |
+| 3 | protocol version | u8 = 1 | |
+| 4–5 | sequence | u16 BE | wraps; reboot detection |
+| 6–9 | uptime seconds | u32 BE | `millis() / 1000` |
+| 10–11 | flags | u16 BE | see below |
+| 12 | RSSI | int8 | dBm |
+| 13 | battery power mode | u8 | 0 battery · 1 charging · 2 plugged · 3 switch-off · 4 fault · 5 unavailable |
+| 14–15 | battery millivolts | u16 BE | |
+| 16 | battery percent | u8 | 255 = not available |
+
+**Flags:** `0x0001` wifi connected · `0x0002` static IP · `0x0008` test tone active (fired within the last 2 s — sineTest blocks, so the tick can never observe it live) · `0x0080` battery valid · `0x0100` SD ready · `0x0200` FTP running · `0x0400` audio playing · `0x0800` looping · `0x1000` marius configured · `0x2000` marius connected.
+
+**Battery sampling** (V1 HUZZAH32 only, `battery.h`): exactly one `analogReadMilliVolts(A13) * 2` per second (stock VBAT/2 divider on GPIO35/ADC1) smoothed with a 4:1 EMA. Never multi-sample or `delay()` here — the Primus 8-sample pattern blocks ~16 ms and the VS1053 FIFO drains in ~11.6 ms. LiPo percent curve, validity window (3200–4200 mV) and the 2-strike switch-off detection match Primus `battery.h`. On V2 (S3 Reverse TFT) the battery fields report mode 5 / 0 mV / 255.
+
+---
+
 ## 12. Capability tag — ArtPollReply Node Report, 64-byte hard limit
 
 ```
@@ -342,6 +391,24 @@ Sent only when a telemetry target has been configured **and** WiFi is up. The se
 Firmware **3.12+** moved `F:` to immediately after the prefix. Earlier firmware put it last, where it could be silently truncated away.
 
 With 2 active outputs, a 3-digit base universe, combined mode and a static IP, the full token set exceeds 64 bytes routinely — **truncation is the normal case, not an edge case.**
+
+### Radius Node Report (firmware 4.16+)
+
+```
+#0001 [0042] OK|PVRAD1|B:v1|F:RIHASB|IP:D|V:4.16|MC:1|MP:PuckName
+```
+
+| Order | Token | Meaning |
+|---|---|---|
+| 1 | `#nnnn [pkts] OK\|PVRAD1` | counter + versioned Radius prefix |
+| 2 | `B:` | board profile (`v1` HUZZAH32, `v2` S3 Reverse TFT) |
+| 3 | `F:` | feature flags — `R` rename · `I` IP config · `H` hello/test-tone · `A` audio (implies FTP) · `S` show info · `B` battery telemetry (`PRS`) |
+| 4 | `IP:` | `S` static / `D` DHCP |
+| 5 | `AUD:` `MGMT:` `TELE:` | lane ports — **only emitted for a lane moved off its default** (6456 / 6457 / 6455); absence means "on the documented defaults". The always-on `\|FTP:21` token of 4.1 is gone (FTP port is not configurable) |
+| 6 | `V:` | firmware version string |
+| 7 | `MC:` / `MP:` | Marius configured/connected + puck name — last, because the puck name is the one unbounded field |
+
+Every token uses the same whole-token-or-nothing append guard as Primus: a token that does not fit entirely inside the 64-byte field is dropped, never truncated — a truncated `\|MGMT:645` would parse as a plausible port and black-hole all Setup traffic.
 
 ---
 

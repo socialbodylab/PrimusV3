@@ -41,7 +41,11 @@ Static IP uses full `IP:S:a.b.c.d:g.w.x.y:s.u.b.n` triple (V4 format). Marius `M
 ## Deferred (not in this port)
 
 - Sender ingestion of `0x8302` ArtAudioStatus (PTR remains primary)
-- Battery telemetry on Radius hardware
+- ~~Battery telemetry on Radius hardware~~ **Superseded — firmware 4.16 adds battery
+  telemetry** (`battery.h` in `V5/Arduino/radius_receiver/`, V1 HUZZAH32 A13/VBAT-2
+  divider, 1 sample/s + 4:1 EMA) carried in the 17-byte `PRS` status packet on the
+  Watch lane and advertised as feature flag `B` (`F:RIHASB`). See
+  `V5/FIRMWARE_REFERENCE.md` for the packet layout.
 
 ## Safety
 
