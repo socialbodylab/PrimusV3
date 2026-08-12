@@ -32,6 +32,7 @@ FRONTEND_PATHS = {
 # Why a running Central cannot serve this launcher.
 MISMATCH_WRONG_PRODUCT = "wrong_product"
 MISMATCH_MONITOR_ONLY = "monitor_only"
+MISMATCH_UNKNOWN_PRODUCT = "unknown_product"
 
 
 class CentralPortInUseByCentral(Exception):
@@ -143,13 +144,31 @@ def evaluate_server(runtime, *, need_product=None, needs_output=False):
     """
     runtime = runtime if isinstance(runtime, dict) else {}
     backend_product = str(runtime.get("product") or "").strip().lower()
+    raw_products = runtime.get("products")
+    if isinstance(raw_products, (list, tuple)):
+        backend_products = [
+            str(p).strip().lower() for p in raw_products if str(p or "").strip()
+        ]
+    else:
+        backend_products = [backend_product] if backend_product else []
 
     if need_product:
         need_product = str(need_product).strip().lower()
-        if backend_product and backend_product != need_product:
+        if not backend_products:
+            # A server that will not say what it serves must not be attached
+            # to on faith — an unknown backend failing loudly beats a wrong
+            # backend failing invisibly.
+            return {
+                "reason": MISMATCH_UNKNOWN_PRODUCT,
+                "backend_product": backend_product,
+                "backend_products": backend_products,
+                "need_product": need_product,
+            }
+        if need_product not in backend_products:
             return {
                 "reason": MISMATCH_WRONG_PRODUCT,
                 "backend_product": backend_product,
+                "backend_products": backend_products,
                 "need_product": need_product,
             }
 
@@ -197,6 +216,7 @@ def register_central_server(
     monitor_only=False,
     lan_enabled=False,
     app_version=None,
+    products=None,
 ):
     """Record where the Central is *and* what it is able to do.
 
@@ -213,6 +233,10 @@ def register_central_server(
         "lan_enabled": bool(lan_enabled),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    if products:
+        payload["products"] = [
+            str(p).strip().lower() for p in products if str(p or "").strip()
+        ]
     if app_version:
         payload["app_version"] = str(app_version)
     for path in registry_write_paths():
@@ -490,7 +514,14 @@ def describe_backend(runtime):
         return "a Central server"
     product = str(runtime.get("product") or "").strip().lower()
     version = str(runtime.get("app_version") or "").strip()
+    products = runtime.get("products")
     name = {"primus": "PrimusCentral", "radius": "RadiusCentral"}.get(product)
+    if (
+        isinstance(products, (list, tuple))
+        and "primus" in products
+        and "radius" in products
+    ):
+        name = "Central (Primus + Radius)"
     if name is None:
         name = "a Central server"
     if runtime.get("monitor_only"):

@@ -63,6 +63,15 @@
     </div>
 </div>
 
+<div class="notice-banner" x-data x-show="$store.app.productMismatch" x-cloak>
+    <div class="notice-pill notice-error">
+        <span class="notice-text">
+            This server cannot serve Radius Central (it is not answering with Radius
+            data). Quit the other Central app, then relaunch Radius Central.
+        </span>
+    </div>
+</div>
+
 <div class="main-content" x-data x-init="$store.app.init()">
 
     <div class="sidebar" :class="{ 'sidebar-collapsed': $store.conn.sidebarCollapsed }"
@@ -86,7 +95,8 @@
             </div>
 
         <template x-for="(dev, di) in $store.conn.devices" :key="di">
-            <div class="device-card" :class="{ 'device-connected': dev.connected, 'device-static-ip': dev.ip_mode === 'static' && !dev.ip_config_pending }">
+            <div class="device-card" x-show="dev.is_radius"
+                 :class="{ 'device-connected': dev.connected, 'device-static-ip': dev.ip_mode === 'static' && !dev.ip_config_pending }">
                 <div class="device-header">
                     <template x-if="$store.conn.renamingDevice !== di">
                         <span class="device-name" x-text="dev.name"
@@ -746,7 +756,8 @@
     </div><!-- /.Net Log panel -->
 
     <!-- ---- PANEL: Firmware ---- -->
-    <div class="panel" x-show="$store.app.mode === 'firmware'" x-data="firmwareUploader">
+    <div class="panel" x-show="$store.app.mode === 'firmware'" x-data="firmwareUploader"
+         x-init="multiFamily = true; family = 'radius'">
         <div class="flex justify-between items-center mb-4 firmware-title-row">
             <div>
                 <h2 class="section-title" style="margin:0">Firmware</h2>
@@ -923,7 +934,7 @@
                 <span class="text-sm text-muted" x-text="activeJob?.command?.join(' ') || ''"></span>
             </div>
             <div class="firmware-job-summary" x-show="activeJob" x-text="jobOverrideSummary()" x-cloak></div>
-            <div class="firmware-log" x-show="activeJob" x-cloak>
+            <div class="firmware-log" x-ref="firmwareLog" x-show="activeJob" x-cloak>
                 <template x-for="(line, idx) in outputLines" :key="idx">
                     <div class="firmware-log-line" x-text="line"></div>
                 </template>

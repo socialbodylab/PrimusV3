@@ -38,6 +38,7 @@ from central_launcher import (
     CentralPortInUseByCentral,
     MISMATCH_MONITOR_ONLY,
     MISMATCH_WRONG_PRODUCT,
+    MISMATCH_UNKNOWN_PRODUCT,
     describe_backend,
     frontend_path_for,
     probe_central_server,
@@ -66,11 +67,19 @@ def _ui_has_live_output(server):
     if state is None:
         return False
     source = getattr(state, "playback_source", None)
-    return source in (
+    if source in (
         ControllerState.SOURCE_CONTROLLER,
         ControllerState.SOURCE_MIXER,
         ControllerState.SOURCE_DESIGNER,
-    )
+    ):
+        return True
+    # The unified backend also serves RadiusCentral: audio playing on a
+    # Radius receiver is live output the same way a running cue is. Fail
+    # toward "live" — a broken check must never make a mid-cue quit legal.
+    try:
+        return bool(state.radius_has_live_playback())
+    except Exception:
+        return True
 
 
 def _attach_mismatch_handler(host="127.0.0.1"):
@@ -140,17 +149,45 @@ def _attach_mismatch_handler(host="127.0.0.1"):
                 return "abort"
             return "start"
 
-        if mismatch["reason"] == MISMATCH_WRONG_PRODUCT:
-            backend = mismatch.get("backend_product") or "another product"
+        if mismatch["reason"] in (MISMATCH_WRONG_PRODUCT, MISMATCH_UNKNOWN_PRODUCT):
+            backend = describe_backend(runtime)
+            # Never offer to open our frontend on a backend that cannot serve
+            # it — that is exactly the silent RadiusCentral-on-Primus failure.
+            # The only honest offers are replacing the old server or walking
+            # away.
+            if not supports_remote_stop(runtime):
+                dialog_notify(
+                    app_name,
+                    f"{backend} is already running on port {port} and cannot "
+                    f"serve {app_name}.\n\n"
+                    "That version is too old to be restarted from here. Quit "
+                    f"it from its own icon in the Dock, then open {app_name} "
+                    "again.")
+                return "abort"
             choice = dialog_choose(
                 app_name,
-                f"A {backend} Central server is already running on port {port}. "
-                f"{app_name} cannot share it.\n\n"
-                f"Open the running {backend} interface instead?",
-                ["Open running server", "Cancel"],
-                "Cancel",
+                f"{backend} is already running on port {port} and cannot "
+                f"serve {app_name}.\n\n"
+                "Restart it as a shared Central server that serves both apps?",
+                ["Restart shared server", "Cancel"],
+                "Restart shared server",
             )
-            return "attach" if choice == "Open running server" else "abort"
+            if choice != "Restart shared server":
+                return "abort"
+            ok, message = stop_running_central(host, port)
+            if not ok:
+                dialog_notify(
+                    app_name,
+                    f"Could not stop {backend} on port {port}: {message}\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
+                return "abort"
+            if not wait_for_port_release(host, port):
+                dialog_notify(
+                    app_name,
+                    f"{backend} on port {port} did not shut down in time.\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
+                return "abort"
+            return "start"
         return "abort"
 
     return handler
@@ -516,6 +553,8 @@ def _mixer_controller_loop(state, cue_list):
 def _launcher_display_name():
     if os.environ.get("PRIMUSV3_DEFAULT_FRONTEND") == "devices":
         return "Device Manager"
+    if os.environ.get("PRIMUSV3_DEFAULT_FRONTEND") == "radius":
+        return "RadiusCentral V5"
     return "PrimusCentral V5"
 
 
@@ -562,6 +601,13 @@ def main():
     # DeviceManager only watches; the show frontends drive DMX. Only the latter
     # are incompatible with a monitor-only backend.
     needs_output = not args.monitor_only and str(args.frontend or "").lower() != "devices"
+    # What the launcher needs from a running backend depends on the frontend
+    # it will open: a RadiusCentral window needs a backend that can serve the
+    # radius product (the unified backend advertises both), not merely any
+    # primus server.
+    need_product = (
+        "radius" if str(args.frontend or "").lower() == "radius" else "primus"
+    )
     on_mismatch = _attach_mismatch_handler()
     if not args.replace and try_attach_before_start(
         port=args.port,
@@ -569,7 +615,7 @@ def main():
         no_browser=args.no_browser,
         open_browser=_open_browser,
         launcher_name=_launcher_display_name(),
-        need_product="primus",
+        need_product=need_product,
         needs_output=needs_output,
         on_mismatch=on_mismatch,
     ):
@@ -614,7 +660,7 @@ def main():
                 no_browser=args.no_browser,
                 open_browser=_open_browser,
                 launcher_name=_launcher_display_name(),
-                need_product="primus",
+                need_product=need_product,
                 needs_output=needs_output,
                 on_mismatch=on_mismatch,
             ):
@@ -653,6 +699,9 @@ def main():
         monitor_only=bool(args.monitor_only),
         lan_enabled=bool(args.lan),
         app_version=app_version(),
+        # The unified backend carries the Radius audio/FTP surface, so a
+        # RadiusCentral launcher may attach to it.
+        products=["primus", "radius"],
     )
 
     anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)

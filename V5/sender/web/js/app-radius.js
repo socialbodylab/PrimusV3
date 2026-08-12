@@ -51,15 +51,24 @@ document.addEventListener("alpine:init", () => {
         runtime: null,
         _lifecycleHeartbeat: null,
         product: "radius",
+        productMismatch: false,
+        _stateFetchGeneration: 0,
+
+        get radiusDevices() {
+            // On the shared backend /api/state?product=radius returns the
+            // whole unified device list (indices stay aligned); only the
+            // is_radius entries belong to this app.
+            return (this.state?.devices || []).filter(d => d.is_radius);
+        },
 
         get connectedDeviceSummary() {
-            const devices = this.state?.devices || [];
+            const devices = this.radiusDevices;
             const connected = devices.filter(d => d.connected).length;
             return connected + "/" + devices.length + " nodes";
         },
 
         get audioStatus() {
-            const devices = this.state?.devices || [];
+            const devices = this.radiusDevices;
             const connected = devices.filter(d => d.connected).length;
             const playing = devices.filter(d => d.connected && d.current_track).length;
             return {
@@ -95,8 +104,15 @@ document.addEventListener("alpine:init", () => {
         },
 
         async fetchState() {
+            const generation = ++this._stateFetchGeneration;
             try {
-                this.state = await api("GET", "/api/state");
+                const next = await api("GET", "/api/state?product=radius");
+                if (generation !== this._stateFetchGeneration) return;
+                this.state = next;
+                if (next?.product) this.product = next.product;
+                // A backend that does not answer with the radius shape is the
+                // silent-attach failure: surface it instead of looking healthy.
+                this.productMismatch = !(next && next.product === "radius");
             } catch (e) { /* ignore */ }
         },
 

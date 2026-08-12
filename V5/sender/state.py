@@ -50,7 +50,18 @@ from artnet import (
     sync_show_info_to_device,
     sync_device_name_to_receiver,
     send_audio_cmd,
+    AUDIO_CMD_STOP,
+    AUDIO_CMD_PLAY,
+    AUDIO_CMD_LOOP,
+    AUDIO_CMD_PAUSE,
+    AUDIO_CMD_VOLUME,
     AUDIO_CMD_TEST_TONE,
+    ftp_list_dir,
+    ftp_upload,
+    ftp_download,
+    ftp_rename,
+    ftp_delete,
+    ftp_mkdir,
     ipv4_octets,
 )
 from output_presets import OutputPresetStore, normalize_output_descriptor_template
@@ -980,6 +991,22 @@ def _load_devices():
         return []
 
 
+def _load_legacy_radius_devices():
+    """Device list saved by a standalone RadiusCentral backend, if any.
+
+    The unified backend keeps its device list in the primus state file, but
+    a fleet configured through standalone RadiusCentral lives in the radius
+    state file's own "devices" list. Read-only here — the unified backend
+    never writes that list back.
+    """
+    try:
+        data = show_info_store.read_state_data(show_info_store.radius_state_path())
+    except Exception:
+        return []
+    devices = data.get("devices", []) if isinstance(data, dict) else []
+    return devices if isinstance(devices, list) else []
+
+
 def _save_device_groups(groups):
     try:
         with open(_state_file(), "r") as f:
@@ -1436,12 +1463,13 @@ class ControllerState:
     def restore_devices(self):
         """Restore saved devices on startup (call after FPS listener is ready)."""
         saved = _load_devices()
-        if not saved:
+        radius_saved = _load_legacy_radius_devices()
+        if not saved and not radius_saved:
             return
         from artnet import discover_artnet_nodes
         known_ips = []
         seen_ips = set()
-        for device in saved:
+        for device in list(saved) + list(radius_saved):
             for ip in (device.get("ip"), device.get("static_ip")):
                 if ip and ip not in seen_ips:
                     known_ips.append(ip)
@@ -1510,6 +1538,40 @@ class ControllerState:
                     "outputs": sd.get("outputs"),
                 }, auto_save=False)
                 _apply_saved_show_info(self.devices[result["device_index"]], sd)
+
+        # Devices saved by a standalone RadiusCentral live in the radius
+        # state file; fold them in so the unified backend starts with the
+        # same fleet RadiusCentral already knew about.
+        for sd in radius_saved:
+            ip = sd.get("ip")
+            if not ip or any(d["ip"] == ip for d in self.devices):
+                continue
+            node = node_map.get(ip) or nodes_by_name.get(sd.get("name"))
+            if node:
+                self.add_device_from_node(node, auto_save=False)
+                continue
+            capabilities = dict(sd.get("capabilities") or {})
+            if capabilities.get("device_class") != "radius":
+                capabilities.setdefault("profile", "pvrad1")
+                capabilities["device_class"] = "radius"
+            self.add_device_from_node({
+                "ip": ip,
+                "short_name": sd.get("name", ip),
+                "long_name": "",
+                "num_ports": 0,
+                "universes": [],
+                "hardware_profile": sd.get("hardware_profile", "v1"),
+                "hardware_label": sd.get("hardware_label", "V1 Huzzah32"),
+                "firmware_version": sd.get("firmware_version"),
+                "capabilities": capabilities,
+                "ip_mode": sd.get("ip_mode"),
+                "static_ip": sd.get("static_ip"),
+                "gateway": sd.get("gateway"),
+                "subnet": sd.get("subnet"),
+                "character_name": sd.get("character_name", ""),
+                "performer_name": sd.get("performer_name", ""),
+            }, auto_save=False)
+
         if refreshed:
             _save_devices(self.devices)
 
@@ -1568,16 +1630,26 @@ class ControllerState:
             timeout=3.0,
             interface=interface,
         )
-        online_ips = {node.get("ip") for node in nodes if node.get("ip")}
+        # Only devices whose discovered identity already matches the flash
+        # overrides may receive the override push — the freshly flashed
+        # node reports the new names on its first ArtPollReply. Pushing to
+        # every online device smears one performer's names across the fleet
+        # (the regression restore_show_info_from_xlsx.py exists to repair).
+        override_ips = {
+            node.get("ip")
+            for node in nodes
+            if node.get("ip")
+            and show_info_store.node_matches_firmware_name_overrides(node, overrides)
+        }
         self.refresh_devices_from_nodes(nodes)
 
-        if not has_name_overrides or not online_ips:
+        if not has_name_overrides or not override_ips:
             return
 
         with self.lock:
             for dev in self.devices:
                 ip = dev.get("ip")
-                if not ip or ip not in online_ips:
+                if not ip or ip not in override_ips:
                     continue
                 if device_name:
                     sync_device_name_to_receiver(
@@ -1838,7 +1910,10 @@ class ControllerState:
                     "character_name": _normalize_show_info_value(dev.get("character_name")),
                     "performer_name": _normalize_show_info_value(dev.get("performer_name")),
                     "ip": dev["ip"],
+                    "mac": dev.get("mac"),
+                    "device_uid": dev.get("device_uid") or "ip:{}".format(dev["ip"]),
                     "is_radius": bool(dev.get("is_radius")),
+                    "is_audio": bool(dev.get("is_radius")),
                     "base_universe": dev.get("base_universe", 0),
                     "receive_mode": dev.get("receive_mode", "split"),
                     "hardware_profile": dev.get("hardware_profile", "unknown"),
@@ -1941,6 +2016,17 @@ class ControllerState:
                             d["current_track"] = rx.get("current_track") or ""
                         if "playback_state" in rx:
                             d["playback_state"] = rx.get("playback_state", 0)
+                        # PRS-specific status (Radius firmware 4.16+)
+                        for key in (
+                            "sd_ready",
+                            "ftp_running",
+                            "audio_playing",
+                            "audio_looping",
+                            "marius_configured",
+                            "marius_connected",
+                        ):
+                            if key in rx:
+                                d[key] = rx.get(key)
                     out["devices"].append(d)
                     continue
                 for o in dev.get("outputs", []):
@@ -1954,6 +2040,74 @@ class ControllerState:
             ("api_state_lock_held_ms", (lock_released - lock_acquired) * 1000.0),
         ))
         return out
+
+    def get_radius_json(self):
+        """Radius-shaped view of the unified device list.
+
+        Serves GET /api/state?product=radius on the shared backend. ALL
+        devices are included so array indices stay aligned with the
+        unified list (every frontend addresses devices by index); the
+        RadiusCentral UI hides non-radius entries client-side.
+        """
+        full = self.get_json()
+        devices = []
+        for d in full.get("devices", []):
+            item = {
+                "name": d.get("name"),
+                "character_name": d.get("character_name", ""),
+                "performer_name": d.get("performer_name", ""),
+                "ip": d.get("ip"),
+                "mac": d.get("mac"),
+                "device_uid": d.get("device_uid"),
+                "connected": bool(d.get("connected")),
+                "is_radius": bool(d.get("is_radius")),
+                "is_audio": bool(d.get("is_radius")),
+                "hardware_profile": d.get("hardware_profile"),
+                "hardware_label": d.get("hardware_label"),
+                "firmware_version": d.get("firmware_version"),
+                "live_firmware_version": d.get("live_firmware_version"),
+                "capabilities": d.get("capabilities") or {},
+                "ip_mode": d.get("ip_mode"),
+                "static_ip": d.get("static_ip"),
+                "gateway": d.get("gateway"),
+                "subnet": d.get("subnet"),
+                "ip_config_pending": d.get("ip_config_pending"),
+                "transport_error": d.get("transport_error"),
+                "receiver_online": bool(d.get("receiver_online")),
+                "telemetry_age_seconds": d.get("telemetry_age_seconds"),
+                "battery_mv": d.get("battery_mv"),
+                "battery_pct": d.get("battery_pct"),
+                "battery_power_mode": d.get("battery_power_mode"),
+                "battery_warning": d.get("battery_warning"),
+                "port_show": d.get("port_show"),
+                "port_setup": d.get("port_setup"),
+                "port_watch": d.get("port_watch"),
+                "current_track": d.get("current_track", ""),
+                "playback_state": d.get("playback_state", 0),
+            }
+            if d.get("receiver_fps") is not None:
+                item["fps"] = d.get("receiver_fps")
+            if d.get("receiver_pkt_rate") is not None:
+                item["pkt_rate"] = d.get("receiver_pkt_rate")
+            for key in (
+                "rssi_dbm",
+                "uptime_seconds",
+                "wifi_connected",
+                "sd_ready",
+                "ftp_running",
+                "audio_playing",
+                "audio_looping",
+                "marius_configured",
+                "marius_connected",
+            ):
+                if key in d:
+                    item[key] = d.get(key)
+            devices.append(item)
+        return {
+            "product": "radius",
+            "products": ["primus", "radius"],
+            "devices": devices,
+        }
 
     # ------------------------------------------------------------------
     #  Update from API
@@ -2898,6 +3052,158 @@ class ControllerState:
             dev["sender"].disconnect()
             dev["connected"] = False
 
+    # ------------------------------------------------------------------
+    #  Radius audio / FTP operations (shared backend)
+    #
+    #  The unified backend serves the RadiusCentral frontend from the same
+    #  process as PrimusCentral/DeviceManager, so the Primus device list is
+    #  also the Radius device list (records tagged is_radius). These mirror
+    #  RadiusState's lane-aware wrappers over the artnet helpers.
+    # ------------------------------------------------------------------
+
+    _AUDIO_CMD_MAP = {
+        "stop": AUDIO_CMD_STOP,
+        "play": AUDIO_CMD_PLAY,
+        "loop": AUDIO_CMD_LOOP,
+        "pause": AUDIO_CMD_PAUSE,
+        "volume": AUDIO_CMD_VOLUME,
+    }
+
+    def _radius_device_ref(self, di):
+        with self.lock:
+            if not (0 <= di < len(self.devices)):
+                return None
+            return self.devices[di]
+
+    def send_audio_command(self, di, cmd, filename="", volume=100, duration=0):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            return False
+        code = self._AUDIO_CMD_MAP.get(str(cmd).lower())
+        if code is None:
+            return False
+        send_audio_cmd(
+            dev["ip"], code, filename=filename, volume=volume, duration=duration,
+            source_ip=self.artnet_source_ip, dest_port=device_show_port(dev),
+        )
+        self.performance.increment("audio_commands")
+        return True
+
+    def fire_audio_cue(self, cue):
+        """Fire per-device actions from a sender-side audio cue."""
+        cmd_map = {
+            "play": AUDIO_CMD_PLAY,
+            "loop": AUDIO_CMD_LOOP,
+            "stop": AUDIO_CMD_STOP,
+        }
+        results = {}
+        with self.lock:
+            snapshot = [
+                (d["ip"], d.get("connected", False), d.get("is_radius", False),
+                 device_show_port(d))
+                for d in self.devices
+            ]
+        actions = cue.get("actions") or {}
+        for ip, connected, is_radius, port_show in snapshot:
+            if not is_radius:
+                continue
+            action = actions.get(ip) or {}
+            cmd_str = str(action.get("cmd", "none")).lower()
+            if cmd_str == "none":
+                continue
+            if not connected:
+                results[ip] = {"status": "skipped", "reason": "not connected"}
+                continue
+            cmd_code = cmd_map.get(cmd_str)
+            if cmd_code is None:
+                results[ip] = {"status": "skipped", "reason": f"unsupported cmd {cmd_str}"}
+                continue
+            filename = str(action.get("filename", "")).strip()
+            if cmd_str in ("play", "loop") and not filename:
+                results[ip] = {"status": "error", "reason": "filename required"}
+                continue
+            try:
+                volume = action.get("volume")
+                duration = action.get("duration") or 0
+                kwargs = {"source_ip": self.artnet_source_ip, "dest_port": port_show}
+                kwargs["volume"] = int(volume) if volume is not None else 80
+                if cmd_str in ("play", "loop"):
+                    kwargs["filename"] = filename
+                    kwargs["duration"] = int(duration)
+                send_audio_cmd(ip, cmd_code, **kwargs)
+                results[ip] = {"status": "sent", "reason": None}
+                self.performance.increment("audio_commands")
+            except Exception as exc:
+                results[ip] = {"status": "error", "reason": str(exc)}
+        return results
+
+    def ftp_download(self, di, path):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            raise ValueError("invalid device index")
+        return ftp_download(
+            dev["ip"], path, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
+
+    def ftp_list_dir(self, di, path="/"):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            return []
+        return ftp_list_dir(
+            dev["ip"], path, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
+
+    def ftp_upload(self, di, path, data, progress_callback=None):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            raise ValueError("invalid device index")
+        ftp_upload(dev["ip"], path, data, source_ip=self.artnet_source_ip,
+                   progress_callback=progress_callback,
+                   dest_port=device_setup_port(dev))
+
+    def ftp_rename(self, di, src, dst):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            raise ValueError("invalid device index")
+        ftp_rename(
+            dev["ip"], src, dst, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
+
+    def ftp_delete(self, di, path, is_dir=False):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            raise ValueError("invalid device index")
+        ftp_delete(
+            dev["ip"], path, is_dir=is_dir, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
+
+    def ftp_mkdir(self, di, path):
+        dev = self._radius_device_ref(di)
+        if not dev or not dev.get("ip"):
+            raise ValueError("invalid device index")
+        ftp_mkdir(
+            dev["ip"], path, source_ip=self.artnet_source_ip,
+            dest_port=device_setup_port(dev))
+
+    def radius_has_live_playback(self):
+        """True when any Radius receiver reports audio playing (via PTR)."""
+        if not self.fps_listener:
+            return False
+        with self.lock:
+            ips = [d.get("ip") for d in self.devices if d.get("is_radius")]
+        for ip in ips:
+            if not ip:
+                continue
+            rx = self.fps_listener.get(ip)
+            if not rx:
+                continue
+            try:
+                if int(rx.get("playback_state") or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+
     def add_device_from_node(self, node_info, auto_save=True):
         with self.lock:
             idx = self._find_existing_device_index_unlocked(node_info)
@@ -2977,6 +3283,10 @@ class ControllerState:
                     "character_name": character_name,
                     "performer_name": performer_name,
                     "ip": node_info["ip"],
+                    "mac": node_info.get("mac"),
+                    "device_uid": node_info.get("device_uid")
+                    or node_info.get("mac")
+                    or "ip:{}".format(node_info["ip"]),
                     "connected": False,
                     "is_radius": True,
                     "transport_error": None,
@@ -3023,6 +3333,10 @@ class ControllerState:
                 "character_name": character_name,
                 "performer_name": performer_name,
                 "ip": node_info["ip"],
+                "mac": node_info.get("mac"),
+                "device_uid": node_info.get("device_uid")
+                or node_info.get("mac")
+                or "ip:{}".format(node_info["ip"]),
                 "base_universe": base_u,
                 "receive_mode": receive_mode,
                 "connected": False,
@@ -3154,6 +3468,11 @@ class ControllerState:
             _promote_device_to_radius(dev)
         preferred = _preferred_device_name(dev, node_info)
         dev["capabilities"] = capabilities
+        if node_info.get("mac"):
+            dev["mac"] = node_info["mac"]
+            dev["device_uid"] = node_info["mac"]
+        elif not dev.get("device_uid"):
+            dev["device_uid"] = "ip:{}".format(dev.get("ip"))
         dev["hardware_profile"] = node_info.get(
             "hardware_profile", capabilities.get("hardware_profile", "unknown"))
         dev["hardware_label"] = node_info.get(

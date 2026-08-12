@@ -92,6 +92,20 @@ FPS_LISTEN_PORT = PORT_WATCH  # alias: Watch lane listen default
 FPS_MAGIC = b"PFP"
 BATTERY_MAGIC = b"PBT"
 TRACK_MAGIC = b"PTR"
+RADIUS_STATUS_MAGIC = b"PRS"
+
+# PRS status flag bits (Radius firmware 4.16+). Bits shared with the Primus
+# PST flag word keep the same positions; 0x0100+ are Radius-specific.
+RADIUS_STATUS_FLAG_WIFI = 0x0001
+RADIUS_STATUS_FLAG_STATIC_IP = 0x0002
+RADIUS_STATUS_FLAG_TEST_ACTIVE = 0x0008
+RADIUS_STATUS_FLAG_BATTERY_VALID = 0x0080
+RADIUS_STATUS_FLAG_SD_READY = 0x0100
+RADIUS_STATUS_FLAG_FTP_RUNNING = 0x0200
+RADIUS_STATUS_FLAG_AUDIO_PLAYING = 0x0400
+RADIUS_STATUS_FLAG_AUDIO_LOOPING = 0x0800
+RADIUS_STATUS_FLAG_MARIUS_CONFIGURED = 0x1000
+RADIUS_STATUS_FLAG_MARIUS_CONNECTED = 0x2000
 
 BATTERY_POWER_MODE_BATTERY = 0
 BATTERY_POWER_MODE_CHARGING = 1
@@ -312,6 +326,47 @@ def parse_pfp_packet(raw):
     return {
         "fps": (raw[3] << 8) | raw[4],
         "pkt_rate": (raw[5] << 8) | raw[6],
+    }
+
+
+def parse_prs_packet(raw):
+    """Parse a 17-byte PRS Radius status packet (firmware 4.16+).
+
+    Layout: 'PRS', version=1, sequence u16 BE, uptime u32 BE, flags u16 BE,
+    RSSI int8, battery power mode u8, battery mV u16 BE, battery pct
+    (255 = unavailable). Returns dict or None.
+    """
+    if len(raw) < 17 or raw[:3] != RADIUS_STATUS_MAGIC:
+        return None
+    if raw[3] != 1:
+        return None
+    flags = (raw[10] << 8) | raw[11]
+    rssi = raw[12] - 256 if raw[12] > 127 else raw[12]
+    power_mode = raw[13]
+    battery_mv = (raw[14] << 8) | raw[15]
+    battery_pct = raw[16]
+    battery_valid = bool(flags & RADIUS_STATUS_FLAG_BATTERY_VALID)
+    mode_label = BATTERY_POWER_MODE_LABELS.get(power_mode, "unavailable")
+    return {
+        "sequence": (raw[4] << 8) | raw[5],
+        "uptime_seconds": (raw[6] << 24) | (raw[7] << 16) | (raw[8] << 8) | raw[9],
+        "status_flags": flags,
+        "rssi_dbm": rssi,
+        "wifi_connected": bool(flags & RADIUS_STATUS_FLAG_WIFI),
+        "static_ip_active": bool(flags & RADIUS_STATUS_FLAG_STATIC_IP),
+        "test_mode_active": bool(flags & RADIUS_STATUS_FLAG_TEST_ACTIVE),
+        "sd_ready": bool(flags & RADIUS_STATUS_FLAG_SD_READY),
+        "ftp_running": bool(flags & RADIUS_STATUS_FLAG_FTP_RUNNING),
+        "audio_playing": bool(flags & RADIUS_STATUS_FLAG_AUDIO_PLAYING),
+        "audio_looping": bool(flags & RADIUS_STATUS_FLAG_AUDIO_LOOPING),
+        "marius_configured": bool(flags & RADIUS_STATUS_FLAG_MARIUS_CONFIGURED),
+        "marius_connected": bool(flags & RADIUS_STATUS_FLAG_MARIUS_CONNECTED),
+        "battery_power_mode": mode_label,
+        "battery_mv": battery_mv if battery_valid and battery_mv > 0 else None,
+        "battery_pct": battery_pct if battery_valid and battery_pct <= 100 else None,
+        "battery_warning": (
+            BATTERY_WARNING_MESSAGES.get(mode_label) if battery_valid else None
+        ),
     }
 
 
@@ -543,6 +598,12 @@ class PrimusTelemetryListener:
             if self._fresh(entry, "_pbt_ts", now):
                 public.update(entry.get("_pbt_public", {}))
 
+        # PRS is the Radius status packet; Radius nodes never send PST, so
+        # there is no precedence conflict — it simply layers battery/flags
+        # on top of whatever PTR/PFP provided.
+        if self._fresh(entry, "_prs_ts", now):
+            public.update(entry.get("_prs_public", {}))
+
         if self._fresh(entry, "_ptr_ts", now):
             public["playback_state"] = entry.get("_ptr_state", 0)
             public["current_track"] = entry.get("_ptr_track", "")
@@ -730,6 +791,12 @@ class PrimusTelemetryListener:
             entry["_ptr_track"] = current_track
             self._touch_entry(entry, "_ptr_ts", timestamp)
 
+    def _record_prs(self, ip, parsed, timestamp):
+        with self.lock:
+            entry = self.data.setdefault(ip, {})
+            entry["_prs_public"] = dict(parsed)
+            self._touch_entry(entry, "_prs_ts", timestamp)
+
     def _handle_packet(self, raw, ip):
         timestamp = self._now()
         if len(raw) >= 3 and raw[:3] == STATUS_MAGIC:
@@ -755,6 +822,13 @@ class PrimusTelemetryListener:
             name_len = raw[4]
             name = raw[5:5 + name_len].decode("utf-8", errors="replace") if name_len else ""
             self._record_ptr(ip, state, name, timestamp)
+            return
+        if len(raw) >= 3 and raw[:3] == RADIUS_STATUS_MAGIC:
+            parsed = parse_prs_packet(raw)
+            if parsed is None:
+                self._record_malformed_packet(ip)
+                return
+            self._record_prs(ip, parsed, timestamp)
             return
         if len(raw) >= 3 and raw[:3] == FPS_MAGIC:
             parsed = parse_pfp_packet(raw)
@@ -856,6 +930,14 @@ class RadiusTelemetryListener:
                     entry = self.data.setdefault(addr[0], {})
                     entry.update({"fps": fps, "pkt_rate": pkt, "ts": time.monotonic()})
                 netlog.log_fps(addr[0], fps, pkt)
+                continue
+            if len(raw) >= 17 and raw[:3] == RADIUS_STATUS_MAGIC:
+                parsed = parse_prs_packet(raw)
+                if parsed:
+                    with self.lock:
+                        entry = self.data.setdefault(addr[0], {})
+                        entry.update(parsed)
+                        entry["ts"] = time.monotonic()
 
     def get(self, ip):
         with self.lock:
@@ -1013,8 +1095,20 @@ def _discover_artnet_nodes_unlocked(known_ips=None, timeout=3.5, interface=None)
             if capabilities.get("ip_mode") == "static" and not capabilities.get("static_ip"):
                 capabilities["static_ip"] = ip
 
+            # ArtPollReply carries the node MAC at bytes 201-206. It is the
+            # only identity that survives DHCP renewals and renames, so it
+            # becomes the stable device_uid (with an ip: fallback for
+            # manually-added or truncated-reply nodes).
+            mac = None
+            if len(raw) >= 207:
+                mac_bytes = raw[201:207]
+                if any(mac_bytes):
+                    mac = ":".join(f"{b:02x}" for b in mac_bytes)
+
             nodes[ip] = {
                 "ip": ip,
+                "mac": mac,
+                "device_uid": mac or f"ip:{ip}",
                 "short_name": short_name,
                 "long_name": long_name,
                 "node_report": node_report,
@@ -1134,6 +1228,7 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
         "output_config": False,
         "audio": False,
         "ftp": False,
+        "battery": False,
     }
     parts = _parse_radius_capability_parts(node_report)
     if not parts:
@@ -1163,6 +1258,7 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
         caps["audio"] = "A" in features
         caps["ftp"] = caps["ftp"] or "F" in features or "A" in features
         caps["show_info"] = "S" in features
+        caps["battery"] = "B" in features
     return caps
 
 
@@ -2451,29 +2547,46 @@ def list_audio_files(ip, source_ip=None, dest_port=None):
 import contextlib as _contextlib
 import io as _io
 
+# One FTP session per device at a time. The receiver runs a single FTP
+# server that is started/stopped by ArtFtpCmd around each session, so two
+# concurrent sessions to the same node tear each other down: whichever
+# finishes first sends the stop command while the other is mid-transfer.
+_ftp_ip_locks = {}
+_ftp_ip_locks_guard = threading.Lock()
+
+
+def _ftp_lock_for(ip):
+    with _ftp_ip_locks_guard:
+        lock = _ftp_ip_locks.get(ip)
+        if lock is None:
+            lock = threading.Lock()
+            _ftp_ip_locks[ip] = lock
+        return lock
+
 
 @_contextlib.contextmanager
 def _ftp_session(ip, source_ip=None, timeout=8.0, dest_port=None):
     import ftplib
-    send_ftp_cmd(ip, start=True, source_ip=source_ip, dest_port=dest_port)
-    time.sleep(0.5)
-    ftp = ftplib.FTP()
-    try:
-        ftp.connect(ip, FTP_PORT, timeout=timeout)
-        ftp.login(FTP_USER, FTP_PASSWORD)
-        yield ftp
+    with _ftp_lock_for(ip):
+        send_ftp_cmd(ip, start=True, source_ip=source_ip, dest_port=dest_port)
+        time.sleep(0.5)
+        ftp = ftplib.FTP()
         try:
-            ftp.quit()
+            ftp.connect(ip, FTP_PORT, timeout=timeout)
+            ftp.login(FTP_USER, FTP_PASSWORD)
+            yield ftp
+            try:
+                ftp.quit()
+            except Exception:
+                pass
         except Exception:
-            pass
-    except Exception:
-        try:
-            ftp.close()
-        except Exception:
-            pass
-        raise
-    finally:
-        send_ftp_cmd(ip, start=False, source_ip=source_ip, dest_port=dest_port)
+            try:
+                ftp.close()
+            except Exception:
+                pass
+            raise
+        finally:
+            send_ftp_cmd(ip, start=False, source_ip=source_ip, dest_port=dest_port)
 
 
 def _parse_list_line(line):

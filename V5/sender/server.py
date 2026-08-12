@@ -32,6 +32,8 @@ import mixer
 import sharing
 from artnet import (
     discover_artnet_nodes,
+    device_show_port,
+    device_setup_port,
     ftp_list_dir,
     ftp_upload,
     is_compatible_node,
@@ -142,6 +144,21 @@ class Handler(BaseHTTPRequestHandler):
     def _device_state(self):
         return self._primus_state() or self._radius_state()
 
+    def _backend_products(self):
+        """Products this server can serve.
+
+        A ControllerState with the Radius audio/FTP surface makes the
+        unified backend a valid host for the RadiusCentral frontend, so it
+        advertises both products; a standalone RadiusState backend stays
+        radius-only.
+        """
+        products = [sender_product()]
+        primus = self._primus_state()
+        if primus is not None and hasattr(primus, "send_audio_command"):
+            if "radius" not in products:
+                products.append("radius")
+        return products
+
     def _osc_service(self):
         return getattr(self.server, "osc_service", None)
 
@@ -245,6 +262,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/runtime":
             self._json_response({
                 "product": sender_product(),
+                "products": self._backend_products(),
                 "app_version": app_version(),
                 "ui_lifecycle": bool(getattr(self.server, "ui_lifecycle_enabled", False)),
                 "frontends": {
@@ -277,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
                 "host": self.server.server_address[0],
                 "port": self.server.server_address[1],
                 "product": sender_product(),
+                "products": self._backend_products(),
                 "app_version": app_version(),
                 "monitor_only": bool(
                     getattr(self._device_state(), "monitor_only", False)),
@@ -290,7 +309,16 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
         if path == "/api/state":
-            self._json_response(self._device_state().get_json())
+            state = self._device_state()
+            wanted = (self._query_params().get("product") or "").strip().lower()
+            if wanted == "radius" and hasattr(state, "get_radius_json"):
+                # Unified backend: the RadiusCentral frontend asks for the
+                # radius-shaped view of the shared device list. Indices stay
+                # aligned with the unified list. A standalone RadiusState
+                # (no get_radius_json) already returns the radius shape.
+                self._json_response(state.get_radius_json())
+                return
+            self._json_response(state.get_json())
             return
         if path == "/api/device_full_config":
             state = self._primus_management_state()
@@ -507,9 +535,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 raw = self._device_state().ftp_download(di, "/cues.json")
-                self._json_response(json.loads(raw.decode()))
             except Exception as exc:
-                self._json_error(500, str(exc))
+                # A node with no cue map yet is a normal state, not an error:
+                # the editor should open an empty table. Only the FTP session
+                # itself failing outright is worth surfacing.
+                message = str(exc)
+                if "550" in message or "no such file" in message.lower():
+                    self._json_response({})
+                    return
+                self._json_error(500, message)
+                return
+            try:
+                self._json_response(json.loads(raw.decode()))
+            except Exception:
+                # Corrupt cue map on the SD card: let the operator start over
+                # rather than blocking the editor behind a 500.
+                self._json_response({})
             return
         if path == "/api/audio_sync/status":
             with _sync_lock:
@@ -1766,12 +1807,17 @@ def _run_sync_job(job, state, cues_data):
         source_ip = state.artnet_source_ip
 
         with state.lock:
+            # Lane-aware ports resolved per device: a node whose Show or
+            # Setup lane has been moved off the legacy defaults would
+            # silently ignore commands sent to 6454.
             devices_snap = [
                 {
                     "ip": d["ip"],
                     "name": d.get("name", d["ip"]),
                     "is_radius": d.get("is_radius", False),
                     "connected": d.get("connected", False),
+                    "port_show": device_show_port(d, is_radius=True),
+                    "port_setup": device_setup_port(d, is_radius=True),
                 }
                 for d in state.devices
             ]
@@ -1785,7 +1831,8 @@ def _run_sync_job(job, state, cues_data):
         for dev in radius_devs:
             if dev["connected"]:
                 try:
-                    send_audio_cmd(dev["ip"], AUDIO_CMD_STOP, source_ip=source_ip)
+                    send_audio_cmd(dev["ip"], AUDIO_CMD_STOP, source_ip=source_ip,
+                                   dest_port=dev["port_show"])
                 except Exception:
                     pass
         time.sleep(0.3)
@@ -1797,6 +1844,7 @@ def _run_sync_job(job, state, cues_data):
             ip = dev["ip"]
             dev_name = dev["name"]
             connected = dev["connected"]
+            port_setup = dev["port_setup"]
 
             if not connected:
                 with _sync_lock:
@@ -1833,7 +1881,8 @@ def _run_sync_job(job, state, cues_data):
                 continue
 
             try:
-                entries = ftp_list_dir(ip, "/", source_ip=source_ip)
+                entries = ftp_list_dir(ip, "/", source_ip=source_ip,
+                                       dest_port=port_setup)
                 on_device = {e["name"] for e in entries if not e["is_dir"]}
             except Exception as exc:
                 for fname in sorted(needed):
@@ -1896,7 +1945,8 @@ def _run_sync_job(job, state, cues_data):
 
                 try:
                     ftp_upload(ip, f"/{fname}", data, source_ip=source_ip,
-                               progress_callback=_progress)
+                               progress_callback=_progress,
+                               dest_port=port_setup)
                     item["bytes_sent"] = len(data)
                     item["status"] = "done"
                 except Exception as exc:
