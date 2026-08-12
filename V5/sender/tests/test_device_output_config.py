@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ SENDER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SENDER_DIR not in sys.path:
     sys.path.insert(0, SENDER_DIR)
 
+import state as state_module
 from state import ControllerState
 
 
@@ -22,12 +24,34 @@ CAPABILITIES = {
     "output_config": True,
 }
 
+# RFC 5737 TEST-NET-1 addresses: never assigned to real receivers, so a
+# stray unmocked send can never reach (or depend on) fleet hardware.
+DEVICE_IP = "192.0.2.163"
+DEVICE_IP_B = "192.0.2.164"
+
 
 class DeviceOutputConfigTests(unittest.TestCase):
+    def setUp(self):
+        # Keep all state reads/writes inside a scratch dir; with real fleet
+        # IPs these tests rewrote the real .primus_state.json show-info map.
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        state_path = os.path.join(scratch.name, ".primus_state.json")
+        radius_path = os.path.join(scratch.name, ".radius_state.json")
+        for target in (
+            patch.object(state_module, "_state_file", return_value=state_path),
+            patch.object(state_module.show_info_store, "primus_state_path",
+                         return_value=state_path),
+            patch.object(state_module.show_info_store, "radius_state_path",
+                         return_value=radius_path),
+        ):
+            target.start()
+            self.addCleanup(target.stop)
+
     def make_state(self):
         state = ControllerState(None)
         state.add_device_from_node({
-            "ip": "192.168.8.163",
+            "ip": DEVICE_IP,
             "short_name": "A12",
             "capabilities": CAPABILITIES,
             "outputs": [
@@ -41,7 +65,7 @@ class DeviceOutputConfigTests(unittest.TestCase):
     def make_state_with_off_a0(self):
         state = ControllerState(None)
         state.add_device_from_node({
-            "ip": "192.168.8.164",
+            "ip": DEVICE_IP_B,
             "short_name": "A13",
             "capabilities": CAPABILITIES,
             "outputs": [
@@ -53,8 +77,10 @@ class DeviceOutputConfigTests(unittest.TestCase):
         return state
 
     @patch("state._save_devices")
+    @patch("state.send_virtual_resolution")
     @patch("state.send_output_config")
-    def test_set_device_output_type_updates_device_and_sends_config(self, send_output_config, save_devices):
+    def test_set_device_output_type_updates_device_and_sends_config(
+            self, send_output_config, send_virtual_resolution, save_devices):
         state = self.make_state()
         dev = state.devices[0]
         dev["sender"].connected = True
@@ -71,12 +97,14 @@ class DeviceOutputConfigTests(unittest.TestCase):
         send_output_config.assert_called_once()
         args = send_output_config.call_args[0]
         self.assertEqual(args[1], ["short_strip", "long_strip"])
+        send_virtual_resolution.assert_called_once()
         save_devices.assert_called_once()
 
     @patch("state._save_devices")
+    @patch("state.send_virtual_resolution")
     @patch("state.send_output_config")
     def test_set_output_targets_a1_when_a0_is_off(
-            self, send_output_config, save_devices):
+            self, send_output_config, send_virtual_resolution, save_devices):
         state = self.make_state_with_off_a0()
         dev = state.devices[0]
         dev["sender"].connected = True
@@ -95,8 +123,10 @@ class DeviceOutputConfigTests(unittest.TestCase):
         )
 
     @patch("state._save_devices")
+    @patch("state.send_virtual_resolution")
     @patch("state.send_output_config", side_effect=OSError(32, "Broken pipe"))
-    def test_set_device_output_type_reverts_on_send_failure(self, send_output_config, save_devices):
+    def test_set_device_output_type_reverts_on_send_failure(
+            self, send_output_config, send_virtual_resolution, save_devices):
         state = self.make_state()
         dev = state.devices[0]
         dev["connected"] = True

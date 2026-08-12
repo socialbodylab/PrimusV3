@@ -62,8 +62,13 @@ class CentralLauncherTests(unittest.TestCase):
         self.assertEqual(found[0], 8099)
         self.assertEqual(found[1]["product"], "radius")
 
+    # request_ui_focus/reserve_ui_session must be mocked: unmocked they reach
+    # whatever real Central happens to be listening on 127.0.0.1:8080, and a
+    # successful real focus means open_browser is never called.
+    @patch("central_launcher.request_ui_focus", return_value=False)
+    @patch("central_launcher.reserve_ui_session")
     @patch("central_launcher.find_running_central_server")
-    def test_try_attach_before_start_opens_view(self, mock_find):
+    def test_try_attach_before_start_opens_view(self, mock_find, mock_reserve, mock_focus):
         mock_find.return_value = (8080, {"product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
         opened = []
 
@@ -154,10 +159,11 @@ class AttachGuardTests(unittest.TestCase):
             on_mismatch=lambda mismatch, port, runtime: "attach")
         self.assertTrue(attached)
 
+    @patch("central_launcher.request_ui_focus", return_value=False)
     @patch("central_launcher.notify")
     @patch("central_launcher.reserve_ui_session")
     @patch("central_launcher.find_running_central_server")
-    def test_unraisable_window_notifies_the_user(self, mock_find, mock_reserve, mock_notify):
+    def test_unraisable_window_notifies_the_user(self, mock_find, mock_reserve, mock_notify, mock_focus):
         """The original silent-launch bug: attached fine, but showed nothing."""
         mock_find.return_value = (8080, {
             "product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
@@ -172,10 +178,11 @@ class AttachGuardTests(unittest.TestCase):
         mock_notify.assert_called_once()
         self.assertIn("8080", mock_notify.call_args[0][1])
 
+    @patch("central_launcher.request_ui_focus", return_value=False)
     @patch("central_launcher.notify")
     @patch("central_launcher.reserve_ui_session")
     @patch("central_launcher.find_running_central_server")
-    def test_successful_raise_does_not_notify(self, mock_find, mock_reserve, mock_notify):
+    def test_successful_raise_does_not_notify(self, mock_find, mock_reserve, mock_notify, mock_focus):
         mock_find.return_value = (8080, {
             "product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
         central_launcher.try_attach_before_start(
