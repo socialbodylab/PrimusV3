@@ -931,6 +931,8 @@ def _save_devices(devices):
         saved_devices.append({
             "ip": d["ip"],
             "name": d["name"],
+            "mac": d.get("mac"),
+            "device_uid": d.get("device_uid"),
             "is_radius": bool(d.get("is_radius")),
             "hardware_profile": d.get("hardware_profile", "unknown"),
             "hardware_label": d.get("hardware_label", "Unknown hardware"),
@@ -1505,6 +1507,8 @@ class ControllerState:
                 # Add offline device with saved name
                 result = self.add_device_from_node({
                     "ip": ip,
+                    "mac": sd.get("mac"),
+                    "device_uid": sd.get("device_uid"),
                     "short_name": sd.get("name", ip),
                     "long_name": "",
                     "num_ports": 0,
@@ -1556,6 +1560,8 @@ class ControllerState:
                 capabilities["device_class"] = "radius"
             self.add_device_from_node({
                 "ip": ip,
+                "mac": sd.get("mac"),
+                "device_uid": sd.get("device_uid"),
                 "short_name": sd.get("name", ip),
                 "long_name": "",
                 "num_ports": 0,
