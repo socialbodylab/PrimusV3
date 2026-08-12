@@ -52,6 +52,20 @@ static void _applyVolume(uint8_t volume) {
   _musicMaker.setVolume(vs1053vol, vs1053vol);
 }
 
+static void _cancelPlayback() {
+  // Aborting a WAV mid-stream leaves the decoder holding stale stream
+  // state (stopPlaying only sets SM_CANCEL and walks away) — the next
+  // track then decodes at the wrong rate and plays audibly slow. A soft
+  // reset clears the decoder; ~100 ms, and only ever runs on an explicit
+  // track switch or stop, never in the streaming path. Natural track end
+  // consumes the stream fully and needs none of this.
+  _musicMaker.stopPlaying();
+  delay(5);
+  _musicMaker.softReset();
+  _musicMaker.setVolume(254, 254);  // reset leaves the volume register loud
+  _lastAppliedVolume = 255;         // force reapply on the next play
+}
+
 void audioInit() {
   Serial.println("[Audio] Music Maker FeatherWing (VS1053)");
 
@@ -100,9 +114,8 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
     }
   }
 
-  if (_musicMaker.playingMusic) {
-    _musicMaker.stopPlaying();
-    delay(20);
+  if (_musicMaker.playingMusic || _audioPaused) {
+    _cancelPlayback();
   }
   _audioPaused = false;
 
@@ -131,7 +144,7 @@ bool audioPlay(const char* filename, uint8_t volume, uint16_t duration = 0) {
 }
 
 void audioStop() {
-  if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  if (_musicMaker.playingMusic || _audioPaused) _cancelPlayback();
   _audioPaused = false;
   _musicMaker.setVolume(254, 254);
   _audioCurrentFile[0] = '\0';

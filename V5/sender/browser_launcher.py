@@ -64,13 +64,13 @@ class DedicatedBrowser:
         if attach:
             if self.focus():
                 return "raised existing browser window"
-            if self.has_tracked_browser():
-                return "using existing browser window"
-            # No window of ours exists — attach means "make this frontend
-            # visible", so open one rather than reporting failure. (A
-            # windowed launcher that attaches without surfacing a window
-            # looks exactly like a crashed app.)
-            result = self.launch(url, cleanup_stale=True)
+            # Attach means "make this frontend visible": if we cannot focus
+            # a window, open one — on a NEVER-USED profile subdir. Reusing
+            # the tracked (possibly still locked) profile makes Chromium
+            # hand the request to the running instance, which drops the
+            # --app URL and opens a blank window instead of the interface.
+            # A fresh data dir cannot hand off.
+            result = self.launch(url, cleanup_stale=False, fresh_profile=True)
             if result:
                 return result
             webbrowser.open_new(url)
@@ -98,13 +98,14 @@ class DedicatedBrowser:
             return True
         return self._activate_process_with_profile_root(profile_root)
 
-    def launch(self, url, cleanup_stale=True):
+    def launch(self, url, cleanup_stale=True, fresh_profile=False):
         candidates = self._chromium_candidates()
         if not candidates:
             return None
 
         profile_root = self.profile_root()
-        profile_dir = self._resolve_profile_dir(profile_root, cleanup_stale)
+        profile_dir = self._resolve_profile_dir(
+            profile_root, cleanup_stale, fresh_profile=fresh_profile)
         for label, executable in candidates:
             args = [
                 executable,
@@ -141,8 +142,13 @@ class DedicatedBrowser:
         profile_name = f"profile-{os.getpid()}-{int(time.time() * 1000)}"
         return os.path.join(profile_root, profile_name)
 
-    def _resolve_profile_dir(self, profile_root, cleanup_stale):
-        if cleanup_stale:
+    def _resolve_profile_dir(self, profile_root, cleanup_stale, fresh_profile=False):
+        if fresh_profile:
+            # A brand-new data dir can never trigger Chromium's
+            # single-instance handoff (which drops the --app URL).
+            os.makedirs(profile_root, exist_ok=True)
+            profile_dir = self._new_profile_dir(profile_root)
+        elif cleanup_stale:
             self._remove_profiles(profile_root)
             profile_dir = self._new_profile_dir(profile_root)
         else:
