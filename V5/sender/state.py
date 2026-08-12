@@ -1137,6 +1137,9 @@ def _promote_device_to_radius(dev):
     dev.pop("receive_mode", None)
     dev.setdefault("current_track", "")
     dev.setdefault("playback_state", 0)
+    # Radius connected-by-default: the flag gates one-shot audio commands,
+    # not standing DMX (see add_device_from_node's radius branch).
+    dev["connected"] = True
 
 
 def _apply_network_capabilities_to_device(dev, capabilities, fallback_ip=None):
@@ -1503,9 +1506,18 @@ class ControllerState:
                 _apply_persisted_show_info(dev, node)
                 if node.get("ip") != ip:
                     refreshed = True
-            else:
-                # Add offline device with saved name
-                result = self.add_device_from_node({
+                continue
+            # Add offline device with saved name. A saved radius record must
+            # restore as radius even when its saved capabilities are missing
+            # — classifying it by name would give it an ArtNetSender and
+            # stream DMX keepalives at an audio node once connected.
+            saved_caps = sd.get("capabilities")
+            if sd.get("is_radius"):
+                saved_caps = dict(saved_caps or {})
+                if saved_caps.get("device_class") != "radius":
+                    saved_caps.setdefault("profile", "pvrad1")
+                    saved_caps["device_class"] = "radius"
+            result = self.add_device_from_node({
                     "ip": ip,
                     "mac": sd.get("mac"),
                     "device_uid": sd.get("device_uid"),
@@ -1516,7 +1528,7 @@ class ControllerState:
                     "hardware_profile": sd.get("hardware_profile", "unknown"),
                     "hardware_label": sd.get("hardware_label", "Unknown hardware"),
                     "firmware_version": sd.get("firmware_version"),
-                    "capabilities": sd.get("capabilities"),
+                    "capabilities": saved_caps,
                     "ip_mode": sd.get("ip_mode"),
                     "static_ip": sd.get("static_ip"),
                     "gateway": sd.get("gateway"),
@@ -1540,8 +1552,8 @@ class ControllerState:
                     "character_name": sd.get("character_name", ""),
                     "performer_name": sd.get("performer_name", ""),
                     "outputs": sd.get("outputs"),
-                }, auto_save=False)
-                _apply_saved_show_info(self.devices[result["device_index"]], sd)
+            }, auto_save=False)
+            _apply_saved_show_info(self.devices[result["device_index"]], sd)
 
         # Devices saved by a standalone RadiusCentral live in the radius
         # state file; fold them in so the unified backend starts with the
@@ -1904,7 +1916,9 @@ class ControllerState:
                 "look_output_types": LOOK_OUTPUT_TYPES,
                 "look": look,
                 "devices": [],
-                "device_groups": self.device_groups,
+                # Copy: json.dumps runs outside the lock, and handing out the
+                # live list lets a concurrent group save resize it mid-encode.
+                "device_groups": list(self.device_groups),
                 "playback_source": self.playback_source,
                 "playback": self._playback_status_unlocked(),
             }
@@ -3302,7 +3316,13 @@ class ControllerState:
                     "device_uid": node_info.get("device_uid")
                     or node_info.get("mac")
                     or "ip:{}".format(node_info["ip"]),
-                    "connected": False,
+                    # Radius devices default to connected: for them the flag
+                    # gates one-shot audio commands (cue firing, sync), not a
+                    # standing DMX stream, so there is nothing to "arm" and a
+                    # default-off flag just makes audio cues silently no-op
+                    # after every restart. Disconnect remains available to
+                    # exclude a device from cues.
+                    "connected": True,
                     "is_radius": True,
                     "transport_error": None,
                     "capabilities": capabilities,
@@ -3585,6 +3605,10 @@ class ControllerState:
                     dev["sender"].blackout(info)
                     dev["sender"].disconnect()
                 self.devices.pop(di)
+                # Drop accumulated telemetry so a re-added device at the
+                # same IP starts with clean loss/reboot diagnostics.
+                if self.fps_listener is not None and hasattr(self.fps_listener, "forget"):
+                    self.fps_listener.forget(dev.get("ip"))
                 _save_devices(self.devices)
                 return True
         return False
@@ -4140,7 +4164,11 @@ class ControllerState:
                     info = _device_blackout_info(dev)
                     dev["sender"].blackout(info)
                     dev["sender"].disconnect()
-                    dev["connected"] = False
+                # Always clear the flag — a source-IP change disconnects the
+                # sender behind our back, and leaving dev["connected"] True
+                # here let the next tick silently re-arm DMX right after the
+                # operator hit Disconnect All.
+                dev["connected"] = False
 
     # ------------------------------------------------------------------
     #  Device groups
@@ -4210,10 +4238,17 @@ class ControllerState:
             if not status["ok"]:
                 return False
             dev = self.devices[di]
-            if not dev.get("connected") and not self.monitor_only:
-                return False
+            # Identify must work on unconnected devices — monitoring is
+            # passive by default now, and locating a device physically is
+            # exactly when it isn't connected yet. Open a transient
+            # connection for the flash window; tick() releases it (with an
+            # off frame) when the window ends.
+            was_connected = bool(dev.get("connected"))
             if not self._ensure_sender_connected_unlocked(dev):
                 return False
+            if not was_connected:
+                dev["connected"] = True
+                dev["_hello_transient"] = True
             dev["_hello_until"] = time.monotonic() + 1.0
             return True
 
@@ -4474,7 +4509,7 @@ class ControllerState:
                         devices_sent.add(di)
                         continue
                     dev["_hello_until"] = 0
-                    if self.monitor_only:
+                    if dev.pop("_hello_transient", False):
                         # The flash window is over, but the receiver just holds
                         # whatever pixel data it last got — it won't blackout on
                         # its own once we stop streaming. Push one off frame

@@ -784,21 +784,27 @@ class Handler(BaseHTTPRequestHandler):
             if getattr(self._device_state(), "monitor_only", False):
                 self._json_error(409, "this instance is running in monitor-only mode")
                 return
-            di = data.get("device", 0)
-            if 0 <= di < len(self._device_state().devices):
+            try:
+                # Snapshot the IP in one step: a concurrent remove between a
+                # separate length check and the index read raised IndexError
+                # (an uncaught 500) on this route.
+                di = int(data.get("device", 0))
+                if di < 0:
+                    raise IndexError(di)
                 ip = self._device_state().devices[di]["ip"]
-                interface = self._sync_artnet_source()
-                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface)
-                node = next((n for n in nodes if n["ip"] == ip), None)
-                if node:
-                    self._device_state().add_device_from_node(node)
-                result = self._device_state().connect(di)
-                if result.get("ok"):
-                    self._ok()
-                else:
-                    self._json_error(503, result.get("error", "connect failed"))
-            else:
+            except (IndexError, TypeError, ValueError, KeyError):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
+                return
+            interface = self._sync_artnet_source()
+            nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface)
+            node = next((n for n in nodes if n["ip"] == ip), None)
+            if node:
+                self._device_state().add_device_from_node(node)
+            result = self._device_state().connect(di)
+            if result.get("ok"):
+                self._ok()
+            else:
+                self._json_error(503, result.get("error", "connect failed"))
 
         elif path == "/api/disconnect":
             di = data.get("device", 0)

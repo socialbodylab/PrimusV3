@@ -372,10 +372,13 @@ def _resilient_loop(fn, state, *args):
             return
         except Exception:
             errors += 1
-            import traceback
-            print(f"ERROR: {fn.__name__} crashed (#{errors}); restarting:")
-            traceback.print_exc()
-            time.sleep(0.5)
+            if errors <= 5 or errors % 100 == 0:
+                import traceback
+                print(f"ERROR: {fn.__name__} crashed (#{errors}); restarting:")
+                traceback.print_exc()
+            # Grow the backoff so a deterministic crash cannot spin at 2 Hz
+            # (and spam the log) for the rest of the night.
+            time.sleep(min(0.5 * errors, 5.0))
 
 
 def _mixer_controller_loop(state, cue_list):

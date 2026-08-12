@@ -190,9 +190,22 @@ class ArtNetSender:
             except OSError:
                 pass
             self.sock = None
+        self._sock_bind_mode = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if bind_source and self.source_ip:
             self.sock.bind((self.source_ip, 0))
+        # Remember how this socket was opened so send_output can reuse it
+        # instead of paying socket()+bind()+close() on every DMX frame.
+        self._sock_bind_mode = bool(bind_source and self.source_ip)
+
+    def _close_socket_unlocked(self):
+        if self.sock:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        self.sock = None
+        self._sock_bind_mode = None
 
     @staticmethod
     def _route_retryable(error):
@@ -216,12 +229,7 @@ class ArtNetSender:
     def disconnect(self):
         with self._io_lock:
             self.connected = False
-            if self.sock:
-                try:
-                    self.sock.close()
-                except OSError:
-                    pass
-                self.sock = None
+            self._close_socket_unlocked()
 
     def _build_packet(self, universe, rgb_data):
         if len(rgb_data) % 2 != 0:
@@ -248,12 +256,21 @@ class ArtNetSender:
                 if bind_source and not self.source_ip:
                     continue
                 try:
-                    self._open_socket_unlocked(bind_source=bind_source)
+                    # Reuse the open socket when its bind mode matches:
+                    # reopening per send costs socket()+bind()+close() for
+                    # every DMX frame (thousands of syscalls/second on a
+                    # full fleet) and randomizes the UDP source port.
+                    wanted = bool(bind_source and self.source_ip)
+                    if self.sock is None or getattr(self, "_sock_bind_mode", None) != wanted:
+                        self._open_socket_unlocked(bind_source=bind_source)
                     self.sock.sendto(pkt, (self.ip, self.dest_port))
                     self.last_error = None
                     return True
                 except OSError as exc:
                     self.last_error = str(exc) or "UDP send failed"
+                    # The socket may be poisoned (interface gone) — drop it
+                    # so the next attempt starts fresh.
+                    self._close_socket_unlocked()
                     if bind_source and self.source_ip and self._route_retryable(exc):
                         self._prefer_unbound_send = True
                         continue
@@ -840,12 +857,27 @@ class PrimusTelemetryListener:
             return
 
     def run(self):
+        error_count = 0
         while self.running:
             try:
                 raw, addr = self._sock.recvfrom(256)
             except socket.timeout:
                 continue
-            self._handle_packet(raw, addr[0])
+            except OSError:
+                # Interface drop/switch mid-show must not kill the only
+                # telemetry listener — the whole fleet would read offline
+                # until restart. Back off briefly and keep receiving.
+                if self.running:
+                    time.sleep(0.5)
+                continue
+            try:
+                self._handle_packet(raw, addr[0])
+            except Exception:
+                error_count += 1
+                if error_count <= 5 or error_count % 100 == 0:
+                    import traceback
+                    print(f"ERROR: telemetry packet handling failed (#{error_count}):")
+                    traceback.print_exc()
 
     TELEMETRY_STALE_SECONDS = 12.0
     TELEMETRY_ONLINE_SECONDS = 3.0
@@ -857,6 +889,16 @@ class PrimusTelemetryListener:
             if entry and (now - entry.get("ts", 0)) < self.TELEMETRY_STALE_SECONDS:
                 return self._merge_public_entry(entry, now)
         return None
+
+    def forget(self, ip):
+        """Drop accumulated telemetry for a removed device.
+
+        Without this, a device removed and re-added at the same IP inherits
+        the previous record's loss/reboot/sequence counters, corrupting the
+        diagnostics an operator uses to judge whether a receiver is flaky.
+        """
+        with self.lock:
+            self.data.pop(ip, None)
 
     def get_telemetry_status(self, ip):
         """Return (fresh_entry_or_none, age_seconds_or_none, receiver_online)."""
@@ -911,6 +953,10 @@ class RadiusTelemetryListener:
             try:
                 raw, addr = self._sock.recvfrom(256)
             except socket.timeout:
+                continue
+            except OSError:
+                if self.running:
+                    time.sleep(0.5)
                 continue
             if len(raw) >= 5 and raw[:3] == TRACK_MAGIC:
                 state = raw[3]

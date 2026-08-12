@@ -3,7 +3,11 @@
 import time
 
 UI_CLOSE_GRACE_SECONDS = 5.0
-UI_HEARTBEAT_TIMEOUT_SECONDS = 45.0
+# Chrome throttles timers in backgrounded windows to once per MINUTE after a
+# few minutes hidden — a 45 s timeout auto-quit the packaged Central when the
+# operator merely minimized it during a show. The timeout must sit above that
+# 60 s throttle floor with margin.
+UI_HEARTBEAT_TIMEOUT_SECONDS = 150.0
 UI_INITIAL_HEARTBEAT_TIMEOUT_SECONDS = 30.0
 
 
