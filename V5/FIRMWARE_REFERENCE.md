@@ -159,6 +159,21 @@ flowchart TB
 | `7` | ⚠️ Loop cue by number — same volume-byte reuse |
 | *anything else* | ⚠️ **STOP.** The `switch` default is `audioStop()`, so a malformed or future-versioned packet silences the costume rather than being ignored |
 
+**Volume byte (13) maps linearly onto the VS1053's full 127 dB attenuation
+range**: `attenuation = (100 − volume) × 254 / 100` half-dB steps. That makes
+the bottom half of the scale effectively silent — verified on hardware
+(2026-08-12): volume 80 ≈ −25 dB (clearly audible), 60 ≈ −51 dB (quiet),
+50 ≈ −64 dB (barely audible), 30 ≈ −89 dB (silence). **Usable range is
+~50–100.** This mapping is inherited from V4 and deliberately kept so existing
+cue volume tuning is preserved; the sender UIs clamp volume inputs to 50–100.
+
+**Pause semantics (firmware 4.17+):** `pausePlaying(true)` clears the
+library's `playingMusic` flag, so 4.16 and earlier treated a paused track as
+ended (a paused loop restarted itself; a paused one-shot was cleaned up).
+4.17 tracks pause explicitly: PTR reports state `2` with the track name held,
+`audioIsPlaying()` (FTP guard, PRS playing flag, heartbeat) stays true, and
+there is no resume command — resume by re-sending Play.
+
 ### OSC (UDP 53001)
 
 | Address | Effect |

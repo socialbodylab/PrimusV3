@@ -306,8 +306,10 @@
                         <button class="btn btn-sm" @click="pause(dev.di)">&#8214; Pause</button>
                     </div>
                     <div class="audio-vol-row">
-                        <span class="text-muted" style="font-size:11px;white-space:nowrap">Vol</span>
-                        <input type="range" class="audio-vol-slider" min="0" max="100"
+                        <span class="text-muted" style="font-size:11px;white-space:nowrap"
+                              title="Volume maps to VS1053 attenuation: below ~50 is effectively silent. Usable range is 50-100.">Vol</span>
+                        <input type="range" class="audio-vol-slider" min="50" max="100"
+                               title="Usable range 50-100 (below ~50 the hardware attenuation makes output inaudible)"
                                :value="getVolume(dev.di)"
                                @input="onVolumeInput(dev.di, $event.target.value)">
                         <span class="text-muted" style="font-size:11px;width:26px;text-align:right"
@@ -583,8 +585,10 @@
 
                         <template x-if="['play','loop'].includes(getAction(idx, dev.ip).cmd)">
                             <div class="flex items-center gap-1">
-                                <span class="text-muted" style="font-size:11px">Vol</span>
-                                <input type="number" class="form-input" min="0" max="100" style="width:52px"
+                                <span class="text-muted" style="font-size:11px"
+                                      title="Usable range 50-100 (below ~50 the hardware attenuation makes output inaudible)">Vol</span>
+                                <input type="number" class="form-input" min="50" max="100" style="width:52px"
+                                       title="Usable range 50-100 (below ~50 the hardware attenuation makes output inaudible)"
                                        :value="getAction(idx, dev.ip).volume"
                                        @input="setActionField(idx, dev.ip, 'volume', parseInt($event.target.value) || 0)">
                             </div>
