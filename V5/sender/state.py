@@ -1610,8 +1610,12 @@ class ControllerState:
                 return
             self.artnet_source_ip = source_ip
             for dev in self.devices:
-                if hasattr(dev["sender"], "set_source_ip"):
-                    dev["sender"].set_source_ip(source_ip)
+                # Radius records never carry an ArtNetSender on the unified
+                # backend — a bare dev["sender"] here 500s every request that
+                # syncs the Art-Net source once a Radius device is known.
+                sender = dev.get("sender")
+                if sender is not None and hasattr(sender, "set_source_ip"):
+                    sender.set_source_ip(source_ip)
 
     def refresh_after_firmware_upload(self, overrides=None):
         """Re-discover devices after firmware upload and push name overrides over Art-Net."""
@@ -2135,7 +2139,9 @@ class ControllerState:
                 dev = self.devices[di]
                 if "ip" in data:
                     dev["ip"] = str(data["ip"])
-                    dev["sender"].ip = dev["ip"]
+                    sender = dev.get("sender")
+                    if sender is not None:
+                        sender.ip = dev["ip"]
                 if oi is not None and 0 <= oi < len(dev["outputs"]):
                     o = dev["outputs"][oi]
                     if "grid_order" in data:
@@ -2198,7 +2204,9 @@ class ControllerState:
         dev["transport_error"] = message
         if disconnect:
             dev["connected"] = False
-            dev["sender"].disconnect()
+            sender = dev.get("sender")
+            if sender is not None:
+                sender.disconnect()
             dev["send_fail_streak"] = 0
             print(f"Transport error for {dev['name']} ({dev['ip']}): {message}")
 
@@ -4525,6 +4533,11 @@ class ControllerState:
             for di, dev in enumerate(self.devices):
                 if di in devices_sent:
                     continue
+                # Radius records have no ArtNetSender and never receive DMX;
+                # a bare dev["sender"] here killed the whole tick as soon as
+                # a connected Radius device shared the unified device list.
+                if dev.get("is_radius"):
+                    continue
                 if not dev.get("connected") or not dev["sender"].connected:
                     continue
                 if dev_filter is not None and di not in dev_filter:
@@ -4616,9 +4629,21 @@ def animation_loop(state):
     if set_current_thread_qos():
         state.performance.increment("animation_thread_qos_enabled")
     next_frame = time.monotonic()
+    tick_errors = 0
     while state.running:
         frame_start = time.perf_counter()
-        state.tick()
+        try:
+            state.tick()
+        except Exception:
+            # One bad frame must never kill DMX for the rest of the show.
+            # Log loudly (first few + every 100th so a persistent fault
+            # cannot flood the log) and keep the loop alive.
+            tick_errors += 1
+            state.performance.increment("animation_tick_errors")
+            if tick_errors <= 5 or tick_errors % 100 == 0:
+                import traceback
+                print(f"ERROR: animation tick failed (#{tick_errors}):")
+                traceback.print_exc()
         state.performance.increment("animation_frames")
         state.performance.observe(
             "animation_tick_ms", (time.perf_counter() - frame_start) * 1000.0)

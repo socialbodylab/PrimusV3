@@ -358,6 +358,26 @@ def _frame_payload(look, pixels_per_output):
     return payload
 
 
+def _resilient_loop(fn, state, *args):
+    """Run a render loop, restarting it if it ever dies on an exception.
+
+    The animation and mixer/controller loops ARE the show — a single
+    unhandled exception must never silently end DMX output for the rest
+    of the night. Log the traceback and re-enter the loop.
+    """
+    errors = 0
+    while getattr(state, "running", False):
+        try:
+            fn(state, *args)
+            return
+        except Exception:
+            errors += 1
+            import traceback
+            print(f"ERROR: {fn.__name__} crashed (#{errors}); restarting:")
+            traceback.print_exc()
+            time.sleep(0.5)
+
+
 def _mixer_controller_loop(state, cue_list):
     """Background thread: render look frames for mixer preview and controller.
 
@@ -704,11 +724,13 @@ def main():
         products=["primus", "radius"],
     )
 
-    anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
+    anim = threading.Thread(
+        target=_resilient_loop, args=(animation_loop, state), daemon=True)
     anim.start()
 
     mc_thread = threading.Thread(
-        target=_mixer_controller_loop, args=(state, cue_list), daemon=True)
+        target=_resilient_loop,
+        args=(_mixer_controller_loop, state, cue_list), daemon=True)
     mc_thread.start()
 
     if ui_lifecycle_enabled:
