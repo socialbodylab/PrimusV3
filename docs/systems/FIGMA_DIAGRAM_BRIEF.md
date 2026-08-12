@@ -7,8 +7,17 @@ Markdown / Mermaid / draw.io remain **content truth**; Figma is the **storytelli
 |------|----------|
 | Structure & API truth | [README.md](README.md), [SYSTEMS_OUTLINE.md](SYSTEMS_OUTLINE.md), [API_CONTROLS.md](API_CONTROLS.md) |
 | Draft geometry (optional underlay) | [png/](png/), [Primus-Radius-Systems.drawio](Primus-Radius-Systems.drawio) |
-| Rich visuals | **This Figma file** (create from brief below) |
+| Rich visuals | **[Primus-Radius Systems Diagrams](https://www.figma.com/design/VetnYLjB87BDXle5q8r9s3)** (`VetnYLjB87BDXle5q8r9s3`) |
+| Frame prose | [STORY.md](STORY.md) |
 | Edit / brand polish | Illustrator via **PDF export** (grouped objects) |
+
+**Plan note:** Figma Starter allows only **3 pages**. The brief’s six-page map is collapsed to:
+
+| Page | Frames |
+|------|--------|
+| `00 Cover Index Components` | `00-index` |
+| `10 System and Operators` | `10-lan-overview` … `25-naming` |
+| `30 Devices and API` | `30-primus-device` … `40-api-cheat` |
 
 ---
 

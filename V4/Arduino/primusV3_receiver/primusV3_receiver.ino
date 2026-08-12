@@ -525,6 +525,60 @@ void saveVirtualResolutionConfig() {
   }
 }
 
+bool firmwareOverridesPending() {
+#ifdef PRIMUSV3_OVERRIDE_BUILD_ID
+  return prefs.getString("fwOvrBuild", "") != String(PRIMUSV3_OVERRIDE_BUILD_ID);
+#else
+  return false;
+#endif
+}
+
+void applyFirmwareOutputOverrides() {
+#ifdef PRIMUSV3_FORCE_OUTPUT_CONFIG_OVERRIDE
+  if (!firmwareOverridesPending()) return;
+
+  const OutputType forcedTypes[NUM_OUTPUTS] = {
+#ifdef PRIMUSV3_FORCE_OUTPUT0_TYPE
+    (OutputType)PRIMUSV3_FORCE_OUTPUT0_TYPE,
+#else
+    outputs[0].type,
+#endif
+#ifdef PRIMUSV3_FORCE_OUTPUT1_TYPE
+    (OutputType)PRIMUSV3_FORCE_OUTPUT1_TYPE,
+#else
+    outputs[1].type,
+#endif
+  };
+  const uint16_t forcedVirtual[NUM_OUTPUTS] = {
+#ifdef PRIMUSV3_FORCE_OUTPUT0_VIRTUAL
+    PRIMUSV3_FORCE_OUTPUT0_VIRTUAL,
+#else
+    outputs[0].virtualPixelCount,
+#endif
+#ifdef PRIMUSV3_FORCE_OUTPUT1_VIRTUAL
+    PRIMUSV3_FORCE_OUTPUT1_VIRTUAL,
+#else
+    outputs[1].virtualPixelCount,
+#endif
+  };
+
+  for (uint8_t i = 0; i < NUM_OUTPUTS; i++) {
+    if (!profileSupportsOutputType(forcedTypes[i])) continue;
+    outputs[i].type = forcedTypes[i];
+    deriveFromType(outputs[i]);
+    applyVirtualPixelCount(outputs[i], forcedVirtual[i]);
+    Serial.print("Firmware output override port ");
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.print(typeName(outputs[i].type));
+    Serial.print(", virtual ");
+    Serial.println(outputs[i].virtualPixelCount);
+  }
+  saveOutputConfig();
+  saveVirtualResolutionConfig();
+#endif
+}
+
 OutputType nextValidOutputType(OutputType current) {
   for (uint8_t step = 1; step <= NUM_OUTPUT_TYPES; step++) {
     uint8_t candidateId = ((uint8_t)current + step) % NUM_OUTPUT_TYPES;
@@ -1471,6 +1525,7 @@ void setup() {
   // Load output config
   loadDefaultConfig(outputs);
   loadStoredOutputConfig();
+  applyFirmwareOutputOverrides();
   loadStoredReceiveMode(prefs, outputs);
   activeOutputCount = countActiveOutputs(outputs);
 
@@ -1482,7 +1537,9 @@ void setup() {
     Serial.print(typeName(outputs[i].type));
     Serial.print(", ");
     Serial.print(outputs[i].pixelCount);
-    Serial.print("px, Universe ");
+    Serial.print("px physical, ");
+    Serial.print(outputs[i].virtualPixelCount);
+    Serial.print("px virtual, Universe ");
     Serial.println(outputs[i].universe);
   }
   Serial.print("Active outputs: ");

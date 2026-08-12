@@ -8,6 +8,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import firmware
+import show_info_store
 from firmware import FirmwareRequestError
 
 
@@ -238,6 +239,102 @@ class FirmwareProfileTests(unittest.TestCase):
         device_state = FakeDeviceState()
         manager._refresh_device_state_after_upload(device_state, {"overrides": {}})
         self.assertFalse(device_state.called)
+
+
+class FirmwareUploadNameTargetTests(unittest.TestCase):
+    def test_node_matches_all_specified_overrides(self):
+        node = {
+            "short_name": "Radius-7",
+            "character_name": "Hero",
+            "performer_name": "Sam",
+        }
+        overrides = {
+            "device_name": "Radius-7",
+            "character_name": "Hero",
+            "performer_name": "Sam",
+        }
+        self.assertTrue(show_info_store.node_matches_firmware_name_overrides(node, overrides))
+
+    def test_node_rejects_name_mismatch(self):
+        node = {
+            "short_name": "Other",
+            "character_name": "Hero",
+            "performer_name": "Sam",
+        }
+        overrides = {"device_name": "Radius-7", "character_name": "Hero"}
+        self.assertFalse(show_info_store.node_matches_firmware_name_overrides(node, overrides))
+
+    def test_device_name_only_does_not_require_show_info_match(self):
+        node = {
+            "short_name": "Radius-7",
+            "character_name": "Old",
+            "performer_name": "Old",
+        }
+        overrides = {"device_name": "Radius-7"}
+        self.assertTrue(show_info_store.node_matches_firmware_name_overrides(node, overrides))
+
+    def test_refresh_after_upload_only_targets_matching_devices(self):
+        from unittest.mock import MagicMock, patch
+
+        import state as state_module
+
+        controller = state_module.ControllerState(None)
+        controller.artnet_source_ip = None
+        controller.devices = [
+            {
+                "ip": "10.0.0.1",
+                "name": "A",
+                "character_name": "",
+                "performer_name": "",
+                "connected": False,
+                "sender": MagicMock(),
+                "is_radius": True,
+            },
+            {
+                "ip": "10.0.0.2",
+                "name": "B",
+                "character_name": "",
+                "performer_name": "",
+                "connected": False,
+                "sender": MagicMock(),
+                "is_radius": False,
+            },
+        ]
+        nodes = [
+            {
+                "ip": "10.0.0.1",
+                "short_name": "RadiusNew",
+                "character_name": "Alice",
+                "performer_name": "Bob",
+            },
+            {
+                "ip": "10.0.0.2",
+                "short_name": "Other",
+                "character_name": "Charlie",
+                "performer_name": "Dave",
+            },
+        ]
+        overrides = {
+            "device_name": "RadiusNew",
+            "character_name": "Alice",
+            "performer_name": "Bob",
+        }
+
+        with patch("time.sleep"), patch(
+            "artnet.discover_artnet_nodes", return_value=nodes
+        ), patch("artnet.sync_device_name_to_receiver") as sync_name, patch(
+            "artnet.sync_show_info_to_device"
+        ) as sync_show, patch.object(
+            controller, "refresh_devices_from_nodes"
+        ), patch.object(
+            state_module, "_save_devices"
+        ):
+            controller.refresh_after_firmware_upload(overrides)
+
+        sync_name.assert_called_once_with(
+            "10.0.0.1", "RadiusNew", source_ip=None)
+        sync_show.assert_called_once_with(
+            "10.0.0.1", "Alice", "Bob", source_ip=None)
 
 
 if __name__ == "__main__":

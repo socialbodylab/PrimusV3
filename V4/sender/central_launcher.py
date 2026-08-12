@@ -265,13 +265,19 @@ def find_running_central_server(requested_port=DEFAULT_HTTP_PORT, host="127.0.0.
     return None
 
 
-def _raise_existing_ui(host, port, url, open_browser):
+def _raise_existing_ui(host, port, url, open_browser, *, force_new_window=False):
     """Focus an existing UI without opening a new browser window."""
+    if force_new_window:
+        return open_browser(url, attach=False)
     if request_ui_focus(port, host=host):
         return "raised existing browser window"
     result = open_browser(url, attach=True)
-    if result == "raised existing browser window":
+    if result in ("raised existing browser window", "opened Google Chrome app window", "opened Chromium app window"):
         return result
+    if result == "using existing browser window":
+        return open_browser(url, attach=False)
+    if result == "could not raise existing browser window":
+        return open_browser(url, attach=False)
     return (
         f"{result} (Central is already running at {url})"
     )
@@ -322,7 +328,10 @@ def try_attach_before_start(
     if no_browser:
         print("  Browser: not opened (--no-browser)")
     else:
-        browser_result = _raise_existing_ui(host, actual_port, url, open_browser)
+        force_new_window = str(frontend_path or "").rstrip("/") == "/devices"
+        browser_result = _raise_existing_ui(
+            host, actual_port, url, open_browser, force_new_window=force_new_window,
+        )
         print(f"  Browser: {browser_result}")
     print()
     return True

@@ -13,6 +13,8 @@ TOOLS_DIR_ENV = "RADIUSV4_TOOLS_DIR"
 PRIMUS_TOOLS_DIR_ENV = "PRIMUSV3_TOOLS_DIR"
 USE_APP_DATA_ENV = "RADIUSV4_USE_APP_DATA"
 PRIMUS_USE_APP_DATA_ENV = "PRIMUSV3_USE_APP_DATA"
+PRIMUS_ARDUINO_DIR_ENV = "PRIMUSV3_ARDUINO_DIR"
+RADIUS_ARDUINO_DIR_ENV = "RADIUSV4_ARDUINO_DIR"
 SENDER_PRODUCT_ENV = "PRIMUSV3_SENDER_PRODUCT"
 DEFAULT_SENDER_PRODUCT = "radius"
 
@@ -251,6 +253,47 @@ def firmware_downloads_dir():
 
 def bundled_arduino_dir():
     return os.path.dirname(resource_path("Arduino", "upload.sh"))
+
+
+def _repo_arduino_dir_from_bundle():
+    """When running a packaged app from a git checkout, prefer V4/Arduino in the repo."""
+    if not is_bundled():
+        return None
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if not bundle_root:
+        bundle_root = os.path.dirname(os.path.abspath(sys.executable))
+    cursor = os.path.abspath(bundle_root)
+    for _ in range(10):
+        candidate = os.path.join(cursor, "V4", "Arduino")
+        if os.path.isfile(os.path.join(candidate, "radius_upload.sh")):
+            return candidate
+        parent = os.path.dirname(cursor)
+        if parent == cursor:
+            break
+        cursor = parent
+    return None
+
+
+def radius_arduino_dir():
+    """Directory containing radius_upload.sh and radius_receiver/."""
+    for env_key in (PRIMUS_ARDUINO_DIR_ENV, RADIUS_ARDUINO_DIR_ENV):
+        override = os.environ.get(env_key)
+        if override:
+            root = os.path.abspath(os.path.expanduser(override))
+            if os.path.isfile(os.path.join(root, "radius_upload.sh")):
+                return root
+    repo = _repo_arduino_dir_from_bundle()
+    if repo:
+        return repo
+    if not is_bundled():
+        dev = os.path.join(v4_dir(), "Arduino")
+        if os.path.isfile(os.path.join(dev, "radius_upload.sh")):
+            return dev
+    return bundled_arduino_dir()
+
+
+def radius_receiver_config_path():
+    return os.path.join(radius_arduino_dir(), "radius_receiver", "config.h")
 
 
 def ensure_firmware_data():

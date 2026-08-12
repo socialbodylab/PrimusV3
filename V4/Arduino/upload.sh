@@ -69,6 +69,14 @@ RECEIVE_MODE_OVERRIDE=""
 UNIVERSE_BASE_OVERRIDE=""
 RECEIVE_MODE_OVERRIDE_SET=false
 UNIVERSE_BASE_OVERRIDE_SET=false
+OUTPUT0_TYPE_OVERRIDE=""
+OUTPUT1_TYPE_OVERRIDE=""
+OUTPUT0_VIRTUAL_OVERRIDE=""
+OUTPUT1_VIRTUAL_OVERRIDE=""
+OUTPUT0_TYPE_OVERRIDE_SET=false
+OUTPUT1_TYPE_OVERRIDE_SET=false
+OUTPUT0_VIRTUAL_OVERRIDE_SET=false
+OUTPUT1_VIRTUAL_OVERRIDE_SET=false
 BUILD_OVERRIDE_HEADER=""
 
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
@@ -133,6 +141,10 @@ Flags:
   --receivemode split|combined
                            Default Art-Net receive mode for this build.
   --universe <n>           Default base universe number (0-32767).
+  --output0 <type>         Seed output 0 type on boot (e.g. small_grid).
+  --output1 <type>         Seed output 1 type on boot (e.g. long_strip).
+  --virtual0 <n>           Seed output 0 virtual pixel count on boot.
+  --virtual1 <n>           Seed output 1 virtual pixel count on boot.
   --baud, --speed <rate>   Override upload speed.
   -h, --help               Show this help.
 EOF
@@ -276,6 +288,42 @@ while [[ $# -gt 0 ]]; do
       fi
       UNIVERSE_BASE_OVERRIDE="$2"
       UNIVERSE_BASE_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --output0)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires an output type"
+        exit 1
+      fi
+      OUTPUT0_TYPE_OVERRIDE="$2"
+      OUTPUT0_TYPE_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --output1)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires an output type"
+        exit 1
+      fi
+      OUTPUT1_TYPE_OVERRIDE="$2"
+      OUTPUT1_TYPE_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --virtual0)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a virtual pixel count"
+        exit 1
+      fi
+      OUTPUT0_VIRTUAL_OVERRIDE="$2"
+      OUTPUT0_VIRTUAL_OVERRIDE_SET=true
+      shift 2
+      ;;
+    --virtual1)
+      if [[ $# -lt 2 ]]; then
+        err "$1 requires a virtual pixel count"
+        exit 1
+      fi
+      OUTPUT1_VIRTUAL_OVERRIDE="$2"
+      OUTPUT1_VIRTUAL_OVERRIDE_SET=true
       shift 2
       ;;
     --baud|--speed)
@@ -470,6 +518,55 @@ ipv4_c_octets() {
   printf '%s, %s, %s, %s' "$((10#${parts[0]}))" "$((10#${parts[1]}))" "$((10#${parts[2]}))" "$((10#${parts[3]}))"
 }
 
+output_type_to_id() {
+  local value
+  value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    none|off) printf '0' ;;
+    short_strip|short-strip|shortstrip) printf '1' ;;
+    long_strip|long-strip|longstrip) printf '2' ;;
+    grid) printf '3' ;;
+    small_grid|small-grid|smallgrid|badge) printf '4' ;;
+    extra_long_strip|extra-long-strip|extralongstrip|belt) printf '5' ;;
+    *)
+      err "Unknown output type: $1"
+      err "Expected one of: none, short_strip, long_strip, grid, small_grid, extra_long_strip"
+      exit 1
+      ;;
+  esac
+}
+
+validate_virtual_override() {
+  local label="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    err "$label must be a non-negative integer."
+    exit 1
+  fi
+  if (( value < 1 || value > 122 )); then
+    err "$label must be between 1 and 122."
+    exit 1
+  fi
+}
+
+if [[ "$OUTPUT0_TYPE_OVERRIDE_SET" == true ]]; then
+  OUTPUT0_TYPE_ID="$(output_type_to_id "$OUTPUT0_TYPE_OVERRIDE")"
+fi
+if [[ "$OUTPUT1_TYPE_OVERRIDE_SET" == true ]]; then
+  OUTPUT1_TYPE_ID="$(output_type_to_id "$OUTPUT1_TYPE_OVERRIDE")"
+fi
+if [[ "$OUTPUT0_VIRTUAL_OVERRIDE_SET" == true ]]; then
+  validate_virtual_override "Output 0 virtual pixel count" "$OUTPUT0_VIRTUAL_OVERRIDE"
+fi
+if [[ "$OUTPUT1_VIRTUAL_OVERRIDE_SET" == true ]]; then
+  validate_virtual_override "Output 1 virtual pixel count" "$OUTPUT1_VIRTUAL_OVERRIDE"
+fi
+if [[ "$OUTPUT0_TYPE_OVERRIDE_SET" == true || "$OUTPUT1_TYPE_OVERRIDE_SET" == true || "$OUTPUT0_VIRTUAL_OVERRIDE_SET" == true || "$OUTPUT1_VIRTUAL_OVERRIDE_SET" == true ]]; then
+  OUTPUT_CONFIG_OVERRIDE_SET=true
+else
+  OUTPUT_CONFIG_OVERRIDE_SET=false
+fi
+
 if [[ "$DHCP_OVERRIDE_SET" == true && ( "$STATIC_IP_OVERRIDE_SET" == true || "$GATEWAY_OVERRIDE_SET" == true || "$SUBNET_OVERRIDE_SET" == true ) ]]; then
   err "Use either --dhcp or --static-ip/--gateway/--subnet, not both."
   exit 1
@@ -493,7 +590,7 @@ c_string_literal() {
 }
 
 create_build_override_header() {
-  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$CHARACTER_NAME_OVERRIDE_SET" != true && "$PERFORMER_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true && "$RECEIVE_MODE_OVERRIDE_SET" != true && "$UNIVERSE_BASE_OVERRIDE_SET" != true ]]; then
+  if [[ "$WIFI_SSID_OVERRIDE_SET" != true && "$WIFI_PASSWORD_OVERRIDE_SET" != true && "$DEVICE_NAME_OVERRIDE_SET" != true && "$CHARACTER_NAME_OVERRIDE_SET" != true && "$PERFORMER_NAME_OVERRIDE_SET" != true && "$STATIC_IP_OVERRIDE_SET" != true && "$DHCP_OVERRIDE_SET" != true && "$RECEIVE_MODE_OVERRIDE_SET" != true && "$UNIVERSE_BASE_OVERRIDE_SET" != true && "$OUTPUT_CONFIG_OVERRIDE_SET" != true ]]; then
     return
   fi
 
@@ -539,6 +636,21 @@ create_build_override_header() {
     fi
     if [[ "$UNIVERSE_BASE_OVERRIDE_SET" == true ]]; then
       printf '#define PRIMUS_DEFAULT_UNIVERSE_BASE %s\n' "$UNIVERSE_BASE_OVERRIDE"
+    fi
+    if [[ "$OUTPUT_CONFIG_OVERRIDE_SET" == true ]]; then
+      printf '#define PRIMUSV3_FORCE_OUTPUT_CONFIG_OVERRIDE 1\n'
+      if [[ "$OUTPUT0_TYPE_OVERRIDE_SET" == true ]]; then
+        printf '#define PRIMUSV3_FORCE_OUTPUT0_TYPE %s\n' "$OUTPUT0_TYPE_ID"
+      fi
+      if [[ "$OUTPUT1_TYPE_OVERRIDE_SET" == true ]]; then
+        printf '#define PRIMUSV3_FORCE_OUTPUT1_TYPE %s\n' "$OUTPUT1_TYPE_ID"
+      fi
+      if [[ "$OUTPUT0_VIRTUAL_OVERRIDE_SET" == true ]]; then
+        printf '#define PRIMUSV3_FORCE_OUTPUT0_VIRTUAL %s\n' "$OUTPUT0_VIRTUAL_OVERRIDE"
+      fi
+      if [[ "$OUTPUT1_VIRTUAL_OVERRIDE_SET" == true ]]; then
+        printf '#define PRIMUSV3_FORCE_OUTPUT1_VIRTUAL %s\n' "$OUTPUT1_VIRTUAL_OVERRIDE"
+      fi
     fi
   } > "$BUILD_OVERRIDE_HEADER"
 
@@ -861,6 +973,18 @@ if [[ "$STATIC_IP_OVERRIDE_SET" == true ]]; then
 fi
 if [[ "$DHCP_OVERRIDE_SET" == true ]]; then
   info "DHCP override: clear saved static IP settings"
+fi
+if [[ "$OUTPUT0_TYPE_OVERRIDE_SET" == true ]]; then
+  info "Output 0 type override: $OUTPUT0_TYPE_OVERRIDE"
+fi
+if [[ "$OUTPUT1_TYPE_OVERRIDE_SET" == true ]]; then
+  info "Output 1 type override: $OUTPUT1_TYPE_OVERRIDE"
+fi
+if [[ "$OUTPUT0_VIRTUAL_OVERRIDE_SET" == true ]]; then
+  info "Output 0 virtual pixels override: $OUTPUT0_VIRTUAL_OVERRIDE"
+fi
+if [[ "$OUTPUT1_VIRTUAL_OVERRIDE_SET" == true ]]; then
+  info "Output 1 virtual pixels override: $OUTPUT1_VIRTUAL_OVERRIDE"
 fi
 
 if [[ "$COMPILE_ONLY" == true ]]; then

@@ -558,7 +558,10 @@ def discover_artnet_nodes(known_ips=None, timeout=3.5, interface=None):
             if len(raw) > 17:
                 firmware_version = f"{raw[16]}.{raw[17]}"
             capabilities = parse_node_capabilities(node_report, short_name, long_name)
-            capabilities["firmware_version"] = firmware_version
+            if capabilities.get("firmware_version"):
+                firmware_version = capabilities.get("firmware_version")
+            else:
+                capabilities["firmware_version"] = firmware_version
             if capabilities.get("ip_mode") == "static" and not capabilities.get("static_ip"):
                 capabilities["static_ip"] = ip
 
@@ -699,6 +702,9 @@ def _parse_radius_capabilities(node_report, short_name="", long_name=""):
         if part.startswith(NODE_CAPS_IP_PREFIX):
             _parse_ip_capability(part, caps)
             caps["ip_config"] = True
+            continue
+        if part.startswith("V:") and len(part) > 2:
+            caps["firmware_version"] = part[2:]
             continue
         if not part.startswith(NODE_CAPS_FEATURE_PREFIX):
             continue

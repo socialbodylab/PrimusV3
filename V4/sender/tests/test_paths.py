@@ -47,6 +47,15 @@ class PathsTests(unittest.TestCase):
         self.assertIn("RadiusV3", root)
         self.assertIn("V4", root)
 
+    def test_radius_arduino_dir_env_override(self):
+        repo_arduino = os.path.join(paths.v4_dir(), "Arduino")
+        os.environ["PRIMUSV3_ARDUINO_DIR"] = repo_arduino
+        try:
+            self.assertEqual(paths.radius_arduino_dir(), repo_arduino)
+            self.assertTrue(os.path.isfile(paths.radius_receiver_config_path()))
+        finally:
+            os.environ.pop("PRIMUSV3_ARDUINO_DIR", None)
+
 
 if __name__ == "__main__":
     unittest.main()

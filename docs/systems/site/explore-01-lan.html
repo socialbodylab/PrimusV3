@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Explore 01 — Show LAN · four encodings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/site.css" />
+    <link rel="stylesheet" href="css/explore.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="nav-brand"><a href="index.html">Primus · Radius</a> / explore 01</div>
+      <nav>
+        <ul class="nav-links">
+          <li><a href="#v1">A Matrix</a></li>
+          <li><a href="#v2">B Planes</a></li>
+          <li><a href="#v3">C Scales</a></li>
+          <li><a href="#v4">D Timeline</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="explore">
+      <header class="explore-intro">
+        <p class="kicker">Diagram study · one subject · four encodings</p>
+        <h1>Trusted show LAN</h1>
+        <p class="lede">
+          Same question each time: who may talk to which receiver, on which
+          port, in which plane (Show / Setup / Watch), and when. Not a box
+          flowchart four times — four different data shapes.
+        </p>
+        <dl class="explore-dims">
+          <div>
+            <dt>Sources</dt>
+            <dd>Eos · PrimusCentral · DeviceManager · RadiusCentral</dd>
+          </div>
+          <div>
+            <dt>Targets</dt>
+            <dd>Primus receivers · Radius receivers</dd>
+          </div>
+          <div>
+            <dt>Planes</dt>
+            <dd>Show (drive) · Setup (commission) · Watch (telemetry)</dd>
+          </div>
+          <div>
+            <dt>Wire</dt>
+            <dd>:6454 · :6455 · :6456 · HTTP · OSC · FTP/TCP21</dd>
+          </div>
+        </dl>
+      </header>
+
+      <!-- ========== A: ADJACENCY MATRIX ========== -->
+      <section id="v1" class="variant">
+        <div class="variant-head">
+          <p class="kicker">Encoding A · adjacency matrix</p>
+          <h2>Source × target cells</h2>
+          <p class="lede">
+            Each cell lists every conversation. Plane letter + port + payload.
+            Empty = no standing path. Dense: read columns for “what hits a
+            Primus body,” rows for “what one app is allowed to do.”
+          </p>
+        </div>
+        <div class="matrix-scroll" id="adj-root"></div>
+        <p class="note">
+          Legend: <b>S</b> show · <b>U</b> setup · <b>W</b> watch · dashed
+          outline = optional / secondary path
+        </p>
+      </section>
+
+      <!-- ========== B: SMALL MULTIPLES BY PLANE ========== -->
+      <section id="v2" class="variant">
+        <div class="variant-head">
+          <p class="kicker">Encoding B · small multiples</p>
+          <h2>One panel per plane</h2>
+          <p class="lede">
+            Same edges, split by job. Compare vertically: Show is fat traffic;
+            Setup is many thin management edges; Watch is receivers →
+            DeviceManager only.
+          </p>
+        </div>
+        <div class="planes" id="planes-root"></div>
+      </section>
+
+      <!-- ========== C: SCALE LADDER ========== -->
+      <section id="v3" class="variant">
+        <div class="variant-head">
+          <p class="kicker">Encoding C · nested scales</p>
+          <h2>Four zoom levels, same system</h2>
+          <p class="lede">
+            Cast → apps → ports → opcodes. Each column is a finer grain of the
+            column to its left. Pick a row to see how one show concern
+            decomposes.
+          </p>
+        </div>
+        <div class="scales" id="scales-root"></div>
+        <div class="scale-detail" id="scale-detail" hidden></div>
+      </section>
+
+      <!-- ========== D: CHANNEL TIMELINE ========== -->
+      <section id="v4" class="variant">
+        <div class="variant-head">
+          <p class="kicker">Encoding D · channel × phase</p>
+          <h2>When each wire is busy</h2>
+          <p class="lede">
+            Rows are protocol channels. Columns are production phases. Marks
+            show which app owns the channel in that phase. Makes “don’t FTP at
+            GO” and “ArtDmx lives at GO” visible as time, not topology.
+          </p>
+        </div>
+        <div class="chan-scroll" id="chan-root"></div>
+        <p class="note">
+          Fill = primary use · outline only = allowed but not typical · blank =
+          should be quiet
+        </p>
+      </section>
+
+      <section class="variant compare-prompt">
+        <p class="kicker">Next</p>
+        <h2>Which encoding carries the idea?</h2>
+        <p class="lede">
+          Pick A / B / C / D (or a hybrid). Then we commit that language and
+          rebuild the rest of the site around it — not another Mermaid clone.
+        </p>
+        <ul class="pick-list">
+          <li><b>A Matrix</b> — best for “is there a path?” and audit density</li>
+          <li><b>B Planes</b> — best for teaching Show ≠ Setup ≠ Watch</li>
+          <li><b>C Scales</b> — best for jumping from cast story to opcode</li>
+          <li><b>D Timeline</b> — best for tech vs GO discipline</li>
+        </ul>
+        <p class="note"><a href="index.html">← back to site shell</a></p>
+      </section>
+    </main>
+
+    <footer>Explore 01 · LAN · four encodings · greyscale study</footer>
+    <script type="module" src="js/explore-01-lan.js"></script>
+  </body>
+</html>

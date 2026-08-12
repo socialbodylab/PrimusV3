@@ -54,6 +54,11 @@ class RadiusArtNetTests(unittest.TestCase):
         self.assertEqual(caps["hardware_profile"], "v2")
         self.assertEqual(caps["ip_mode"], "static")
 
+    def test_pvrad1_node_report_version_token(self):
+        report = "#0001 [0042] OK|PVRAD1|B:v1|IP:D|F:RIHAS|V:4.15"
+        caps = parse_node_capabilities(report, "Radius", "Radius Central V1")
+        self.assertEqual(caps["firmware_version"], "4.15")
+
     def test_audio_cmd_packet_builder(self):
         sent = []
 

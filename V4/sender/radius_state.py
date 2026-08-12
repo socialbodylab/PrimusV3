@@ -286,11 +286,18 @@ class RadiusState:
         if not has_name_overrides or not online_ips:
             return
 
+        nodes_by_ip = {node.get("ip"): node for node in nodes if node.get("ip")}
         with self.lock:
+            targets = []
             for dev in self.devices:
                 ip = dev.get("ip")
                 if not ip or ip not in online_ips:
                     continue
+                node = nodes_by_ip.get(ip)
+                if show_info_store.node_matches_firmware_name_overrides(node, overrides):
+                    targets.append(dev)
+            for dev in targets:
+                ip = dev.get("ip")
                 if device_name:
                     sync_device_name_to_receiver(
                         ip, device_name, source_ip=self.artnet_source_ip)
@@ -313,7 +320,8 @@ class RadiusState:
                     dev.get("character_name", ""),
                     dev.get("performer_name", ""),
                 )
-            _save_devices(self.devices)
+            if targets:
+                _save_devices(self.devices)
 
     def refresh_devices_from_nodes(self, nodes, auto_save=True):
         refreshed = []
