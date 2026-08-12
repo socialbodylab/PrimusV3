@@ -24,8 +24,41 @@ class DedicatedBrowser:
         return os.path.join(tempfile.gettempdir(), self.profile_root_name)
 
     def has_tracked_browser(self):
+        """True only when a tracked browser PROCESS is actually alive.
+
+        The marker files persist after the window closes, and treating a
+        stale marker as a live window made a relaunch exit without ever
+        showing anything — indistinguishable from a crashed app.
+        """
         root = self.profile_root()
-        return bool(self._read_tracked_profile(root) or self._read_tracked_pid(root))
+        pid = self._read_tracked_pid(root)
+        if pid and self._process_is_running(pid):
+            return True
+        return self._process_using_profile_root(root)
+
+    def _process_using_profile_root(self, profile_root):
+        profile_root = os.path.abspath(profile_root)
+        if os.name == "nt":
+            # No cheap process scan on Windows; err toward "not running" so
+            # a relaunch opens a window instead of silently exiting.
+            return False
+        try:
+            out = subprocess.check_output(
+                ["ps", "-axo", "pid=,command="],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+        marker = "--user-data-dir="
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+            command = parts[1]
+            if marker in command and profile_root in command:
+                return True
+        return False
 
     def open(self, url, attach=False):
         if attach:
@@ -53,6 +86,13 @@ class DedicatedBrowser:
         pid = self._read_tracked_pid(profile_root)
         if pid and self._process_is_running(pid) and self._activate_process(pid):
             return True
+        # Label activation raises the whole browser app (e.g. "Google
+        # Chrome") — that is only meaningful while a window on OUR profile
+        # still exists. After the user closes it, activating the label
+        # fronts an unrelated Chrome window, focus() reports success, and
+        # the relaunched app exits without ever showing its own window.
+        if not self._process_using_profile_root(profile_root):
+            return False
         label = self._read_tracked_label(profile_root)
         if label and self._activate_application(label):
             return True
