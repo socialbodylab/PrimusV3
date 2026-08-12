@@ -118,10 +118,6 @@
                         <span class="dm-status-pill"
                               :class="$store.conn.monitorStatusClass(dev)"
                               x-text="$store.conn.monitorStatusLabel(dev)"></span>
-                        <span class="device-fps"
-                              x-show="$store.conn.monitorFpsLabel(dev)"
-                              :class="$store.conn.monitorLiveClass(dev)"
-                              x-text="$store.conn.monitorFpsLabel(dev)"></span>
                         <span class="device-battery"
                               x-show="$store.conn.showBattery(dev)"
                               :class="$store.conn.batteryClass(dev)"

@@ -1087,13 +1087,10 @@ document.addEventListener("alpine:init", () => {
         // listener regardless of connect state, so these don't gate on dev.connected.
         monitorFpsLabel(dev) {
             if (isRadiusDevice(dev)) {
-                // Radius nodes report render FPS via PTR/PRS telemetry (field
-                // "fps" in the radius state shape). Old firmware without that
-                // data stays blank rather than showing "waiting".
-                if (!dev?.receiver_online) return "";
-                const fps = dev?.fps ?? dev?.receiver_fps;
-                if (fps != null) return `${fps} fps · live`;
-                return "live";
+                // Radius firmware reports 0 fps by design (no render loop) —
+                // an fps counter on an audio node is pure noise. The status
+                // pill already communicates live/offline.
+                return "";
             }
             if (dev?.receiver_online) {
                 if (dev?.receiver_fps != null) {
