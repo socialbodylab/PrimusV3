@@ -1107,6 +1107,30 @@ document.addEventListener("alpine:init", () => {
             return !isRadiusDevice(dev) && !!dev?.capabilities?.battery;
         },
 
+        // ---- Performer grouping helpers (additive; used by Device Manager) ----
+        // Stable identity key for a device. Prefers the backend-provided
+        // device_uid (MAC-derived) when present, then the IP (the backend's
+        // primary identity and the show-info persistence key), then the name.
+        deviceKey(dev) {
+            if (!dev) return "unknown:";
+            if (dev.device_uid) return String(dev.device_uid);
+            if (dev.ip) return String(dev.ip);
+            return "unknown:" + (dev.name || "");
+        },
+
+        // Normalized performer-name key used to group devices worn by the same
+        // performer: trimmed, lowercased, inner whitespace collapsed.
+        performerKey(dev) {
+            return String(dev?.performer_name || "")
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, " ");
+        },
+
+        hasPerformer(dev) {
+            return !!this.performerKey(dev);
+        },
+
         showInfoEnabled(dev) {
             if (dev) {
                 return isRadiusDevice(dev) || !!dev?.capabilities?.show_info;

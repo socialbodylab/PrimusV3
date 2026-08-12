@@ -117,16 +117,19 @@ Primus firmware (`primusV3_receiver/`) is unchanged in behavior aside from the i
 
 ## DeviceManager UI
 
-**Monitor tab** (`index-devices.html`, `app-devices.js`, `device-conn.js`):
+**Monitor tab** (`index-devices.html`, `app-devices.js`, `device-conn.js`) — **performer-first layout**:
 
-- Cards grouped into **Primus** and **Radius** sections, each with Attention / Online / Offline subsections.
-- Summary strip shows total online, Primus count, and Radius count.
-- Character-name filter chips are split into separate **Primus** and **Radius** rows.
+- Cards are grouped **by performer**: one section per performer (heading = performer name, character name(s), device count, worst-status rollup badge), with that performer's Primus card first and Radius card beside it. Most performers wear both a Primus and a Radius device, so the two cards sit side by side (`.dm-performer-grid` constrains card width).
+- A single **Unassigned** section at the bottom collects devices with no performer name. Setting a performer name on a card (inline edit, unchanged) moves it into that performer's group — that move is the expected feedback for assignment.
+- **Stable positions:** performers sort alphabetically (`localeCompare`, sensitivity `base`); within a performer, Primus first then Radius, tiebreak on the stable device key (`deviceKey(dev)` in `device-conn.js`: `device_uid` → `ip` → name). Battery level, online/offline flapping, transport errors, and sync order never reorder cards. Status is shown **in place**: the `.dm-status-pill`, the per-performer rollup badge, the summary strip, a per-card left-border tint (`.dm-card-attention/-online/-offline`), and an optional "Attention only" filter toggle. Alpine `:key`s are the stable device/section keys (never array index), and card expand state is keyed by device key with a `syncExpandedCards` reconciler.
+- **Edit identity** on a performer heading opens a panel with Character + Performer fields (datalists of existing names); saving issues one `POST /api/device_show_info` per device in the group (`{device, character_name, performer_name}`), skipping locked/unsupported devices. Group re-sorting is frozen while the editor is open. Renaming the performer moves the whole group; clearing it moves the devices to Unassigned.
+- Summary strip shows total online, Primus count, and Radius count. Character-name filter chips remain split into **Primus** and **Radius** rows.
 - Per-device helpers (not session product):
   - `monitorProductLabel(dev)` → `"Primus"` / `"Radius"`
   - `showInfoEnabled(dev)` → Radius devices or Primus nodes with `capabilities.show_info`
   - `helloDevice()` → identify flash for Primus, test tone (+ volume) for Radius
-- **Radius cards** hide universe, receive mode, outputs, virtual resolution, and battery. They still show character/performer/device name, IP, status/FPS, Hello, firmware version, and static IP config when expanded.
+- **Radius cards** hide universe, receive mode, outputs, virtual resolution, and battery. They still show character/performer/device name, IP, status/FPS, Hello, firmware version, and static IP config when expanded. Expanded cards also show `monitorHardwareLabel(dev)` in the footer.
+- The mobile view (`/devices?mode=mobile`) uses the same performer grouping, read-only (no identity editing).
 
 **Firmware tab** — mixed upload panel:
 
@@ -174,7 +177,7 @@ Key new/extended coverage:
 ## Quick validation
 
 1. Run DeviceManager: `python3 V5/sender/run_devices.py`
-2. Confirm Primus and Radius nodes appear in separate Monitor sections without DMX side effects.
-3. Edit character/performer on a Radius card — restart sender; names should restore from `.radius_state.json`.
+2. Confirm devices group by performer in the Monitor tab (a performer's Primus and Radius cards side by side; devices without a performer under **Unassigned**) without DMX side effects, and that card positions do not move when a device goes offline or its battery drops.
+3. Edit character/performer on a Radius card (or via a performer heading's **Edit identity**) — restart sender; names should restore from `.radius_state.json`. Assigning a performer to an Unassigned card should move it into that performer's group.
 4. RadiusCentral sidebar: same identity fields editable for connected Radius nodes.
 5. DeviceManager Firmware tab: toggle Primus vs Radius, compile/upload with the expected `upload.sh` / `radius_upload.sh` routing.

@@ -60,6 +60,10 @@
                     @click="$store.conn.syncNetwork()"
                     :disabled="$store.conn.syncing"
                     x-text="$store.conn.syncing ? 'Syncing…' : 'Sync now'"></button>
+            <button type="button" class="dm-character-chip dm-attention-toggle"
+                    :class="{ 'dm-character-chip-active': $store.app.filterAttentionOnly }"
+                    title="Show only devices with a transport error or a low/faulted battery"
+                    @click="$store.app.toggleAttentionFilter()">Attention only</button>
         </div>
         <div class="dm-character-filters"
              x-show="$store.app.hasPrimusDevices && $store.app.isProductFilterVisible('primus')">
@@ -122,99 +126,8 @@
         </div>
     </div>
 
-    <!-- ---- Bulk Rename panel ---- -->
-    <div class="dm-bulk-panel" x-show="$store.app.bulkPanel === 'rename'" x-cloak>
-        <div class="dm-bulk-panel-header">
-            <span class="output-name">Bulk Rename — <span x-text="$store.app.currentBulkGroup()?.name"></span></span>
-            <button class="notice-close" @click="$store.app.closeBulkPanel()">&times;</button>
-        </div>
-        <div class="dm-bulk-form">
-            <div class="form-group compact">
-                <label class="form-label">Pattern (use {n} for number)</label>
-                <input class="form-input form-input-sm" type="text"
-                       x-model="$store.app.bulkRenamePattern"
-                       @input="$store.app.updateBulkRenamePreview()">
-            </div>
-            <div class="form-group compact">
-                <label class="form-label">Start #</label>
-                <input class="form-input form-input-sm" type="number" min="0"
-                       x-model.number="$store.app.bulkRenameStart"
-                       @input="$store.app.updateBulkRenamePreview()">
-            </div>
-            <div class="form-group compact">
-                <label class="form-label">Zero-pad width</label>
-                <input class="form-input form-input-sm" type="number" min="0" max="4"
-                       x-model.number="$store.app.bulkRenamePad"
-                       @input="$store.app.updateBulkRenamePreview()">
-            </div>
-        </div>
-        <div class="dm-bulk-preview">
-            <template x-for="item in $store.app.bulkRenamePlan" :key="item.di">
-                <div class="dm-bulk-preview-row" :class="{ 'dm-bulk-preview-disabled': !item.canRename }">
-                    <span x-text="item.oldName || item.ip"></span>
-                    <span>&rarr;</span>
-                    <span x-text="item.newName"></span>
-                    <span class="text-sm text-muted" x-show="!item.canRename">(rename not supported)</span>
-                </div>
-            </template>
-        </div>
-        <div class="btn-group" style="margin-top:8px">
-            <button class="btn btn-sm btn-primary" @click="$store.app.applyBulkRename()">Apply Rename</button>
-            <button class="btn btn-sm" @click="$store.app.closeBulkPanel()">Cancel</button>
-        </div>
-    </div>
-
-    <!-- ---- Bulk Apply panel ---- -->
-    <div class="dm-bulk-panel" x-show="$store.app.bulkPanel === 'apply'" x-cloak>
-        <div class="dm-bulk-panel-header">
-            <span class="output-name">Bulk Apply — <span x-text="$store.app.currentBulkGroup()?.name"></span></span>
-            <button class="notice-close" @click="$store.app.closeBulkPanel()">&times;</button>
-        </div>
-        <div class="dm-bulk-form">
-            <div class="form-group compact">
-                <label class="form-label">Output</label>
-                <input class="form-input form-input-sm" type="number" min="0"
-                       x-model.number="$store.app.bulkOutputIndex">
-            </div>
-            <div class="form-group compact">
-                <label class="form-label">Output Type</label>
-                <select class="form-input form-input-sm" x-model="$store.app.bulkOutputType">
-                    <template x-for="type in $store.app.outputTypes" :key="type">
-                        <option :value="type" x-text="$store.app.outputTypeLabel(type)"></option>
-                    </template>
-                </select>
-            </div>
-            <button class="btn btn-sm btn-primary" @click="$store.app.applyBulkOutputType()">Apply Output Type</button>
-            <div class="form-group compact">
-                <label class="form-label">Management preset / descriptor</label>
-                <select class="form-input form-input-sm" x-model="$store.app.bulkPresetId">
-                    <option value="">Choose preset…</option>
-                    <template x-for="preset in $store.conn.outputPresets" :key="preset.id">
-                        <option :value="preset.id"
-                                x-text="preset.name + (preset.built_in ? ' · Built-in' : '')"></option>
-                    </template>
-                </select>
-            </div>
-            <button class="btn btn-sm btn-primary"
-                    :disabled="!$store.app.bulkPresetId"
-                    @click="$store.app.applyBulkPreset()">Apply Preset</button>
-        </div>
-        <div class="dm-bulk-preview" x-show="$store.app.bulkApplyResults.length">
-            <template x-for="result in $store.app.bulkApplyResults" :key="result.device">
-                <div class="dm-bulk-preview-row">
-                    <span x-text="result.device"></span>
-                    <span x-text="result.status.replace('_', ' ')"></span>
-                    <span class="text-sm text-muted" x-show="result.error" x-text="result.error"></span>
-                </div>
-            </template>
-        </div>
-        <div class="btn-group" style="margin-top:8px">
-            <button class="btn btn-sm" @click="$store.app.closeBulkPanel()">Close</button>
-        </div>
-    </div>
-
     <div class="device-manager-empty text-muted"
-         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterPrimusCharacter || $store.app.filterRadiusCharacter || $store.app.filterProductType)"
+         x-show="!$store.app.filteredDevices.length && ($store.conn.devices.length || $store.app.filterPrimusCharacter || $store.app.filterRadiusCharacter || $store.app.filterProductType || $store.app.filterAttentionOnly)"
          x-cloak>
         No devices match the selected filters.
     </div>
@@ -225,21 +138,83 @@
         No devices found yet. Device Manager scans the network automatically every 20 seconds — use "Sync now" for an immediate check.
     </div>
 
-    <template x-for="product in $store.app.productSectionList" :key="product.key">
-        <div class="dm-product-section" x-cloak>
-            <div class="dm-product-header">
-                <span class="dm-product-title" x-text="product.label"></span>
-                <span class="dm-product-count" x-text="product.count"></span>
-            </div>
-            <template x-for="section in product.sections" :key="product.key + '-' + section.key">
-                <div class="dm-section" x-show="section.entries.length" x-cloak>
-                    <div class="dm-section-header">
-                        <span class="dm-section-title" x-text="section.label"></span>
-                        <span class="dm-section-count" x-text="section.entries.length"></span>
+    <!-- Datalists for the performer identity editor -->
+    <datalist id="dm-character-name-options" x-data>
+        <template x-for="name in $store.app.allCharacterNames" :key="name">
+            <option :value="name"></option>
+        </template>
+    </datalist>
+    <datalist id="dm-performer-name-options" x-data>
+        <template x-for="name in $store.app.allPerformerNames" :key="name">
+            <option :value="name"></option>
+        </template>
+    </datalist>
+
+    <!-- Performer-first monitor layout: one section per performer (Primus card
+         first, then Radius), then a single Unassigned section. Card positions
+         are stable — status is shown in place, never by re-sorting. -->
+    <template x-for="section in $store.app.monitorSections" :key="section.key">
+        <div class="dm-performer-section" x-cloak>
+            <div class="dm-performer-header">
+                <div class="dm-performer-heading">
+                    <span class="dm-performer-title"
+                          :class="{ 'dm-performer-title-unassigned': section.type === 'unassigned' }"
+                          x-text="section.type === 'performer' ? section.group.performerName : 'Unassigned'"></span>
+                    <span class="dm-performer-character"
+                          x-show="section.type === 'performer' && section.group.characterLabel"
+                          x-text="section.group?.characterLabel"></span>
+                    <span class="dm-performer-count" x-text="section.entries.length"></span>
+                    <span class="dm-status-pill dm-performer-rollup"
+                          x-show="section.type === 'performer'"
+                          :class="$store.app.groupRollupClass(section.group)"
+                          x-text="$store.app.groupRollupLabel(section.group)"></span>
+                    <button type="button" class="btn btn-sm dm-identity-edit-btn"
+                            x-show="section.type === 'performer' && !$store.app.mobileView"
+                            :class="{ active: $store.app.isIdentityEditorOpen(section.group?.key) }"
+                            title="Edit the character and performer names for every device in this group"
+                            @click="$store.app.toggleIdentityEditor(section.group)">Edit identity</button>
+                </div>
+                <div class="dm-performer-hint" x-show="section.type === 'unassigned'">
+                    These devices have no performer yet. Set a performer name on a card to move it into that performer's group.
+                </div>
+                <template x-if="section.type === 'performer' && $store.app.isIdentityEditorOpen(section.group?.key)">
+                    <div class="dm-identity-editor">
+                        <div class="form-group compact">
+                            <label class="form-label">Character</label>
+                            <input class="form-input form-input-sm" type="text" maxlength="64"
+                                   list="dm-character-name-options"
+                                   x-model="$store.app.identityEditor.character"
+                                   @keydown.enter="$store.app.saveIdentityEditor()"
+                                   @keydown.escape="$store.app.closeIdentityEditor()">
+                        </div>
+                        <div class="form-group compact">
+                            <label class="form-label">Performer</label>
+                            <input class="form-input form-input-sm" type="text" maxlength="64"
+                                   list="dm-performer-name-options"
+                                   x-model="$store.app.identityEditor.performer"
+                                   @keydown.enter="$store.app.saveIdentityEditor()"
+                                   @keydown.escape="$store.app.closeIdentityEditor()">
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-primary"
+                                    :disabled="$store.app.identityEditor.saving"
+                                    @click="$store.app.saveIdentityEditor()"
+                                    x-text="$store.app.identityEditor.saving ? 'Saving…' : 'Save to all'"></button>
+                            <button class="btn btn-sm"
+                                    :disabled="$store.app.identityEditor.saving"
+                                    @click="$store.app.closeIdentityEditor()">Cancel</button>
+                        </div>
+                        <div class="dm-identity-note">
+                            Saves both names to every device in this group
+                            (<span x-text="section.entries.length"></span> device<span x-show="section.entries.length !== 1">s</span>).
+                            Renaming the performer moves the whole group; clearing it moves the devices to Unassigned.
+                        </div>
                     </div>
-                    <div class="device-manager-grid">
-                        <template x-for="entry in section.entries" :key="entry._index">
-                    <div class="device-card dm-card" :class="'dm-card-' + entry._section">
+                </template>
+            </div>
+            <div class="device-manager-grid dm-performer-grid">
+                <template x-for="entry in section.entries" :key="entry.key">
+                    <div class="device-card dm-card" :class="$store.app.cardStatusClass(entry.dev)">
 
                         <!-- Primary heading: Character Name, always editable (placeholder when unset) -->
                         <div class="dm-heading">
@@ -279,10 +254,10 @@
                                   x-text="$store.conn.configFeedbackMessage($store.conn.showInfoFeedbackKey(entry._index, 'character'))"></span>
                             <button type="button" class="dm-expand-toggle"
                                     x-show="!$store.app.mobileView"
-                                    :class="{ 'dm-expand-toggle-open': $store.app.isCardExpanded(entry._index) }"
-                                    :aria-expanded="$store.app.isCardExpanded(entry._index) ? 'true' : 'false'"
-                                    :title="$store.app.isCardExpanded(entry._index) ? 'Collapse configuration' : 'Expand configuration'"
-                                    @click="$store.app.toggleCardExpanded(entry._index)">&#9656;</button>
+                                    :class="{ 'dm-expand-toggle-open': $store.app.isCardExpanded(entry.key) }"
+                                    :aria-expanded="$store.app.isCardExpanded(entry.key) ? 'true' : 'false'"
+                                    :title="$store.app.isCardExpanded(entry.key) ? 'Collapse configuration' : 'Expand configuration'"
+                                    @click="$store.app.toggleCardExpanded(entry.key)">&#9656;</button>
                         </div>
 
                         <!-- Performer Name subheading -->
@@ -354,8 +329,8 @@
                         <div class="dm-row dm-row-ip">
                             <button class="device-ip-button"
                                     :class="{ active: $store.conn.ipConfigDevice === entry._index }"
-                                    :disabled="!$store.conn.canConfigureIp(entry.dev) || $store.app.mobileView || !$store.app.isCardExpanded(entry._index)"
-                                    :title="$store.app.isCardExpanded(entry._index) ? $store.conn.ipConfigHint(entry.dev) : 'Expand card to configure'"
+                                    :disabled="!$store.conn.canConfigureIp(entry.dev) || $store.app.mobileView || !$store.app.isCardExpanded(entry.key)"
+                                    :title="$store.app.isCardExpanded(entry.key) ? $store.conn.ipConfigHint(entry.dev) : 'Expand card to configure'"
                                     @click="$store.conn.ipConfigDevice === entry._index ? $store.conn.closeIpConfig() : $store.conn.openIpConfig(entry._index)"
                                     x-text="entry.dev.ip"></button>
                             <span class="dm-universe" x-show="!$store.app.isRadiusDevice(entry.dev)"
@@ -367,7 +342,7 @@
                         </div>
 
                         <div class="device-ip-config"
-                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index) && $store.conn.ipConfigDevice === entry._index"
+                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry.key) && $store.conn.ipConfigDevice === entry._index"
                              x-cloak>
                             <div class="form-group compact">
                                 <label class="form-label">Static IP</label>
@@ -392,7 +367,7 @@
                         </div>
 
                         <!-- UDP Lanes (Show/Setup/Watch) -->
-                        <div class="dm-row dm-row-lanes" x-show="$store.app.isCardExpanded(entry._index)">
+                        <div class="dm-row dm-row-lanes" x-show="$store.app.isCardExpanded(entry.key)">
                             <button class="device-ip-button"
                                     :class="{ active: $store.conn.lanePortsConfigDevice === entry._index }"
                                     :disabled="!$store.conn.canConfigureLanePorts(entry.dev) || $store.app.mobileView"
@@ -405,7 +380,7 @@
                         </div>
 
                         <div class="device-ip-config"
-                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index) && $store.conn.lanePortsConfigDevice === entry._index"
+                             x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry.key) && $store.conn.lanePortsConfigDevice === entry._index"
                              x-cloak>
                             <div class="form-group compact">
                                 <label class="form-label">Show</label>
@@ -430,7 +405,7 @@
 
                         <!-- Receive Mode -->
                         <div class="dm-row dm-row-receive"
-                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
+                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry.key)"
                              :title="$store.conn.receiveModeHint(entry.dev)"
                              x-init="$store.conn.initReceiveConfigDrafts(entry._index)">
                             <span class="device-config-label">Receive</span>
@@ -458,7 +433,7 @@
 
                         <!-- Outputs + Resolution -->
                         <div class="device-outputs dm-outputs-table"
-                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index)"
+                             x-show="!$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry.key)"
                              :title="$store.conn.outputConfigHint(entry.dev)">
                             <template x-for="(o, oi) in $store.conn.physicalOutputs(entry.dev)" :key="oi">
                                 <div class="device-output-group" x-init="$store.conn.initVirtualConfigDrafts(entry._index)">
@@ -626,7 +601,7 @@
                         </div>
 
                         <section class="device-management-panel"
-                                 x-show="!$store.app.mobileView && !$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry._index) && $store.conn.isPrimusManagementDevice(entry.dev)"
+                                 x-show="!$store.app.mobileView && !$store.app.isRadiusDevice(entry.dev) && $store.app.isCardExpanded(entry.key) && $store.conn.isPrimusManagementDevice(entry.dev)"
                                  x-cloak>
                             <div class="device-setup-heading">
                                 <strong>Management v2 setup</strong>
@@ -709,6 +684,9 @@
                         <div class="device-footer-actions dm-footer">
                             <div class="dm-footer-meta">
                                 <span class="device-profile" x-text="$store.conn.monitorProductLabel(entry.dev)"></span>
+                                <span class="device-profile dm-hardware-label"
+                                      x-show="$store.app.isCardExpanded(entry.key)"
+                                      x-text="$store.conn.monitorHardwareLabel(entry.dev)"></span>
                                 <span class="device-fw-version"
                                       x-show="$store.conn.firmwareLabel(entry.dev) !== '—'"
                                       x-text="'FW ' + $store.conn.firmwareLabel(entry.dev)"></span>
@@ -722,14 +700,12 @@
                                 <span class="device-transport-error" x-show="entry.dev.transport_error" x-text="entry.dev.transport_error"></span>
                             </div>
                             <button class="btn btn-sm btn-danger device-remove-btn"
-                                    x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry._index)"
+                                    x-show="!$store.app.mobileView && $store.app.isCardExpanded(entry.key)"
                                     @click="$store.conn.removeDevice(entry._index)">Remove</button>
                         </div>
                     </div>
                 </template>
-                    </div>
-                </div>
-            </template>
+            </div>
         </div>
     </template>
 </div>

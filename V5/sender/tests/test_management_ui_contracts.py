@@ -186,6 +186,155 @@ function response(state) {{
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_device_manager_monitor_groups_by_performer(self):
+        # The Monitor tab is performer-first: one section per performer, then a
+        # single Unassigned section. The old product/status bucketing
+        # (Primus/Radius x Attention/Online/Offline) is gone as a LAYOUT
+        # mechanism; status is expressed in place (pill, rollup badge, card
+        # border tint).
+        for member in (
+            "get performerGroups()",
+            "get unassignedEntries()",
+            "get monitorSections()",
+            "syncExpandedCards()",
+            "saveIdentityEditor()",
+            "_frozenGroupOrder",
+        ):
+            self.assertIn(member, self.devices_app)
+        for helper in ("deviceKey(dev)", "performerKey(dev)", "hasPerformer(dev)"):
+            self.assertIn(helper, self.conn)
+        # Sections and cards are keyed by stable identity, never array index,
+        # so DOM (and expand state) survives device removal and re-sync...
+        self.assertIn(
+            'x-for="section in $store.app.monitorSections" :key="section.key"',
+            self.devices,
+        )
+        self.assertIn('x-for="entry in section.entries" :key="entry.key"', self.devices)
+        self.assertNotIn(':key="entry._index"', self.devices)
+        # ...while device actions still address the backend by array index.
+        self.assertIn("entry._index", self.devices)
+        self.assertNotIn("productSectionList", self.devices)
+        self.assertNotIn("'dm-card-' + entry._section", self.devices)
+        # Identity editor + datalists of existing names.
+        self.assertIn("dm-character-name-options", self.devices)
+        self.assertIn("dm-performer-name-options", self.devices)
+        self.assertIn("toggleIdentityEditor", self.devices)
+        for selector in (
+            ".dm-performer-section",
+            ".dm-performer-grid",
+            ".dm-identity-editor",
+            ".dm-card-attention",
+            ".dm-card-online",
+            ".dm-card-offline",
+        ):
+            self.assertIn(selector, self.css)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for UI store runtime coverage")
+    def test_performer_grouping_runtime_is_stable_and_index_preserving(self):
+        app_path = os.path.join(WEB_DIR, "js", "app-devices.js")
+        conn_path = os.path.join(WEB_DIR, "js", "device-conn.js")
+        script = f"""
+const fs = require("fs");
+const vm = require("vm");
+const stores = {{}};
+const context = {{
+  console,
+  URLSearchParams,
+  setTimeout,
+  clearTimeout,
+  setInterval,
+  clearInterval,
+  fetch() {{ return new Promise(() => {{}}); }},
+  window: {{
+    location: {{search: ""}},
+    localStorage: {{getItem() {{ return null; }}, setItem() {{}}}},
+  }},
+  document: {{
+    title: "",
+    dispatchEvent() {{}},
+    addEventListener(name, callback) {{
+      if (name === "alpine:init") callback();
+    }},
+  }},
+  CustomEvent: function CustomEvent() {{}},
+  Alpine: {{
+    store(name, value) {{
+      if (arguments.length === 2) stores[name] = value;
+      return stores[name];
+    }},
+  }},
+}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync({json.dumps(app_path)}, "utf8"), context, {{filename: "app-devices.js"}});
+vm.runInContext(fs.readFileSync({json.dumps(conn_path)}, "utf8"), context, {{filename: "device-conn.js"}});
+const app = stores.app;
+const devices = [
+  {{name: "zoe-led", ip: "10.0.0.2", performer_name: "Zoe", character_name: "Queen",
+    receiver_online: true, capabilities: {{}}}},
+  {{name: "zoe-audio", ip: "10.0.0.3", performer_name: "  zoe ", is_radius: true,
+    receiver_online: false}},
+  {{name: "amy-led", ip: "10.0.0.1", performer_name: "Amy", character_name: "Page",
+    receiver_online: true, battery_pct: 5, capabilities: {{battery: true}}}},
+  {{name: "fresh", ip: "10.0.0.9", receiver_online: true, capabilities: {{}}}},
+];
+app.state = {{devices}};
+const groups = app.performerGroups;
+if (groups.map(g => g.key).join(",") !== "amy,zoe") {{
+  throw new Error("groups not sorted alphabetically: " + groups.map(g => g.key));
+}}
+const zoe = groups[1];
+if (zoe.devices.map(e => e.key).join(",") !== "10.0.0.2,10.0.0.3") {{
+  throw new Error("zoe devices not primus-first/key-ordered");
+}}
+if (zoe.devices.map(e => e._index).join(",") !== "0,1") {{
+  throw new Error("entry._index not preserved for backend addressing");
+}}
+if (!zoe.hasPrimus || !zoe.hasRadius || zoe.performerName !== "Zoe") {{
+  throw new Error("zoe group shape wrong (whitespace/case merge failed)");
+}}
+if (groups[0].worstStatus !== "attention" || zoe.worstStatus !== "offline") {{
+  throw new Error("worstStatus rollup wrong");
+}}
+if (app.unassignedEntries.map(e => e.key).join(",") !== "10.0.0.9") {{
+  throw new Error("unassigned bucket wrong");
+}}
+const sections = app.monitorSections;
+if (sections.map(s => s.key).join(",") !== "perf:amy,perf:zoe,unassigned") {{
+  throw new Error("monitor sections wrong: " + sections.map(s => s.key));
+}}
+// Flip every volatile status field and reverse backend order: positions
+// must not move (stability contract).
+const shuffled = [devices[3], devices[1], devices[0], devices[2]].map(d => ({{...d}}));
+shuffled.forEach(d => {{ d.receiver_online = !d.receiver_online; }});
+shuffled[3].battery_pct = 100;
+shuffled[2].transport_error = "send failed";
+app.state = {{devices: shuffled}};
+const after = app.performerGroups;
+if (after.map(g => g.key).join(",") !== "amy,zoe") {{
+  throw new Error("group order changed after status flap/re-sync");
+}}
+if (after[1].devices.map(e => e.key).join(",") !== "10.0.0.2,10.0.0.3") {{
+  throw new Error("device order changed after status flap/re-sync");
+}}
+if (after[1].devices.map(e => e._index).join(",") !== "2,1") {{
+  throw new Error("entry._index did not track the new backend positions");
+}}
+// Expand state is keyed by device key and pruned by the reconciler.
+app.expandedCards = {{"10.0.0.2": true, "10.9.9.9": true}};
+app.syncExpandedCards();
+if (!app.expandedCards["10.0.0.2"] || app.expandedCards["10.9.9.9"]) {{
+  throw new Error("syncExpandedCards did not prune by stable key");
+}}
+"""
+        completed = subprocess.run(
+            ["node", "-e", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_radius_and_mobile_surfaces_do_not_expose_primus_setup(self):
         self.assertIn("!$store.app.isRadiusDevice(entry.dev)", self.devices)
         self.assertIn("!$store.app.mobileView", self.devices)

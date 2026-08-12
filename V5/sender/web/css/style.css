@@ -4690,6 +4690,121 @@ input[type="color"] {
     color: var(--accent);
 }
 
+/* ── Performer Grouping (Device Manager monitor layout) ── */
+/* One section per performer; cards keep a stable position inside the group
+   (Primus first, then Radius). Status is expressed in place via the pill,
+   the heading rollup badge, and the per-card left-border tint below. */
+
+.dm-performer-section {
+    margin-bottom: 28px;
+}
+
+.dm-performer-header {
+    margin-bottom: 12px;
+}
+
+.dm-performer-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.dm-performer-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.dm-performer-title-unassigned {
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 13px;
+}
+
+.dm-performer-character {
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+.dm-performer-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: monospace;
+}
+
+.dm-performer-rollup {
+    margin-left: 2px;
+}
+
+.dm-identity-edit-btn {
+    margin-left: auto;
+    padding: 3px 10px;
+    font-size: 11px;
+}
+
+.dm-identity-edit-btn.active {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.dm-performer-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.dm-identity-editor {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-dim);
+    border-radius: var(--radius);
+}
+
+.dm-identity-editor .form-group.compact {
+    margin-bottom: 0;
+    min-width: 180px;
+}
+
+.dm-identity-note {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Constrain card width inside a performer group so a performer's Primus and
+   Radius cards sit side by side instead of stretching across the row. */
+.dm-performer-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 320px));
+}
+
+/* Per-card status signal (replaces the old Attention/Online/Offline layout
+   sections): left-border tint matching the status pill colors. */
+.dm-card-attention {
+    border-left: 3px solid var(--danger);
+}
+
+.dm-card-online {
+    border-left: 3px solid color-mix(in srgb, var(--success) 60%, var(--border));
+}
+
+.dm-card-offline {
+    border-left: 3px solid color-mix(in srgb, var(--warning) 60%, var(--border));
+}
+
+.dm-hardware-label {
+    color: var(--text-muted);
+}
+
 /* ── Management-v2 output, telemetry, and production setup ── */
 
 .device-descriptor-open {
