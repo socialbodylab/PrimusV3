@@ -718,11 +718,16 @@ def main():
     # Shared by the auto-shutdown monitor and /api/server/stop so both agree on
     # whether it is safe to quit.
     server.live_output_fn = _ui_has_live_output
+    url = f"http://127.0.0.1:{port}{frontend_path}"
     if not args.no_browser:
         server.ui_focus_callback = _dedicated_browser.focus
         ui_focus_server = UiFocusServer(port, _dedicated_browser.focus)
         ui_focus_server.start()
-    url = f"http://127.0.0.1:{port}{frontend_path}"
+        # The lifecycle monitor reopens our window when all windows are
+        # closed but live output forbids quitting — a windowless resident
+        # app swallows relaunches (macOS just activates the running
+        # process) and looks like an app that won't open.
+        server.ui_reopen_callback = lambda: _open_browser(url)
     lan_url = None
     if args.lan:
         try:

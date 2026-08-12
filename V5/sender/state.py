@@ -4465,6 +4465,20 @@ class ControllerState:
         with self.lock:
             self._set_playback_source_unlocked(self.SOURCE_IDLE)
 
+    def release_ui_preview(self):
+        """Release the mixer preview when no UI is left to own it.
+
+        Called by the UI-lifecycle monitor after the last window closes: a
+        preview is editing state, not show output, and letting it hold
+        playback_source="mixer" kept the auto-quit brake on forever.
+        Returns True when a preview was actually released.
+        """
+        with self.lock:
+            if self.playback_source != self.SOURCE_MIXER:
+                return False
+            self._set_playback_source_unlocked(self.SOURCE_IDLE)
+            return True
+
     def set_playback_source(self, source):
         """Explicitly set the playback source.
 
