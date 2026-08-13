@@ -125,7 +125,7 @@ references.
 ## SHA-256
 
 ```text
-PRIMUS_DIGEST  PrimusCentral-0.99-macOS-arm64.dmg
-RADIUS_DIGEST  RadiusCentral-0.99-macOS-arm64.dmg
-DEVICES_DIGEST  DeviceManager-0.99-macOS-arm64.dmg
+0a9ed3e93c3d76105d5aa40494679ec116cae5b8f308cc963cb88581fb0b1f33  PrimusCentral-0.99-macOS-arm64.dmg
+8c10924d2593d87ed4728e840a46475590e8c5c2dd067f879f8b3c6e13e92b77  RadiusCentral-0.99-macOS-arm64.dmg
+749140b72e8a48b011ff7155b2b3d77e7dae4ff150ef002fec28bd73109178f7  DeviceManager-0.99-macOS-arm64.dmg
 ```
