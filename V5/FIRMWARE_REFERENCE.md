@@ -6,8 +6,8 @@ Single-file reference for both receiver firmwares. Read directly from source, no
 |---|---|
 | **Primus source** | `V5/Arduino/primusV3_receiver/` — `primusV3_receiver.ino`, `config.h`, `receive_mode.h`, `management_protocol.h`, `display.h`, `buttons.h`, `battery.h` |
 | **Primus firmware** | `PrimusV3.6` v3.14.1 · NVS namespace `primus35` |
-| **Radius source** | `V5/Arduino/radius_receiver/` — `radius_receiver.ino`, `config.h`, `audio.h`, `cues.h`, `ftp.h`, `telemetry.h`, `marius.h` |
-| **Radius firmware** | NVS namespace `artnet` |
+| **Radius source** | `V5/Arduino/radius_receiver/` — `radius_receiver.ino`, `config.h`, `audio.h`, `battery.h`, `cues.h`, `ftp.h`, `marius.h`, `build_opt.h` |
+| **Radius firmware** | v4.20 · NVS namespace `artnet` |
 
 > ⚠️ markers flag behaviour that differs from the design docs, or that surprises. They are the rows worth reading twice.
 
@@ -183,6 +183,25 @@ ended (a paused loop restarted itself; a paused one-shot was cleaned up).
 `audioIsPlaying()` (FTP guard, PRS playing flag, heartbeat) stays true, and
 there is no resume command — resume by re-sending Play.
 
+**Volume cache invalidation (firmware 4.19):** `_applyVolume()` skips the
+SPI write when the requested volume hasn't changed — but track-end hiss-kill,
+pause, and the test tone's internal `reset()` all mute the codec *behind*
+that cache. On 4.16–4.18 the next play at an unchanged volume matched the
+cache, skipped the hardware write, and decoded into silence while PTR
+honestly reported `playing` — the "hello, then one track works, then
+nothing" pattern. All three mute paths now invalidate the cache
+(`_lastAppliedVolume = 255`); the test-tone path only invalidates, since an
+SCI write right after `sineTest()` can be dropped while DREQ is low.
+
+**Decoder soft-reset on track switch (firmware 4.20):** aborting a WAV
+mid-stream with the library's `stopPlaying()` leaves the VS1053 holding
+stale stream state, and the next track decodes at the wrong sample rate —
+audibly slow. Explicit stops and mid-play switches now run
+`_cancelPlayback()`: `stopPlaying()` → 5 ms → `softReset()` → mute + cache
+invalidate. Costs ~100 ms, only on an explicit switch or stop — never in the
+streaming path; natural track end consumes the stream fully and needs none
+of it.
+
 ### OSC (UDP 53001)
 
 | Address | Effect |
@@ -211,7 +230,7 @@ Any ArtAudioCmd arriving while FTP is running stops the FTP server first; conver
 | Radius | Packet rate | `PFP` | sender : `portWatch` | 7 B | 1 Hz |
 | Radius | Unified status | `PRS` | sender : `portWatch` | 17 B | 1 Hz + MAC jitter, anti-phase to `PTR`/`PFP` (firmware 4.16+) |
 
-⚠️ **Primus pins all three reply paths to literal `PORT_SHOW_DEFAULT` (6454)** — `ino:1315`, `:1474`, `:1578` — rather than the runtime `portShow`. Move Primus's Show lane via mgmt `0x17` and it listens on the new port but keeps answering on the old one. Radius discovery replies follow `portDiscovery` and do not have this problem.
+⚠️ **Primus pins all three reply paths to literal `PORT_SHOW_DEFAULT` (6454)** — `sendArtPollReply`, `sendShowInfoReply`, `sendManagementReplyPacket` — rather than the runtime `portShow`. Move Primus's Show lane via mgmt `0x17` and it listens on the new port but keeps answering on the old one. Radius discovery replies follow `portDiscovery` and do not have this problem.
 
 ⚠️ **Primus sends no telemetry at all until mgmt op `0x11` sets a target.** There is no broadcast fallback.
 
@@ -259,9 +278,9 @@ Grid 8x4 defaulting to **1** virtual pixel is deliberate: a Badge ships 3 bytes 
 | Buttons | — | — | D0 `INPUT_PULLUP` active-LOW · D1 `INPUT_PULLDOWN` active-HIGH |
 | Battery sense | A13, LiPo 3.2–4.2 V | none | A4 / GPIO14, 5 V rail, 100k/100k ÷2 |
 | Outputs WiFi-gated | no | no | **yes** |
-| Feature flags `F:` | `RIOHBMSG` | `RIOHMSG` | `RIOHBMSG` |
+| Feature flags `F:` | `RIOHBMSGL` | `RIOHMSGL` | `RIOHBMSGL` |
 
-**Flags:** **R**ename · **I**P config · **O**utput config · **H**ello/identify · **B**attery · **M**ode config · **S**how info · **G**roups.
+**Flags:** **R**ename · **I**P config · **O**utput config · **H**ello/identify · **B**attery · **M**ode config · **S**how info · **G** management protocol (informational only in `F:` — the sender gates management on the separate `\|G:` token, not this letter) · **L**ane-aware (firmware binds a separate Setup lane; added 3.14.1).
 
 ⚠️ `CLAUDE.md` still describes V3.1 as NeoPXL8 on GPIO14/15. That is the legacy FeatherWing path — still compiled behind `PRIMUS_DRIVER_NEOPXL8`, but no current profile selects it. `config.h:113` is authoritative.
 
@@ -398,7 +417,7 @@ Sent on every play/stop/pause/loop transition, plus a 1 Hz heartbeat while playi
 ## 12. Capability tag — ArtPollReply Node Report, 64-byte hard limit
 
 ```
-#0001 [0042] OK|PV3CAP1|F:RIOHBMSG|B:v31|SHOW:6454|MGMT:6457|TELE:6455|IP:D|U:C:0|G:1P|0:4:0:1|1:2:0:72
+#0001 [0042] OK|PV3CAP1|F:RIOHBMSGL|B:v31|IP:D|U:C:0|0:4:0:1|1:2:0:72|G:1P
 ```
 
 | Order | Token | Meaning | Why in this position |
@@ -406,20 +425,27 @@ Sent on every play/stop/pause/loop transition, plus a 1 Hz heartbeat while playi
 | 1 | `#nnnn [pkts] OK\|PV3CAP1` | counter + versioned prefix | identifies the tag |
 | 2 | `F:` | feature flags | **first** — losing it degrades the device to "unconfirmed legacy hardware" with rename, hello, IP, output, receive-mode, battery and show-info all disabled |
 | 3 | `B:` | board profile code | drives the hardware label in the UI |
-| 4 | `SHOW:` `MGMT:` `TELE:` | advertised lane ports | lets the sender find the Setup lane; absence falls back to Show |
-| 5 | `IP:` | `S` static / `D` DHCP | |
-| 6 | `U:` | `C`ombined / `S`plit + base universe | |
-| 7 | `G:` | groups schema + `L`ocked / `P`rototype | |
-| 8 | `port:type:universe:virtual` | per-output tuples | **last**, first dropped on overflow; only appended when the whole token fits, since a truncated tuple would look valid but mis-report the output type |
+| 4 | `IP:` | `S` static / `D` DHCP | |
+| 5 | `U:` | `C`ombined / `S`plit + base universe | |
+| 6 | `SHOW:` `MGMT:` `TELE:` | lane ports — **only emitted for a lane moved off its default** (firmware 3.14.1+) | a node whose Setup lane moved but cannot say so is unmanageable; `L` in `F:` + no lane token means "on the documented defaults", no `L` means pre-lane firmware with Setup on Show |
+| 7 | `port:type:universe:virtual` | per-output tuples | only appended when the whole token fits — a truncated tuple looks valid but mis-reports the output type; the sender keeps last-known values when they vanish |
+| 8 | `G:` | management protocol version + `L`ocked / `P`rototype | ⚠️ ranked last on the theory that nothing parses it — **wrong**: the sender's `MANAGEMENT_TOKEN_RE` gates `management_supported` on it, so a report loaded heavily enough to drop `G:` silently disables all `0x8140` management for that device. Known issue (see CHANGES.md). |
 
-Firmware **3.12+** moved `F:` to immediately after the prefix. Earlier firmware put it last, where it could be silently truncated away.
+Firmware **3.12+** moved `F:` to immediately after the prefix (earlier
+firmware put it last, where it was silently truncated away). Firmware
+**3.14.1** removed the unconditional `SHOW:/MGMT:/TELE:` triple — those 30
+bytes alone overflowed the report on every device — introduced the `L` flag,
+and applied the whole-token-or-nothing guard to lane tokens and `G:` as well
+as the tuples. **Note:** the lane split itself shipped under an unchanged
+3.14.0 version string, so two different firmwares report 3.14.0; `L` is the
+reliable signal, not the version.
 
 With 2 active outputs, a 3-digit base universe, combined mode and a static IP, the full token set exceeds 64 bytes routinely — **truncation is the normal case, not an edge case.**
 
 ### Radius Node Report (firmware 4.16+)
 
 ```
-#0001 [0042] OK|PVRAD1|B:v1|F:RIHASB|IP:D|V:4.16|MC:1|MP:PuckName
+#0001 [0042] OK|PVRAD1|B:v1|F:RIHASB|IP:D|V:4.20|MC:1|MP:PuckName
 ```
 
 | Order | Token | Meaning |
@@ -497,6 +523,6 @@ Worth reconciling when that file is next updated:
 
 1. **Telemetry format.** V5 sends the 28-byte `PST` unified status packet, not the 7-byte `PFP` packet. Unicast to a configured target only; no broadcast fallback.
 2. **V3.1 output pins.** A0/GPIO17 and A1/GPIO18, direct NeoPixel — not NeoPXL8 on GPIO14/15.
-3. **Capability tag.** Now carries `SHOW:`/`MGMT:`/`TELE:` lane-port tokens between `B:` and `IP:`.
+3. **Capability tag.** Lane-port tokens (`SHOW:`/`MGMT:`/`TELE:`) are emitted **only for lanes moved off their defaults** (3.14.1+); `L` in `F:` marks lane-aware firmware. A node on defaults shows no lane token.
 4. **Reply port.** Primus replies are pinned to literal 6454 and do not follow a reconfigured `portShow`.
 5. **OSC on Radius.** Firmware binds UDP 53001; `PORT_ORGANIZATION.md` says it is app-local only.

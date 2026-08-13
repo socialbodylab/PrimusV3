@@ -25,8 +25,8 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - Package: `python3 V5/build_sender_app.py --target macos --product radius --name RadiusCentral`
 - Web UI: `V5/sender/web/index.html` (served at `/radius`); shows a blocking banner if the backend does not answer with the radius shape.
 - App data: unified under `PrimusV3/V5/sender/` — on first launch `run.py` copies legacy `RadiusV3/V5/sender/` data (`.radius_state.json`, `audio_cues.json`, `audio/`) across, and `ControllerState.restore_devices()` imports device lists saved by the old standalone backend.
-- Firmware: `V5/Arduino/radius_receiver/` + `radius_upload.sh` (profiles `radius_v1` HUZZAH32 + Music Maker, `radius_v2` S3 ReverseTFT). Firmware 4.17 is canonical: features `RIHASB`, Node Report order `F:` first with whole-token guard, `build_opt.h` disables unused NimBLE roles to fit flash, pause reports `playback_state=2` and holds position (4.16's pause self-restarted loops).
-- Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|F:RIHASB|IP:D|V:4.17`
+- Firmware: `V5/Arduino/radius_receiver/` + `radius_upload.sh` (profiles `radius_v1` HUZZAH32 + Music Maker, `radius_v2` S3 ReverseTFT). Firmware **4.20** is canonical: features `RIHASB`, Node Report `F:` first with whole-token guard, `build_opt.h` disables unused NimBLE roles to fit flash (do not delete it). Ledger: 4.17 pause holds position (`playback_state=2`; 4.16's pause self-restarted loops), 4.18 filenames 32→64 chars everywhere, 4.19 volume-cache invalidation when muting behind it (fixed silent sequential playback), 4.20 decoder soft-reset on explicit stop/track-switch (fixed slow playback). Volume byte maps onto the codec's full 127 dB attenuation — usable range ~50–100; UIs clamp.
+- Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd, `0x8220` ArtLanePorts; shared `0x8200` ArtIPConfig, `0x8210` ArtShowInfo; capability tag `PVRAD1|B:v1|F:RIHASB|IP:D|V:4.20`
 - Telemetry on UDP 6455: `PTR` (current filename + playback state, byte-frozen) and, firmware 4.16+, the 17-byte `PRS` status packet (sequence, uptime, flags incl. SD/FTP/playing/Marius, RSSI, battery from the HUZZAH32 A13 VBAT/2 divider — one ADC sample/s with EMA, never blocking the VS1053 feed). `PrimusTelemetryListener` demuxes PST/PBT/PFP/PTR/PRS; exact byte layouts in `V5/FIRMWARE_REFERENCE.md`.
 
 **Launcher contract (all three apps).** There is one backend process; the apps are launchers onto its frontends. Before attaching, a launcher must answer three questions, and `central_launcher.evaluate_server()` is where that happens: is a Central running, can it serve *my product*, and can it serve *my capabilities* (drive output). A mismatch must never silently attach — packaged apps are windowed with no console, so a silent decision is indistinguishable from a failed launch. Key pieces:
@@ -105,12 +105,17 @@ Same module layout as V4 Primus path, but not used for current PrimusCentral rel
 
 ### Docs
 - `README.md` - Project overview, V5 quick start, packaging marker summary.
-- `V5/README.md` - V5 documentation index, PrimusCentral and RadiusCentral quick start.
+- `V5/README.md` - **The documentation index.** Start here.
+- `V5/CHANGES.md` - The 2026-08 unification milestone: what changed, why, and the honest still-needs-work list.
+- `V5/ARCHITECTURE.md` - Unified backend as implemented (process model, tick, telemetry, launcher contract, lifecycle, persistence).
+- `V5/API_REFERENCE.md` - **Canonical HTTP API** (all routes) + Art-Net integration guide + custom-opcode wire formats. Root `API_REFERENCE.md` is just a pointer now.
+- `V5/PORTS_AND_LANES.md` - UDP lane model as implemented (Show/Setup/Watch, `L` flag, dual-listen state, recovery).
+- `V5/FIRMWARE_REFERENCE.md` - Receiver firmware behavior, telemetry byte layouts, capability tags (both families).
+- `V5/PRIMUS_FIRMWARE_MAP.md` - Primus firmware internals map.
+- `V5/RADIUS_INTEGRATION.md` - Mixed Primus/Radius monitoring and show identity.
 - `V5/PACKAGING.md` - App packaging, signing, notarization, DMG creation, and packaged FPS validation.
-- `API_REFERENCE.md` - Network protocol, HTTP API, sharing endpoints, performance diagnostics, packaging touchpoints.
-- `V3_6/README.md` - Historical V3.6 protocol/source reference.
-- `V3_6/FIRMWARE_DEVELOPMENT.md` - Firmware profiles, pins, protocol contracts, and validation.
-- `V3_6/SENDER_DEVELOPMENT.md` - Sender architecture, discovery metadata, API behavior, and tests.
+- `docs/archive/`, `V5/docs/archive/` - Historical handoffs, audits, and planning snapshots. Not authoritative.
+- `V3_6/README.md`, `V3_6/FIRMWARE_DEVELOPMENT.md`, `V3_6/SENDER_DEVELOPMENT.md` - Historical V3.6 track reference.
 
 ## Critical sync points
 
@@ -123,8 +128,8 @@ The sender and receiver must agree on:
 - **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration.
 - **Discovery capability tag**: `PV3CAP1|F:RIOHM|B:<profile>|IP:D|U:S:0|...` in ArtPollReply Node Report (`U:C:N` for combined mode; trailing `...` is the per-output `port:type:universe[:virtual]` tuples, with the optional fourth field being virtual pixel count on firmware 3.11+). Firmware **3.12+** put `F:` (feature flags) right after the `PV3CAP1` prefix instead of last — the Node Report is a hard 64-byte Art-Net field, and with 2 outputs + a 3-digit base universe + combined mode + a static IP the full token set can exceed that, so whatever comes last risks silent truncation. `F:` gates nearly every capability the sender can act on (rename, hello, IP config, output config, receive mode, battery, show info), so losing it is far worse than losing the lower-stakes per-output tuples, which now come last instead.
 - **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config, `M` receive mode config, `B` battery telemetry, `S` show info storage, `L` Setup-lane aware.
-- **Lane ports (firmware 3.14+)**: Show 6454 / Setup 6457 / Watch 6455. A node advertises `SHOW:`/`MGMT:`/`TELE:` **only for a lane moved off its default** — the full 30-byte triple alone overflows the 64-byte Node Report and silently ate `IP:`, `U:`, `G:` and all per-output tuples. `L` in `F:` is what marks a node lane-aware, so `L` + no lane token means "on the documented defaults" and no `L` means pre-lane firmware whose Setup stays on the Show port. Node Report priority under pressure: `F:` → `B:` → `IP:` → `U:` → moved-lane tokens → per-output tuples → `G:` (last; nothing parses it). Every token is appended only if it fits whole — a truncated `|MGMT:645` parses as a plausible port and would black-hole all Setup traffic.
-- **FPS telemetry**: 7-byte `PFP` packets on UDP 6455.
+- **Lane ports (firmware 3.14+)**: Show 6454 / Setup 6457 / Watch 6455. A node advertises `SHOW:`/`MGMT:`/`TELE:` **only for a lane moved off its default** — the full 30-byte triple alone overflows the 64-byte Node Report and silently ate `IP:`, `U:`, `G:` and all per-output tuples. `L` in `F:` is what marks a node lane-aware, so `L` + no lane token means "on the documented defaults" and no `L` means pre-lane firmware whose Setup stays on the Show port. Node Report priority under pressure: `F:` → `B:` → `IP:` → `U:` → moved-lane tokens → per-output tuples → `G:` (last — but NOTE: the sender DOES parse `G:` and gates `management_supported` on it, so dropping it silently disables all 0x8140 management; known issue, see `V5/CHANGES.md`). Every token is appended only if it fits whole — a truncated `|MGMT:645` parses as a plausible port and would black-hole all Setup traffic.
+- **Primus telemetry**: firmware 3.14+ sends the 28-byte `PST` unified status packet (fps, packet rate, flags, battery, lock state) on UDP 6455, unicast only after a telemetry target is set via mgmt op `0x11` — no broadcast fallback. The 7-byte `PFP` and 9-byte `PBT` packets are legacy (pre-3.14) and still parsed.
 - **Radius telemetry**: `PTR` (byte-frozen: magic, state, nameLen, filename) and the 17-byte `PRS` status packet (firmware 4.16+: version, sequence u16 BE, uptime u32 BE, flags u16 BE, RSSI i8, battery power mode, battery mV u16 BE, battery pct) on UDP 6455, both parsed by `PrimusTelemetryListener` and `parse_prs_packet` in `artnet.py`. Radius feature string is `RIHASB` (`B` = battery).
 - **Device identity**: ArtPollReply bytes 201-206 (MAC) become `device_uid` (`ip:<addr>` fallback) — the stable key for performer grouping and client-side card state; persisted across restarts.
 - **Brightness**: sender-side RGB scaling only; no receiver brightness channel.
@@ -171,7 +176,7 @@ Use `--auto` only when exactly one ESP32-like serial port is connected. Use `--a
 
 ## Packaging and release marker
 
-Shipped PrimusCentral releases v0.81–v0.92 were built from **V4** with `--product primus`. **v0.97 is the first release built from V5**, for both PrimusCentral and DeviceManager. Note that PrimusCentral and DeviceManager share one `v0.9x` tag stream and one `APP_VERSION` in `V5/sender/version.py` — DeviceManager reached v0.96 while PrimusCentral was still at v0.92, so pick the next free number in the shared stream rather than incrementing either product on its own. RadiusCentral versions separately under `RadiusCentral-v0.9x` tags. The v0.65 release is an important packaged macOS performance marker from the earlier V3_6 line. It fixed an FPS drop where source `run.py` and direct binary execution reached about 30 FPS, but a real `.app` LaunchServices/Finder launch dropped to about 15-20 FPS. Future packaged FPS validation must launch the app through Finder or LaunchServices, not by running `PrimusCentral.app/Contents/MacOS/PrimusCentral` directly.
+Shipped PrimusCentral releases v0.81–v0.92 were built from **V4** with `--product primus`. **v0.97 is the first release built from V5**, for both PrimusCentral and DeviceManager. **Since v0.99 all three apps (PrimusCentral, RadiusCentral, DeviceManager) ship together under one `v0.9x` tag** with one `APP_VERSION` in `V5/sender/version.py` — pick the next free number in that single stream. (Historically PrimusCentral/DeviceManager shared `v0.9x` while RadiusCentral tagged separately as `RadiusCentral-v0.9x`; that split ended at v0.99.) The v0.65 release is an important packaged macOS performance marker from the earlier V3_6 line. It fixed an FPS drop where source `run.py` and direct binary execution reached about 30 FPS, but a real `.app` LaunchServices/Finder launch dropped to about 15-20 FPS. Future packaged FPS validation must launch the app through Finder or LaunchServices, not by running `PrimusCentral.app/Contents/MacOS/PrimusCentral` directly.
 
 Validated macOS release identity:
 - App name: `PrimusCentral.app`
@@ -280,5 +285,5 @@ none, solid, pulse, linear, constrainbow, rainbow, noise, static_noise, sparkle_
 
 - V1 Huzzah32: direct NeoPixel outputs on GPIO32/GPIO12, LED_BUILTIN WiFi indicator.
 - V2 ESP32 Feather: direct NeoPixel outputs on GPIO32/GPIO12, onboard NeoPixel WiFi indicator.
-- V3.1 Reverse TFT Feather: NeoPXL8 FeatherWing outputs 6/7 on GPIO14/GPIO15, 240x135 ST7789 TFT, D0/D1 buttons.
+- V3.1 Reverse TFT Feather: direct NeoPixel outputs on A0/GPIO17 and A1/GPIO18, 240x135 ST7789 TFT, D0/D1 buttons, outputs WiFi-gated. (The NeoPXL8 FeatherWing path on GPIO14/15 still compiles behind `PRIMUS_DRIVER_NEOPXL8` but no current profile selects it.)
 - Max 122 LEDs per port, 2 active ports per node.

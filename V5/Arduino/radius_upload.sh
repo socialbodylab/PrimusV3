@@ -3,12 +3,12 @@
 # Usage:
 #   ./upload.sh --ports                   # list likely ESP32 serial ports
 #   ./upload.sh --ports-json              # list likely ESP32 serial ports as JSON
-#   ./upload.sh -v3 --auto                # compile, then upload if exactly one ESP32-like port is connected
+#   ./upload.sh -v1 --auto                # compile, then upload if exactly one ESP32-like port is connected
 #   ./upload.sh -v2 --all                 # compile, then upload selected profile to every detected ESP32-like port
 #   ./upload.sh -v1 --compile             # compile V1 only, like Arduino IDE Verify
 #   ./upload.sh -v2 /dev/cu.usb...        # compile, then upload V2 to an explicit port
 #   ./upload.sh -v2 -ssid PrimusRouter -pw router-password --auto # override WiFi defaults for this build
-#   ./upload.sh -v3 --name StageLeft --auto # override default device name for this build
+#   ./upload.sh -v1 --name StageLeft --auto # override default device name for this build
 #   ./upload.sh -v1 /dev/cu.usb1 /dev/cu.usb2 # upload selected profile to explicit ports
 #   ./upload.sh -v2 --baud 115200 /dev/cu.usb... # override upload speed
 #   ./upload.sh --install                 # install libraries for selected board
@@ -82,7 +82,7 @@ Usage:
     ./upload.sh --ports-json
       List likely ESP32 serial ports as machine-readable JSON.
 
-  ./upload.sh -v3 --auto
+  ./upload.sh -v1 --auto
       Compile first, then upload when exactly one ESP32-like serial port is connected.
 
   ./upload.sh -v2 --all
@@ -97,7 +97,7 @@ Usage:
   ./upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
       Compile with WiFi credential overrides for this build, then upload.
 
-    ./upload.sh -v3 --name "StageLeft" --auto
+    ./upload.sh -v1 --name "StageLeft" --auto
       Compile with a default Art-Net short-name override for this build.
 
   Behavior:
@@ -105,8 +105,10 @@ Usage:
     --compile before uploading; use --compile only when you want a verify-only pass.
 
 Flags:
-  -v1, -v2, -v3          Select hardware profile. Default: -v3.
-  --board v1|v2|v3       Long-form hardware profile selection.
+  -v1, -v2               Select Radius hardware profile (aliases -rv1/-rv2).
+                           v1 = HUZZAH32 + Music Maker, v2 = S3 Reverse TFT.
+                           Default: -v1.
+  --board radius_v1|radius_v2   Long-form hardware profile selection.
   --auto, -auto            Select the only detected ESP32-like serial port.
   --all, -all              Select every detected ESP32-like serial port.
   --all-ports              Alias for --all.

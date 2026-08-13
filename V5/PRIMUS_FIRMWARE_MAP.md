@@ -1,6 +1,6 @@
 # Primus Receiver Firmware Map (V5)
 
-Source: `V5/Arduino/primusV3_receiver/` — `primusV3_receiver.ino` (2595 L), `config.h`, `receive_mode.h`, `management_protocol.h`, `display.h`, `buttons.h`, `battery.h`.
+Source: `V5/Arduino/primusV3_receiver/` — `primusV3_receiver.ino` (~2600 L), `config.h`, `receive_mode.h`, `management_protocol.h`, `display.h`, `buttons.h`, `battery.h`.
 Firmware `PrimusV3.6` **3.14.1**, NVS namespace `primus35`.
 
 ---
@@ -146,9 +146,9 @@ Errors: `1` malformed · `2` bad version · `3` unsupported op · `4` invalid pa
 | TFT / buttons | — | — | 240×135 ST7789 + D0/D1 |
 | Battery sense | A13, LiPo 3.2–4.2 V | none | A4 / GPIO14, 5 V rail, ÷2 divider |
 | Outputs WiFi-gated | no | no | **yes** (buck/boost spin-up) |
-| Feature flags `F:` | `RIOHBMSG` | `RIOHMSG` | `RIOHBMSG` |
+| Feature flags `F:` | `RIOHBMSGL` | `RIOHMSGL` | `RIOHBMSGL` |
 
-Flags: **R**ename · **I**P config · **O**utput config · **H**ello/identify · **B**attery · **M**ode config · **S**how info · **G**roups.
+Flags: **R**ename · **I**P config · **O**utput config · **H**ello/identify · **B**attery · **M**ode config · **S**how info · **G** management protocol (informational only here — the sender gates management on the separate `|G:` token) · **L**ane-aware (binds a separate Setup lane, 3.14.1+).
 
 Buttons (V3.1 only): **D0** `INPUT_PULLUP`, active-LOW → cycle info screens. **D1** `INPUT_PULLDOWN`, active-HIGH → short press = test mode / edit commit, long press ≥600 ms = cycle edit focus (Out0 → Out1 → Receive). In production mode D1-long unlocks to prototype, D1-short toggles TFT power.
 
@@ -224,21 +224,23 @@ Build-time overrides are gated by `PRIMUSV3_OVERRIDE_BUILD_ID`: a flashed overri
 
 ## 10. Discovery capability tag (ArtPollReply Node Report)
 
-64-byte hard limit — tokens are emitted most-important-first and truncate from the tail:
+64-byte hard limit — tokens are emitted most-important-first, and every token
+from the lane ports onward appends whole-or-not-at-all (a truncated
+`|MGMT:645` parses as a plausible port and would black-hole Setup traffic):
 
 ```
-#0001 [pkts] OK|PV3CAP1|F:RIOHBMSG|B:v31|SHOW:6454|MGMT:6457|TELE:6455|IP:D|U:C:0|G:1P|0:4:0:1|1:2:0:72
+#0001 [pkts] OK|PV3CAP1|F:RIOHBMSGL|B:v31|IP:D|U:C:0|0:4:0:1|1:2:0:72|G:1P
 ```
 
 | Token | Meaning |
 |---|---|
 | `F:` | feature flags — **first**, because losing it degrades the device to "unconfirmed legacy" |
 | `B:` | board profile code |
-| `SHOW:`/`MGMT:`/`TELE:` | advertised lane ports |
 | `IP:` | `S` static / `D` DHCP |
 | `U:` | `C`ombined or `S`plit + base universe |
-| `G:` | groups schema + `L`ocked / `P`rototype |
-| `port:type:universe:virtual` | per-output tuples — **last**, first dropped on overflow, and only appended when the whole token fits |
+| `SHOW:`/`MGMT:`/`TELE:` | lane ports — **emitted only for a lane moved off its default** (3.14.1+); a node on defaults shows none, and `L` in `F:` is what marks it lane-aware |
+| `port:type:universe:virtual` | per-output tuples — only appended when the whole token fits; the sender keeps last-known values when they vanish |
+| `G:` | management protocol version + `L`ocked / `P`rototype — ⚠️ ranked last on the belief nothing parses it, but the sender's `MANAGEMENT_TOKEN_RE` gates `management_supported` on it; dropping it silently disables all `0x8140` management (known issue, see CHANGES.md) |
 
 ---
 
