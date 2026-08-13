@@ -1,0 +1,602 @@
+:root {
+  --bg: #f4f4f4;
+  --ink: #0a0a0a;
+  --mute: #5c5c5c;
+  --line: #1a1a1a;
+  --soft: #d8d8d8;
+  --panel: #ffffff;
+  --fill: #e8e8e8;
+  --hi: #2a2a2a;
+  --font: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 17px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+/* —— Nav —— */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: rgba(244, 244, 244, 0.92);
+  border-bottom: 1px solid var(--soft);
+  backdrop-filter: blur(8px);
+}
+
+.nav-brand {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.nav-links a {
+  text-decoration: none;
+  color: var(--mute);
+}
+
+.nav-links a:hover,
+.nav-links a[aria-current="true"] {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* —— Layout —— */
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1.25rem 6rem;
+}
+
+section {
+  padding: 4.5rem 0 2rem;
+  border-top: 1px solid var(--soft);
+}
+
+section:first-of-type {
+  border-top: 0;
+  padding-top: 2rem;
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 0 0 0.75rem;
+}
+
+h1,
+h2 {
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+h1 {
+  font-size: clamp(2.4rem, 6vw, 3.8rem);
+  line-height: 1.05;
+  max-width: 14ch;
+}
+
+h2 {
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  line-height: 1.15;
+}
+
+.lede {
+  max-width: 42rem;
+  color: var(--mute);
+  margin: 0 0 2rem;
+  font-size: 1.05rem;
+}
+
+.note {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--mute);
+  margin-top: 1rem;
+}
+
+/* —— Hero —— */
+.hero {
+  display: grid;
+  grid-template-columns: 0.9fr 1.2fr;
+  gap: 2.5rem;
+  align-items: end;
+  min-height: calc(100vh - 4rem);
+  border-top: 0;
+  padding-top: 2rem;
+}
+
+.hero-map {
+  margin: 0;
+  border: 1px solid var(--ink);
+  background: var(--panel);
+}
+
+.hero-map-cap {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--ink);
+  color: var(--mute);
+}
+
+.hero-lanes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.hero-lanes th,
+.hero-lanes td {
+  border-top: 1px solid var(--soft);
+  padding: 0.75rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.hero-lanes thead th {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--mute);
+  border-top: 0;
+  background: var(--fill);
+}
+
+.hero-lanes tbody th {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
+  white-space: nowrap;
+  width: 4.5rem;
+}
+
+.hero-lanes td {
+  color: var(--mute);
+}
+
+.hero-lanes td:last-child {
+  color: var(--ink);
+}
+
+/* —— Signal flow —— */
+.flow-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.flow-tabs button {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+
+.flow-tabs button[aria-selected="true"] {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.flow-stage {
+  background: var(--panel);
+  border: 1px solid var(--ink);
+  padding: 1.25rem;
+  overflow-x: auto;
+}
+
+.flow-svg {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+}
+
+.flow-svg .node-box {
+  fill: var(--panel);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.flow-svg .node-box.dim {
+  fill: var(--fill);
+}
+
+.flow-svg .node-box.monitor {
+  stroke-dasharray: 4 3;
+}
+
+.flow-svg text {
+  font-family: var(--mono);
+  font-size: 11px;
+  fill: var(--ink);
+}
+
+.flow-svg .label-mute {
+  fill: var(--mute);
+  font-size: 10px;
+}
+
+.flow-svg .arrow {
+  stroke: var(--ink);
+  stroke-width: 2;
+  fill: none;
+}
+
+.flow-svg .arrow.thin {
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
+}
+
+.flow-svg marker path {
+  fill: var(--ink);
+}
+
+/* —— Blueprint —— */
+.blueprint {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  background: var(--panel);
+}
+
+.blueprint th,
+.blueprint td {
+  border: 1px solid var(--soft);
+  padding: 0.65rem 0.7rem;
+  vertical-align: top;
+  text-align: left;
+}
+
+.blueprint thead th {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 500;
+}
+
+.blueprint tbody th {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--fill);
+  width: 7.5rem;
+  font-weight: 500;
+}
+
+.blueprint td {
+  color: var(--mute);
+}
+
+.blueprint td strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* —— Matrix —— */
+.matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--ink);
+  background: var(--panel);
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+.matrix th,
+.matrix td {
+  border: 1px solid var(--soft);
+  padding: 0.55rem 0.6rem;
+  text-align: center;
+}
+
+.matrix thead th {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+}
+
+.matrix tbody th {
+  text-align: left;
+  background: var(--fill);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.matrix .cell-open {
+  background: #fff;
+  color: var(--ink);
+}
+
+.matrix .cell-locked {
+  background: #222;
+  color: #f0f0f0;
+}
+
+.matrix .cell-na {
+  background: #bbb;
+  color: #333;
+}
+
+.matrix-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+}
+
+.matrix-legend i {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1px solid var(--ink);
+  margin-right: 0.35rem;
+  vertical-align: -2px;
+}
+
+.matrix-legend .lg-open {
+  background: #fff;
+}
+
+.matrix-legend .lg-locked {
+  background: #222;
+}
+
+.matrix-legend .lg-na {
+  background: #bbb;
+}
+
+/* —— Recipes —— */
+.recipes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.recipe {
+  border: 1px solid var(--ink);
+  background: var(--panel);
+  padding: 1.25rem;
+}
+
+.recipe h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.recipe ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.recipe li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--soft);
+}
+
+.recipe li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.recipe li::before {
+  content: counter(step, decimal-leading-zero);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--mute);
+}
+
+.recipe .end {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--ink);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* —— API table —— */
+.api-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.api-tools input,
+.api-tools select {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  border: 1px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 0.5rem 0.65rem;
+}
+
+.api-tools input {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.api-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--ink);
+  background: var(--panel);
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.api-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.api-table th,
+.api-table td {
+  border-bottom: 1px solid var(--soft);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.api-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--ink);
+  color: var(--bg);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.api-table code {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+}
+
+.api-table .tag {
+  display: inline-block;
+  border: 1px solid var(--ink);
+  padding: 0.1rem 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* —— Appendix —— */
+.appendix details {
+  border: 1px solid var(--soft);
+  background: var(--panel);
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.appendix summary {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.appendix p,
+.appendix ul {
+  color: var(--mute);
+  font-size: 0.92rem;
+}
+
+footer {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  border-top: 1px solid var(--soft);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--mute);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 800px) {
+  .hero {
+    grid-template-columns: 1fr;
+    align-items: start;
+    min-height: auto;
+  }
+
+  .recipes {
+    grid-template-columns: 1fr;
+  }
+
+  .nav {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -62,8 +62,13 @@ class CentralLauncherTests(unittest.TestCase):
         self.assertEqual(found[0], 8099)
         self.assertEqual(found[1]["product"], "radius")
 
+    # request_ui_focus/reserve_ui_session must be mocked: unmocked they reach
+    # whatever real Central happens to be listening on 127.0.0.1:8080, and a
+    # successful real focus means open_browser is never called.
+    @patch("central_launcher.request_ui_focus", return_value=False)
+    @patch("central_launcher.reserve_ui_session")
     @patch("central_launcher.find_running_central_server")
-    def test_try_attach_before_start_opens_view(self, mock_find):
+    def test_try_attach_before_start_opens_view(self, mock_find, mock_reserve, mock_focus):
         mock_find.return_value = (8080, {"product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
         opened = []
 
@@ -154,10 +159,11 @@ class AttachGuardTests(unittest.TestCase):
             on_mismatch=lambda mismatch, port, runtime: "attach")
         self.assertTrue(attached)
 
+    @patch("central_launcher.request_ui_focus", return_value=False)
     @patch("central_launcher.notify")
     @patch("central_launcher.reserve_ui_session")
     @patch("central_launcher.find_running_central_server")
-    def test_unraisable_window_notifies_the_user(self, mock_find, mock_reserve, mock_notify):
+    def test_unraisable_window_notifies_the_user(self, mock_find, mock_reserve, mock_notify, mock_focus):
         """The original silent-launch bug: attached fine, but showed nothing."""
         mock_find.return_value = (8080, {
             "product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
@@ -172,10 +178,11 @@ class AttachGuardTests(unittest.TestCase):
         mock_notify.assert_called_once()
         self.assertIn("8080", mock_notify.call_args[0][1])
 
+    @patch("central_launcher.request_ui_focus", return_value=False)
     @patch("central_launcher.notify")
     @patch("central_launcher.reserve_ui_session")
     @patch("central_launcher.find_running_central_server")
-    def test_successful_raise_does_not_notify(self, mock_find, mock_reserve, mock_notify):
+    def test_successful_raise_does_not_notify(self, mock_find, mock_reserve, mock_notify, mock_focus):
         mock_find.return_value = (8080, {
             "product": "primus", "frontends": central_launcher.FRONTEND_PATHS})
         central_launcher.try_attach_before_start(
@@ -222,6 +229,44 @@ class RegistryCapabilityTests(unittest.TestCase):
                     payload = central_launcher.read_registry()
         self.assertFalse(payload["monitor_only"])
         self.assertFalse(payload["lan_enabled"])
+
+
+class RemoteStopCapabilityTests(unittest.TestCase):
+    """A launcher must not offer a restart it cannot perform.
+
+    Servers before 0.98 have no POST /api/server/stop and answer 404. The
+    launcher used to try anyway, abort on failure, and leave the old server
+    holding the port -- after which every launch of either app failed the same
+    silent way and both looked broken.
+    """
+
+    def test_missing_flag_means_no_remote_stop(self):
+        self.assertFalse(central_launcher.supports_remote_stop(
+            {"product": "primus", "app_version": "0.97", "monitor_only": True}))
+
+    def test_flag_present_means_remote_stop(self):
+        self.assertTrue(central_launcher.supports_remote_stop(
+            {"product": "primus", "app_version": "0.98", "server_control": True}))
+
+    def test_non_dict_runtime_is_not_stoppable(self):
+        self.assertFalse(central_launcher.supports_remote_stop(None))
+        self.assertFalse(central_launcher.supports_remote_stop("nope"))
+
+    def test_describe_backend_names_monitor_only_as_devicemanager(self):
+        label = central_launcher.describe_backend(
+            {"product": "primus", "app_version": "0.97", "monitor_only": True})
+        self.assertIn("DeviceManager", label)
+        self.assertIn("0.97", label)
+
+    def test_describe_backend_names_products(self):
+        self.assertIn("PrimusCentral", central_launcher.describe_backend(
+            {"product": "primus", "app_version": "0.98"}))
+        self.assertIn("RadiusCentral", central_launcher.describe_backend(
+            {"product": "radius", "app_version": "0.98"}))
+
+    def test_describe_backend_tolerates_junk(self):
+        self.assertIsInstance(central_launcher.describe_backend({}), str)
+        self.assertIsInstance(central_launcher.describe_backend(None), str)
 
 
 if __name__ == "__main__":

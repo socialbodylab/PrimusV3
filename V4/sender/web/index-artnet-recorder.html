@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArtNet Recorder</title>
+<link rel="stylesheet" href="/css/style.css">
+<script defer src="/js/alpine.min.js"></script>
+<script src="/js/artnet-recorder.js"></script>
+<style>
+.recorder-main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+.recorder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .recorder-grid { grid-template-columns: 1fr; } }
+.recorder-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+}
+.recorder-card h2 { font-size: 15px; margin-bottom: 12px; color: var(--accent); }
+.recorder-field { margin-bottom: 12px; }
+.recorder-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.recorder-field input, .recorder-field select {
+    width: 100%; padding: 8px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary);
+}
+.recorder-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.recorder-checklist { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.recorder-checklist li { margin-left: 18px; }
+.stat-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--bg-tertiary); font-size: 13px; }
+.stat-label { color: var(--text-secondary); }
+.anomaly { padding: 8px 10px; border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 13px; }
+.anomaly-warning { background: rgba(255,170,0,0.15); border: 1px solid var(--warning); }
+.anomaly-info { background: rgba(0,191,255,0.1); border: 1px solid var(--accent-dim); }
+.event-log {
+    max-height: 220px; overflow-y: auto; font-family: ui-monospace, monospace;
+    font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 8px;
+}
+.event-line { padding: 2px 0; border-bottom: 1px solid var(--bg-tertiary); }
+.recording-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px;
+    background: rgba(68,204,68,0.15); color: var(--success); border: 1px solid var(--success);
+}
+.recording-pill.idle { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border); }
+.setup-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.setup-table th, .setup-table td { border-bottom: 1px solid var(--bg-tertiary); padding: 6px 4px; text-align: left; }
+.setup-table th { color: var(--text-secondary); font-weight: 600; }
+.setup-inline { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.device-stat-row { font-size: 12px; padding: 6px 0; border-bottom: 1px solid var(--bg-tertiary); }
+.expected-uni { color: var(--accent); font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body x-data="artnetRecorder()" x-init="init()">
+
+<nav class="navbar">
+    <div class="navbar-brand">ArtNet Recorder</div>
+    <div class="navbar-status">
+        <span class="recording-pill" :class="{ idle: !recording }" x-text="recording ? 'Recording' : 'Idle'"></span>
+        <span style="margin-left:12px;color:var(--text-secondary);font-size:12px;" x-text="packetSummary"></span>
+    </div>
+</nav>
+
+<div class="recorder-main">
+    <div class="recorder-grid">
+        <div class="recorder-card">
+            <h2>Capture</h2>
+            <div class="recorder-field">
+                <label>Mode</label>
+                <select x-model="mode" :disabled="recording">
+                    <option value="standin">Stand-in (laptop takes device IP)</option>
+                    <option value="sniff">Sniff (tcpdump, device stays online)</option>
+                </select>
+            </div>
+            <div class="recorder-field">
+                <label>Target device</label>
+                <select x-model="deviceIp" :disabled="recording">
+                    <template x-for="dev in showSetup.devices" :key="dev.ip">
+                        <option :value="dev.ip" x-text="deviceOptionLabel(dev)"></option>
+                    </template>
+                </select>
+                <div class="expected-uni" x-show="expectedUniverse != null">
+                    Expected universe: <strong x-text="expectedUniverse"></strong>
+                    <span x-text="setupHint"></span>
+                </div>
+            </div>
+            <div class="recorder-field">
+                <label>Interface</label>
+                <select x-model="interface" :disabled="recording">
+                    <option value="">Auto (all interfaces / recommended)</option>
+                    <template x-for="iface in interfaces" :key="iface.id">
+                        <option :value="iface.device" x-text="ifaceLabel(iface)"></option>
+                    </template>
+                </select>
+            </div>
+            <div class="recorder-field">
+                <label>Duration (seconds, optional)</label>
+                <input type="number" min="0" x-model.number="durationS" :disabled="recording" placeholder="0 = manual stop">
+            </div>
+            <div class="recorder-field">
+                <label><input type="checkbox" x-model="fullPayload" :disabled="recording"> Full RGB payload (large files)</label>
+            </div>
+            <div class="recorder-actions">
+                <button class="btn btn-primary" @click="startCapture()" :disabled="recording || busy" x-text="busy ? 'Starting…' : 'Start'"></button>
+                <button class="btn" @click="stopCapture()" :disabled="!recording || busy">Stop</button>
+                <button class="btn" @click="exportCapture()" :disabled="busy">Export</button>
+            </div>
+            <p class="notice-text" style="margin-top:10px;color:var(--danger);" x-show="error" x-text="error"></p>
+        </div>
+
+        <div class="recorder-card">
+            <h2>Show setup — one universe per device</h2>
+            <p class="recorder-checklist" style="margin-bottom:12px;">
+                EOS combined layout: each Primus node receives badge + collar on a single dedicated universe.
+            </p>
+            <div class="setup-inline">
+                <div class="recorder-field">
+                    <label>Start IP</label>
+                    <input type="text" x-model="showSetup.start_ip" :disabled="recording" @change="regenerateSetup()">
+                </div>
+                <div class="recorder-field">
+                    <label>Start universe</label>
+                    <input type="number" min="0" x-model.number="showSetup.start_universe" :disabled="recording" @change="regenerateSetup()">
+                </div>
+                <div class="recorder-field">
+                    <label>Device count</label>
+                    <input type="number" min="1" x-model.number="showSetup.device_count" :disabled="recording" @change="regenerateSetup()">
+                </div>
+            </div>
+            <div class="recorder-actions">
+                <button class="btn btn-sm" @click="saveSetup()" :disabled="recording || busy">Save setup</button>
+            </div>
+            <table class="setup-table">
+                <thead>
+                    <tr><th>Device</th><th>IP</th><th>Universe</th><th>Pkts</th><th>Pkt/s</th></tr>
+                </thead>
+                <tbody>
+                    <template x-for="dev in showSetup.devices" :key="dev.ip">
+                        <tr>
+                            <td x-text="dev.label"></td>
+                            <td x-text="dev.ip"></td>
+                            <td x-text="'U' + dev.universe"></td>
+                            <td x-text="devicePacketCount(dev.ip)"></td>
+                            <td x-text="devicePacketRate(dev.ip)"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="recorder-card">
+            <h2>Stand-in checklist</h2>
+            <ol class="recorder-checklist">
+                <li>Power off the Primus device normally at <span x-text="deviceIp"></span></li>
+                <li>Set this laptop to static IP <span x-text="deviceIp"></span> / 255.255.255.0</li>
+                <li>Gateway: 192.168.8.1 (show router)</li>
+                <li>Start capture, then run EOS cues that reproduce the flicker</li>
+            </ol>
+            <h2 style="margin-top:16px;">Sniff mode</h2>
+            <p class="recorder-checklist">Requires admin (<code>sudo tcpdump</code>). Captures all devices in the show setup table. Best on a mirrored switch port.</p>
+        </div>
+
+        <div class="recorder-card">
+            <h2>Live stats</h2>
+            <template x-if="stats">
+                <div>
+                    <div class="stat-row"><span class="stat-label">Packets</span><span x-text="stats.packet_count"></span></div>
+                    <div class="stat-row"><span class="stat-label">Sources</span><span x-text="(stats.sources || []).join(', ') || '—'"></span></div>
+                    <div class="stat-row"><span class="stat-label">Sequence gaps</span><span x-text="stats.sequence_gaps"></span></div>
+                    <div class="stat-row"><span class="stat-label">Sequence repeats</span><span x-text="stats.sequence_repeats"></span></div>
+                    <div class="stat-row" x-show="stats.jitter && stats.jitter.avg_ms">
+                        <span class="stat-label">Jitter avg / p95</span>
+                        <span x-text="`${stats.jitter.avg_ms} / ${stats.jitter.p95_ms} ms`"></span>
+                    </div>
+                    <div class="stat-row"><span class="stat-label">Wrong universe pkts</span><span x-text="stats.wrong_universe_packets || 0"></span></div>
+                    <div class="stat-row"><span class="stat-label">Pkt/s (5s window)</span>
+                        <span x-text="rateSummary"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <div class="recorder-card">
+            <h2>Anomalies</h2>
+            <template x-if="!stats || !(stats.anomalies || []).length">
+                <p class="recorder-checklist">No anomalies yet.</p>
+            </template>
+            <template x-for="item in (stats?.anomalies || [])" :key="item.code + item.message">
+                <div class="anomaly" :class="item.level === 'warning' ? 'anomaly-warning' : 'anomaly-info'" x-text="item.message"></div>
+            </template>
+        </div>
+    </div>
+
+    <div class="recorder-card" style="margin-top:16px;">
+        <h2>Recent packets</h2>
+        <div class="event-log">
+            <template x-for="ev in recentEvents.slice().reverse()" :key="ev.id">
+                <div class="event-line" x-text="formatEvent(ev)"></div>
+            </template>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -9,6 +10,7 @@ SENDER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SENDER_DIR not in sys.path:
     sys.path.insert(0, SENDER_DIR)
 
+import state as state_module
 from state import ControllerState
 from serial_monitor import SerialMonitorManager, SerialMonitorError
 
@@ -27,10 +29,27 @@ CAPABILITIES = {
 
 
 class HelloDeviceTests(unittest.TestCase):
+    def setUp(self):
+        # Keep state reads/writes in a scratch dir; with a real fleet IP this
+        # test rewrote the real .primus_state.json show-info map.
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        state_path = os.path.join(scratch.name, ".primus_state.json")
+        radius_path = os.path.join(scratch.name, ".radius_state.json")
+        for target in (
+            patch.object(state_module, "_state_file", return_value=state_path),
+            patch.object(state_module.show_info_store, "primus_state_path",
+                         return_value=state_path),
+            patch.object(state_module.show_info_store, "radius_state_path",
+                         return_value=radius_path),
+        ):
+            target.start()
+            self.addCleanup(target.stop)
+
     def make_state(self):
         state = ControllerState(None)
         state.add_device_from_node({
-            "ip": "192.168.8.163",
+            "ip": "192.0.2.163",
             "short_name": "A12",
             "capabilities": CAPABILITIES,
             "outputs": [

@@ -93,8 +93,13 @@ def transport_rgb_bytes(output_dict, rgb_bytes=None, pixels=None):
             (rgb_bytes[i], rgb_bytes[i + 1], rgb_bytes[i + 2])
             for i in range(0, min(len(rgb_bytes), physical * step), step)
         ]
-        while len(pixels) < physical:
-            pixels.append((0, 0, 0))
+    else:
+        # Same normalization as the byte path: truncate to the output's
+        # physical count and zero-pad short frames, so a look rendered at a
+        # different resolution still fills (and blanks) every physical LED.
+        pixels = list(pixels[:physical])
+    while len(pixels) < physical:
+        pixels.append((0, 0, 0))
 
-    transport_pixels = downsample_pixels(list(pixels), virtual)
+    transport_pixels = downsample_pixels(pixels, virtual)
     return pack_rgb_pixels(transport_pixels)

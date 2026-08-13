@@ -44,26 +44,22 @@ document.addEventListener("alpine:init", () => {
         _stateFetchAppliedGeneration: 0,
         startupScanMessage: "Scanning network for devices…",
         startupScanActive: false,
-        filterCharacterName: "",
         filterPrimusCharacter: "",
         filterRadiusCharacter: "",
         filterProductType: null,
+        filterAttentionOnly: false,
         mode: "monitor",
-        bulkPanel: null,
-        bulkRenamePattern: "Device {n}",
-        bulkRenameStart: 1,
-        bulkRenamePad: 0,
-        bulkRenamePlan: [],
-        bulkOutputIndex: 0,
-        bulkOutputType: "none",
-        bulkPresetId: "",
-        bulkApplyResults: [],
-        bulkReceiveMode: "split",
-        bulkReceiveBase: 0,
-        bulkReceiveStep: 2,
         mobileView: false,
         _mobileQrCache: null,
+        // Keyed by the stable device key (device_uid → ip → name), never by
+        // array index — removing a device must not shift another card's state.
         expandedCards: {},
+        // Performer identity editor: { groupKey, character, performer, saving }.
+        identityEditor: null,
+        // Snapshot of performer-group order taken when the identity editor
+        // opens, so a mid-edit save/refresh can't re-sort groups under the
+        // operator's cursor.
+        _frozenGroupOrder: null,
 
         get brandLabel() {
             const version = this.runtime?.app_version;
@@ -84,6 +80,15 @@ document.addEventListener("alpine:init", () => {
 
         get mobileAccessUrl() {
             if (!this.runtime?.lan_enabled) return null;
+            // Prefer the address this page was actually served from: the
+            // Art-Net NIC's IP is not necessarily the HTTP-reachable address
+            // (a dedicated backend machine may separate the two). Fall back
+            // to the interface IP only when we're browsing via loopback.
+            const host = window.location.hostname;
+            const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+            if (!isLoopback) {
+                return `http://${host}:${window.location.port}/devices?mode=mobile`;
+            }
             const iface = this.network?.selected_interface || this.network?.recommended_interface;
             const ip = iface?.source_ip;
             if (!ip) return null;
@@ -155,56 +160,220 @@ document.addEventListener("alpine:init", () => {
             return this.isRadiusDevice(dev) ? "radius" : "primus";
         },
 
-        get groupedDevices() {
-            return this.groupDevicesForProduct(null);
+        // Per-card status expressed IN PLACE (border tint + pill) instead of by
+        // moving the card between layout sections.
+        deviceStatusSection(dev) {
+            if (this.deviceNeedsAttention(dev)) return "attention";
+            return dev?.receiver_online ? "online" : "offline";
         },
 
-        groupDevicesForProduct(product) {
-            const attention = [];
-            const online = [];
-            const offline = [];
+        cardStatusClass(dev) {
+            return "dm-card-" + this.deviceStatusSection(dev);
+        },
+
+        // Stable ordering for devices within a performer group (and within
+        // Unassigned): Primus first, then Radius, tiebreak on the stable device
+        // key. Never influenced by battery, online state, errors, or sync order.
+        _compareEntries(a, b) {
+            const ar = this.isRadiusDevice(a.dev) ? 1 : 0;
+            const br = this.isRadiusDevice(b.dev) ? 1 : 0;
+            if (ar !== br) return ar - br;
+            return String(a.key).localeCompare(String(b.key));
+        },
+
+        // Performer grouping. Shape:
+        //   [{ key, performerName, characterNames: [..], characterLabel,
+        //      devices: [{ dev, _index, key }...],  // Primus first, key tiebreak
+        //      hasPrimus, hasRadius, count,
+        //      worstStatus: "attention"|"offline"|"online",
+        //      onlineCount }]
+        // Sorted alphabetically by performer name (localeCompare, sensitivity
+        // "base"), tiebreak on normalized key. Order is frozen while the
+        // identity editor is open.
+        get performerGroups() {
+            const conn = Alpine.store("conn");
+            const groups = new Map();
             for (const entry of this.filteredDevices) {
-                if (product && this.deviceProductType(entry.dev) !== product) {
+                const key = conn.performerKey(entry.dev);
+                if (!key) continue;
+                let group = groups.get(key);
+                if (!group) {
+                    group = { key, devices: [] };
+                    groups.set(key, group);
+                }
+                group.devices.push(entry);
+            }
+            const list = [...groups.values()];
+            for (const group of list) {
+                group.devices.sort((a, b) => this._compareEntries(a, b));
+                // Deterministic display name/characters regardless of the order
+                // devices arrived from the backend.
+                group.performerName = (group.devices[0].dev.performer_name || "").trim();
+                const characters = new Set();
+                group.hasPrimus = false;
+                group.hasRadius = false;
+                group.onlineCount = 0;
+                let attention = false;
+                let offline = false;
+                for (const entry of group.devices) {
+                    const dev = entry.dev;
+                    const character = (dev.character_name || "").trim();
+                    if (character) characters.add(character);
+                    if (this.isRadiusDevice(dev)) group.hasRadius = true;
+                    else group.hasPrimus = true;
+                    if (this.deviceNeedsAttention(dev)) attention = true;
+                    if (dev.receiver_online) group.onlineCount++;
+                    else offline = true;
+                }
+                group.characterNames = [...characters].sort(
+                    (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+                group.characterLabel = group.characterNames.join(" / ");
+                group.count = group.devices.length;
+                group.worstStatus = attention ? "attention" : (offline ? "offline" : "online");
+            }
+            list.sort((a, b) =>
+                a.performerName.localeCompare(b.performerName, undefined, { sensitivity: "base" })
+                || String(a.key).localeCompare(String(b.key)));
+            if (this.identityEditor && this._frozenGroupOrder) {
+                const order = this._frozenGroupOrder;
+                const rank = key => {
+                    const idx = order.indexOf(key);
+                    return idx === -1 ? order.length : idx;
+                };
+                list.sort((a, b) => rank(a.key) - rank(b.key));
+            }
+            return list;
+        },
+
+        get unassignedEntries() {
+            const conn = Alpine.store("conn");
+            return this.filteredDevices
+                .filter(entry => !conn.hasPerformer(entry.dev))
+                .sort((a, b) => this._compareEntries(a, b));
+        },
+
+        // Render list for the Monitor tab: one section per performer, then a
+        // single Unassigned section. Assigning a performer name moves the card
+        // into that performer's group — that move is expected feedback.
+        get monitorSections() {
+            const sections = this.performerGroups.map(group => ({
+                key: "perf:" + group.key,
+                type: "performer",
+                group,
+                entries: group.devices,
+            }));
+            const unassigned = this.unassignedEntries;
+            if (unassigned.length) {
+                sections.push({
+                    key: "unassigned",
+                    type: "unassigned",
+                    group: null,
+                    entries: unassigned,
+                });
+            }
+            return sections;
+        },
+
+        groupRollupLabel(group) {
+            if (!group) return "";
+            if (group.worstStatus === "attention") return "Attention";
+            if (group.worstStatus === "offline") {
+                return group.onlineCount + "/" + group.count + " live";
+            }
+            return "Live";
+        },
+
+        groupRollupClass(group) {
+            if (!group) return "";
+            if (group.worstStatus === "attention") return "dm-status-error";
+            if (group.worstStatus === "offline") return "dm-status-nosignal";
+            return "dm-status-live";
+        },
+
+        // ---- Performer identity editor ----
+        get allCharacterNames() {
+            const names = new Set();
+            for (const dev of (this.state?.devices || [])) {
+                const name = (dev.character_name || "").trim();
+                if (name) names.add(name);
+            }
+            return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+        },
+
+        get allPerformerNames() {
+            const names = new Set();
+            for (const dev of (this.state?.devices || [])) {
+                const name = (dev.performer_name || "").trim();
+                if (name) names.add(name);
+            }
+            return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+        },
+
+        isIdentityEditorOpen(groupKey) {
+            return !!this.identityEditor && this.identityEditor.groupKey === groupKey;
+        },
+
+        toggleIdentityEditor(group) {
+            if (!group) return;
+            if (this.isIdentityEditorOpen(group.key)) {
+                this.closeIdentityEditor();
+                return;
+            }
+            this._frozenGroupOrder = this.performerGroups.map(g => g.key);
+            this.identityEditor = {
+                groupKey: group.key,
+                character: group.characterNames[0] || "",
+                performer: group.performerName,
+                saving: false,
+            };
+        },
+
+        closeIdentityEditor() {
+            this.identityEditor = null;
+            this._frozenGroupOrder = null;
+        },
+
+        async saveIdentityEditor() {
+            const editor = this.identityEditor;
+            if (!editor || editor.saving) return;
+            const conn = Alpine.store("conn");
+            const group = this.performerGroups.find(g => g.key === editor.groupKey);
+            if (!group) {
+                this.closeIdentityEditor();
+                return;
+            }
+            const character = String(editor.character || "").trim().slice(0, 64);
+            const performer = String(editor.performer || "").trim().slice(0, 64);
+            editor.saving = true;
+            let succeeded = 0;
+            let failed = 0;
+            let skipped = 0;
+            for (const entry of group.devices) {
+                const dev = entry.dev;
+                if (!conn.showInfoEnabled(dev) || !conn.canEditDeviceSettings(dev)) {
+                    skipped++;
                     continue;
                 }
-                if (this.deviceNeedsAttention(entry.dev)) {
-                    entry._section = "attention";
-                    attention.push(entry);
-                } else if (entry.dev.receiver_online) {
-                    entry._section = "online";
-                    online.push(entry);
-                } else {
-                    entry._section = "offline";
-                    offline.push(entry);
+                try {
+                    await api("POST", "/api/device_show_info", {
+                        device: entry._index,
+                        character_name: character,
+                        performer_name: performer,
+                    });
+                    succeeded++;
+                } catch (e) {
+                    failed++;
                 }
             }
-            return { attention, online, offline };
-        },
-
-        get productSectionList() {
-            const products = [
-                { key: "primus", label: "Primus" },
-                { key: "radius", label: "Radius" },
-            ];
-            return products.map(product => {
-                const g = this.groupDevicesForProduct(product.key);
-                const sections = [
-                    { key: "attention", label: "Attention", entries: g.attention },
-                    { key: "online", label: "Online", entries: g.online },
-                    { key: "offline", label: "Offline / Unconfirmed", entries: g.offline },
-                ];
-                const count = g.attention.length + g.online.length + g.offline.length;
-                return { ...product, count, sections };
-            }).filter(product => product.count > 0);
-        },
-
-        get sectionList() {
-            const g = this.groupedDevices;
-            return [
-                { key: "attention", label: "Attention", entries: g.attention },
-                { key: "online", label: "Online", entries: g.online },
-                { key: "offline", label: "Offline / Unconfirmed", entries: g.offline },
-            ];
+            this.closeIdentityEditor();
+            await this.fetchState();
+            this.showNotice(
+                `Identity saved on ${succeeded} device${succeeded === 1 ? "" : "s"}`
+                    + (failed ? `; ${failed} failed` : "")
+                    + (skipped ? `; ${skipped} skipped (locked or unsupported)` : "") + ".",
+                failed ? "warn" : "success",
+                4000,
+            );
         },
 
         get summaryTotal() {
@@ -285,11 +454,15 @@ document.addEventListener("alpine:init", () => {
         },
 
         get filteredDevices() {
+            const conn = Alpine.store("conn");
             const devices = this.state?.devices || [];
 
             return devices.reduce((entries, dev, index) => {
                 const product = this.deviceProductType(dev);
                 if (this.filterProductType && product !== this.filterProductType) {
+                    return entries;
+                }
+                if (this.filterAttentionOnly && !this.deviceNeedsAttention(dev)) {
                     return entries;
                 }
                 const filter = product === "radius"
@@ -301,48 +474,52 @@ document.addEventListener("alpine:init", () => {
                         return entries;
                     }
                 }
-                entries.push({ dev, _index: index });
+                // _index stays on every entry: all device actions still address
+                // the backend by array index ({ device: di }).
+                entries.push({ dev, _index: index, key: conn.deviceKey(dev) });
                 return entries;
             }, []);
         },
 
-        toggleCharacterFilter(name) {
-            this.filterCharacterName = this.filterCharacterName === name ? "" : name;
-            this.filterPrimusCharacter = this.filterCharacterName;
-        },
-
         togglePrimusCharacterFilter(name) {
             this.filterPrimusCharacter = this.filterPrimusCharacter === name ? "" : name;
-            this.filterCharacterName = this.filterPrimusCharacter;
         },
 
         toggleRadiusCharacterFilter(name) {
             this.filterRadiusCharacter = this.filterRadiusCharacter === name ? "" : name;
         },
 
-        clearCharacterFilter() {
-            this.filterCharacterName = "";
-            this.filterPrimusCharacter = "";
-            this.filterRadiusCharacter = "";
-        },
-
         clearPrimusCharacterFilter() {
             this.filterPrimusCharacter = "";
-            if (!this.filterRadiusCharacter) {
-                this.filterCharacterName = "";
-            }
         },
 
         clearRadiusCharacterFilter() {
             this.filterRadiusCharacter = "";
         },
 
-        isCardExpanded(index) {
-            return !!this.expandedCards[index];
+        toggleAttentionFilter() {
+            this.filterAttentionOnly = !this.filterAttentionOnly;
         },
 
-        toggleCardExpanded(index) {
-            this.expandedCards[index] = !this.expandedCards[index];
+        isCardExpanded(key) {
+            return !!this.expandedCards[key];
+        },
+
+        toggleCardExpanded(key) {
+            this.expandedCards[key] = !this.expandedCards[key];
+        },
+
+        // fetchState reconciler: drop expand state for devices that no longer
+        // exist. Keys are stable device keys, so surviving devices keep their
+        // expand state across removals and re-syncs.
+        syncExpandedCards() {
+            const conn = Alpine.store("conn");
+            if (!conn || typeof conn.deviceKey !== "function") return;
+            const valid = new Set(
+                (this.state?.devices || []).map(dev => conn.deviceKey(dev)));
+            for (const key of Object.keys(this.expandedCards)) {
+                if (!valid.has(key)) delete this.expandedCards[key];
+            }
         },
 
         outputLabel(value, idx = null) {
@@ -426,6 +603,7 @@ document.addEventListener("alpine:init", () => {
                 Alpine.store("conn").syncReceiveConfigDrafts();
                 Alpine.store("conn").syncVirtualConfigDrafts();
                 Alpine.store("conn").syncManagementUi();
+                this.syncExpandedCards();
                 if (this.startupScanActive && (this.state?.devices || []).length > 0) {
                     this.clearStartupScanNotice();
                 }
@@ -528,72 +706,6 @@ document.addEventListener("alpine:init", () => {
         deviceGroupNames(dev) {
             const groups = this.deviceGroups.filter(group => (group.device_ips || []).includes(dev.ip));
             return groups.map(group => group.name).join(", ");
-        },
-
-        // ---- Bulk actions (device group scoped) ----
-        currentBulkGroup() {
-            return this.deviceGroups.find(g => g.id === this.filterGroupId) || null;
-        },
-
-        openBulkRename() {
-            this.bulkPanel = "rename";
-            this.updateBulkRenamePreview();
-        },
-
-        updateBulkRenamePreview() {
-            const group = this.currentBulkGroup();
-            this.bulkRenamePlan = group
-                ? Alpine.store("conn").bulkRenamePreview(
-                    group, this.bulkRenamePattern, Number(this.bulkRenameStart) || 1, Number(this.bulkRenamePad) || 0)
-                : [];
-        },
-
-        async applyBulkRename() {
-            await Alpine.store("conn").bulkRenameApply(this.bulkRenamePlan);
-            this.bulkPanel = null;
-            this.bulkRenamePlan = [];
-        },
-
-        openBulkApply() {
-            this.bulkPanel = "apply";
-            this.bulkApplyResults = [];
-            Alpine.store("conn").loadOutputPresets();
-        },
-
-        async applyBulkOutputType() {
-            const group = this.currentBulkGroup();
-            if (!group) return;
-            await Alpine.store("conn").bulkApplyOutputType(group, Number(this.bulkOutputIndex) || 0, this.bulkOutputType);
-        },
-
-        async applyBulkPreset() {
-            const group = this.currentBulkGroup();
-            const preset = Alpine.store("conn").outputPresets.find(
-                item => item.id === this.bulkPresetId,
-            );
-            if (!group || !preset) {
-                this.showNotice("Choose a group and output preset first.", "warn");
-                return;
-            }
-            const result = await Alpine.store("conn").bulkApplyDescriptor(
-                group,
-                Number(this.bulkOutputIndex) || 0,
-                preset.descriptor,
-            );
-            this.bulkApplyResults = result.results || [];
-        },
-
-        async applyBulkReceiveMode() {
-            const group = this.currentBulkGroup();
-            if (!group) return;
-            await Alpine.store("conn").bulkApplyReceiveMode(
-                group, this.bulkReceiveMode, Number(this.bulkReceiveBase) || 0, Number(this.bulkReceiveStep) || 0);
-        },
-
-        closeBulkPanel() {
-            this.bulkPanel = null;
-            this.bulkRenamePlan = [];
-            this.bulkApplyResults = [];
         },
     });
 });

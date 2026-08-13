@@ -35,11 +35,15 @@ function cueMap() {
             this.loading = true;
             this.error = null;
             try {
-                const [mapData, filesData] = await Promise.all([
-                    api("GET", `/api/audio/cue_map?device=${this.deviceIdx}`),
-                    api("POST", "/api/audio/files", { device: this.deviceIdx, path: "/" })
-                        .catch(() => ({ entries: [] })),
-                ]);
+                // Sequential on purpose: the backend serializes FTP per
+                // device, but running the two FTP operations back-to-back
+                // avoids paying for two overlapping FTP enable/disable
+                // sessions on the node. A missing/corrupt /cues.json comes
+                // back as {} — an empty, editable table, not an error.
+                const mapData = await api("GET", `/api/audio/cue_map?device=${this.deviceIdx}`);
+                const filesData = await api("POST", "/api/audio/files",
+                                            { device: this.deviceIdx, path: "/" })
+                    .catch(() => ({ entries: [] }));
                 this.rows = Object.entries(mapData)
                     .map(([num, val]) => ({
                         number: parseInt(num),
@@ -88,8 +92,11 @@ function cueMap() {
                         : row.file;
                 }
                 await api("POST", "/api/audio/cue_map", { device: this.deviceIdx, cues });
-                this.success = "Saved to SD card — will take effect after device reboot";
-                setTimeout(() => this.success = null, 5000);
+                // No remote-reboot audio command exists (the /api/audio/cmd
+                // set is play/loop/stop/pause/volume), so this stays a hint:
+                // the operator must power-cycle the node to load the new map.
+                this.success = "Saved to SD card — power-cycle / reboot the node to load the new cue map";
+                setTimeout(() => this.success = null, 8000);
             } catch (e) {
                 this.error = e.message;
             } finally {

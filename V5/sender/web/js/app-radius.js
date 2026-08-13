@@ -51,17 +51,31 @@ document.addEventListener("alpine:init", () => {
         runtime: null,
         _lifecycleHeartbeat: null,
         product: "radius",
+        productMismatch: false,
+        _stateFetchGeneration: 0,
+
+        get radiusDevices() {
+            // On the shared backend /api/state?product=radius returns the
+            // whole unified device list (indices stay aligned); only the
+            // is_radius entries belong to this app.
+            return (this.state?.devices || []).filter(d => d.is_radius);
+        },
 
         get connectedDeviceSummary() {
-            const devices = this.state?.devices || [];
+            const devices = this.radiusDevices;
             const connected = devices.filter(d => d.connected).length;
             return connected + "/" + devices.length + " nodes";
         },
 
         get audioStatus() {
-            const devices = this.state?.devices || [];
+            const devices = this.radiusDevices;
             const connected = devices.filter(d => d.connected).length;
-            const playing = devices.filter(d => d.connected && d.current_track).length;
+            // Prefer live playback_state telemetry (0 stopped / 1 playing /
+            // 2 paused); current_track alone can be a stale leftover.
+            const playing = devices.filter(d =>
+                d.connected && (d.receiver_online
+                    ? d.playback_state === 1
+                    : !!d.current_track)).length;
             return {
                 connected,
                 total: devices.length,
@@ -95,8 +109,15 @@ document.addEventListener("alpine:init", () => {
         },
 
         async fetchState() {
+            const generation = ++this._stateFetchGeneration;
             try {
-                this.state = await api("GET", "/api/state");
+                const next = await api("GET", "/api/state?product=radius");
+                if (generation !== this._stateFetchGeneration) return;
+                this.state = next;
+                if (next?.product) this.product = next.product;
+                // A backend that does not answer with the radius shape is the
+                // silent-attach failure: surface it instead of looking healthy.
+                this.productMismatch = !(next && next.product === "radius");
             } catch (e) { /* ignore */ }
         },
 
@@ -175,6 +196,37 @@ document.addEventListener("alpine:init", () => {
                 "playback-chip-idle": !status.playing,
                 "playback-chip-controller": status.playing > 0,
             };
+        },
+
+        // ── Inline two-step confirm (replaces window.confirm) ─────────
+        // First call arms the control (button flips to "Sure?"); a second
+        // call within the hold window confirms. Arm state auto-clears.
+        armed: {},
+        _armTimers: {},
+
+        requestConfirm(key, holdMs = 3500) {
+            if (this.armed[key]) {
+                this.disarmConfirm(key);
+                return true;
+            }
+            this.armed = { ...this.armed, [key]: true };
+            clearTimeout(this._armTimers[key]);
+            this._armTimers[key] = setTimeout(() => this.disarmConfirm(key), holdMs);
+            return false;
+        },
+
+        disarmConfirm(key) {
+            clearTimeout(this._armTimers[key]);
+            delete this._armTimers[key];
+            if (this.armed[key]) {
+                const next = { ...this.armed };
+                delete next[key];
+                this.armed = next;
+            }
+        },
+
+        isArmed(key) {
+            return !!this.armed[key];
         },
 
         showNotice(message, level = "info", timeout = 3200) {

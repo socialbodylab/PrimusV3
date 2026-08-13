@@ -339,7 +339,7 @@ Output types are configurable at runtime from the web UI — no reflashing neede
 
 PrimusV3 uses Art-Net, a common DMX-over-IP lighting protocol, so the receiver nodes can be driven by the built-in sender or by outside lighting tools such as TouchDesigner, MadMapper, and other Art-Net controllers. LED frames are sent as ArtDmx packets on UDP 6454, with one universe per receiver output. Nodes also use ArtPoll/ArtPollReply for discovery, including a Primus capability tag that tells the sender which hardware profile and control features the receiver supports.
 
-The full packet layout, discovery fields, custom opcodes, HTTP API, and integration notes are documented in [API_REFERENCE.md](API_REFERENCE.md).
+The full packet layout, discovery fields, custom opcodes, HTTP API, and integration notes are documented in [V5/API_REFERENCE.md](V5/API_REFERENCE.md), with the UDP lane model in [V5/PORTS_AND_LANES.md](V5/PORTS_AND_LANES.md).
 
 Protocol summary:
 

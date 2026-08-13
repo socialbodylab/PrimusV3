@@ -9,6 +9,7 @@ if SENDER_DIR not in sys.path:
     sys.path.insert(0, SENDER_DIR)
 
 import ui_lifecycle
+import run_primus
 
 
 class UiLifecycleTests(unittest.TestCase):
@@ -36,6 +37,16 @@ class UiLifecycleTests(unittest.TestCase):
         server.ui_last_session_closed_at = time.monotonic() - 5
         ui_lifecycle.monitor(server, app_name="Central", live_output_fn=lambda _s: False)
         server.shutdown.assert_called_once()
+
+    def test_device_manager_disables_ui_lifecycle_shutdown(self):
+        with unittest.mock.patch.object(run_primus, "is_bundled", return_value=True):
+            self.assertFalse(run_primus._ui_lifecycle_enabled("devices"))
+            self.assertTrue(run_primus._ui_lifecycle_enabled("primus"))
+
+    def test_source_runs_skip_ui_lifecycle_shutdown(self):
+        with unittest.mock.patch.object(run_primus, "is_bundled", return_value=False):
+            self.assertFalse(run_primus._ui_lifecycle_enabled("devices"))
+            self.assertFalse(run_primus._ui_lifecycle_enabled("primus"))
 
 
 if __name__ == "__main__":

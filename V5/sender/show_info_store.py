@@ -155,6 +155,35 @@ def merge_show_info_fields(state_path, character_name, performer_name, ip=None, 
     return character_name, performer_name
 
 
+def node_matches_firmware_name_overrides(node_info, overrides):
+    """True when a discovered node already reports the upload override names.
+
+    This is the guard that keeps post-flash name overrides scoped to the
+    device that was actually flashed: pushing overrides to every online
+    device smears one performer's identity across the fleet.
+    """
+    if not isinstance(node_info, dict) or not isinstance(overrides, dict):
+        return False
+    device_name = overrides.get("device_name")
+    character_name = overrides.get("character_name")
+    performer_name = overrides.get("performer_name")
+    if not any((device_name, character_name, performer_name)):
+        return False
+    if device_name:
+        short = str(node_info.get("short_name") or "").strip()
+        if short != str(device_name)[:17]:
+            return False
+    if character_name:
+        actual = normalize_show_info_value(node_info.get("character_name"))
+        if actual != normalize_show_info_value(character_name):
+            return False
+    if performer_name:
+        actual = normalize_show_info_value(node_info.get("performer_name"))
+        if actual != normalize_show_info_value(performer_name):
+            return False
+    return True
+
+
 def apply_persisted_show_info(state_path, dev, node_info=None):
     node_char, node_perf = show_info_from_node(node_info or {})
     if node_char:

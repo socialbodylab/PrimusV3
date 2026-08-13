@@ -238,6 +238,9 @@ void buildNodeReport(char* reportBuf, size_t reportLen) {
   pos += snprintf(reportBuf + pos, reportLen - pos, "|F:%s", NODE_CAPS_FEATURES);
   if (pos < 0 || (size_t)pos >= reportLen) return;
 
+  pos += snprintf(reportBuf + pos, reportLen - pos, "|V:%s", FIRMWARE_VERSION);
+  if (pos < 0 || (size_t)pos >= reportLen) return;
+
   if (mariusIsConfigured()) {
     if (mariusIsConnected()) {
       snprintf(reportBuf + pos, reportLen - pos, "|MC:1|MP:%s", mariusPuckName());
@@ -581,6 +584,25 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
     duration = (uint16_t)data[nullPos + 1] | ((uint16_t)data[nullPos + 2] << 8);
   }
 
+  Serial.print("[ArtAudio] cmd=");
+  Serial.print(cmd);
+  Serial.print(" vol=");
+  Serial.print(volume);
+  if (cmd == 1 || cmd == 2) {
+    Serial.print(" file=");
+    Serial.print(filename);
+    if (duration > 0) {
+      Serial.print(" dur=");
+      Serial.print(duration);
+      Serial.print("s");
+    }
+  }
+  if (cmd == 6 || cmd == 7) {
+    Serial.print(" cue=");
+    Serial.print(volume);
+  }
+  Serial.println();
+
   if (ftpIsRunning()) {
     ftpStop();
     if (infoScreenIndex == 3)
@@ -592,13 +614,19 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
     case 2:  audioLoop(filename, volume, duration); break;
     case 3:  audioPause(); break;
     case 4:  audioSetVolume(volume); break;
-    case 5:  audioSetVolume(volume); audioTestTone(); break;
+    case 5:
+      if (infoScreenIndex == 2)
+        displayAudioStatus("TEST TONE", _audioVolume, true);
+      audioTestTone();
+      break;
     case 6:
     case 7: {
       AudioCue cue;
       if (cueLookup(volume, &cue)) {
         if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
         else          audioLoop(cue.filename, _audioVolume, cue.duration);
+      } else {
+        Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
       break;
     }
@@ -606,8 +634,12 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   }
 
   sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
-  if (infoScreenIndex == 2)
-    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  if (infoScreenIndex == 2) {
+    if (cmd == 5)
+      displayAudioStatus("TEST TONE", _audioVolume, false);
+    else
+      displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  }
 }
 
 void dispatchOscCue(uint8_t cueNum) {
@@ -763,8 +795,9 @@ void handleScreenCycle() {
 void handleD1Press() {
   switch (infoScreenIndex) {
     case 2:
-      audioTestTone();
       displayAudioStatus("TEST TONE", _audioVolume, true);
+      audioTestTone();
+      displayAudioStatus("TEST TONE", _audioVolume, false);
       break;
     case 3:
       if (ftpIsRunning()) ftpStop();

@@ -66,19 +66,27 @@ def _server_control_commands():
     import json
     import urllib.request
 
-    from central_launcher import find_running_central_server, stop_running_central
+    from central_launcher import (
+        find_running_central_server,
+        read_registry,
+        stop_running_central,
+    )
 
     found = find_running_central_server()
     if not found:
         print("No Central server is running.")
         sys.exit(0 if want_status else 1)
     port, runtime = found
+    # The registry records where the server is actually reachable; only
+    # fall back to loopback when it has nothing to say.
+    registry = read_registry() or {}
+    host = str(registry.get("host") or "127.0.0.1")
 
     if want_status:
         status = None
         try:
             with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/api/server/status", timeout=2.0) as response:
+                    f"http://{host}:{port}/api/server/status", timeout=2.0) as response:
                 status = json.loads(response.read().decode("utf-8"))
         except Exception:
             status = None
@@ -94,7 +102,7 @@ def _server_control_commands():
         sys.exit(0)
 
     force = "--force" in sys.argv
-    ok, message = stop_running_central(port=port, force=force)
+    ok, message = stop_running_central(host=host, port=port, force=force)
     if ok:
         print(f"Stopped Central server on port {port}.")
         sys.exit(0)
@@ -104,9 +112,62 @@ def _server_control_commands():
     sys.exit(1)
 
 
+def _migrate_radius_app_data():
+    """Copy standalone-RadiusCentral app data into the unified backend's tree.
+
+    Packaged RadiusCentral used to keep its data under RadiusV3/…; the
+    unified backend lives under PrimusV3/…. Copy (never move) the radius
+    state, audio cue sheet, and audio library across the first time, so an
+    existing fleet and library survive the switch. Source runs share one
+    directory and are untouched.
+    """
+    import shutil
+    from paths import data_path
+    try:
+        dest_state = data_path(".radius_state.json")
+    except Exception:
+        return
+    marker = os.sep + "PrimusV3" + os.sep
+    if marker not in dest_state:
+        return
+    dest_dir = os.path.dirname(dest_state)
+    legacy_dir = dest_dir.replace(marker, os.sep + "RadiusV3" + os.sep)
+    if legacy_dir == dest_dir or not os.path.isdir(legacy_dir):
+        return
+    try:
+        for name in (".radius_state.json", "audio_cues.json"):
+            src = os.path.join(legacy_dir, name)
+            dst = os.path.join(dest_dir, name)
+            if os.path.isfile(src) and not os.path.exists(dst):
+                os.makedirs(dest_dir, exist_ok=True)
+                shutil.copy2(src, dst)
+        src_audio = os.path.join(legacy_dir, "audio")
+        dst_audio = os.path.join(dest_dir, "audio")
+        if os.path.isdir(src_audio) and not os.path.isdir(dst_audio):
+            shutil.copytree(src_audio, dst_audio)
+    except OSError as exc:
+        print(f"WARNING: could not migrate RadiusCentral data: {exc}")
+
+
 def main():
     _server_control_commands()
-    if sender_product() == "primus":
+    product = sender_product()
+    if product == "radius" and os.environ.get("PRIMUSV3_RADIUS_STANDALONE") != "1":
+        # RadiusCentral is a launcher onto the unified backend: one server
+        # process (primus product) hosts the Primus, Radius, and Devices
+        # frontends, holds one device list, and owns the single telemetry
+        # listener on the Watch port — the same pattern DeviceManager uses.
+        # PRIMUSV3_RADIUS_STANDALONE=1 is the escape hatch back to the
+        # legacy separate backend.
+        os.environ["PRIMUSV3_SENDER_PRODUCT"] = "primus"
+        os.environ.setdefault("PRIMUSV3_DEFAULT_FRONTEND", "radius")
+        if "--frontend" not in sys.argv:
+            sys.argv.extend(["--frontend", "radius"])
+        _migrate_radius_app_data()
+        from run_primus import main as primus_main
+        primus_main()
+        return
+    if product == "primus":
         from run_primus import main as primus_main
         primus_main()
     else:

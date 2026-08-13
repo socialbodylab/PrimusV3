@@ -30,6 +30,11 @@ PRODUCT_DEFAULTS = {
         "bundle_id": "com.socialbodylab.DeviceManager",
         "entry": "run_devices.py",
     },
+    "artnetrecorder": {
+        "name": "ArtNetRecorder",
+        "bundle_id": "com.socialbodylab.ArtNetRecorder",
+        "entry": "run_artnet_recorder.py",
+    },
 }
 APP_ICON_SOURCE = Path("assets") / "appIcon.png"
 MACOS_ICON_SOURCE = APP_ICON_SOURCE
@@ -72,6 +77,10 @@ def _add_data_arg(source, dest):
 
 
 def _data_files(v4_dir, sender_dir, product="radius"):
+    if product == "artnetrecorder":
+        return [
+            (sender_dir / "web", "sender/web"),
+        ]
     files = [
         (v4_dir / "Arduino", "Arduino"),
         (sender_dir / "web", "sender/web"),
@@ -516,9 +525,9 @@ def main(argv=None):
     )
     parser.add_argument(
         "--product",
-        choices=("radius", "primus", "devices"),
+        choices=("radius", "primus", "devices", "artnetrecorder"),
         default=os.environ.get("PRIMUSV3_SENDER_PRODUCT", "radius"),
-        help="Sender product to build: radius (RadiusCentral), primus (PrimusCentral), or devices (DeviceManager).",
+        help="Sender product to build: radius (RadiusCentral), primus (PrimusCentral), devices (DeviceManager), or artnetrecorder (ArtNetRecorder).",
     )
     parser.add_argument(
         "--name",
@@ -727,7 +736,7 @@ def main(argv=None):
         _run(cmd, cwd=repo_root)
     except subprocess.CalledProcessError as exc:
         return exc.returncode
-    if args.target == "macos" and args.windowed:
+    if args.target == "macos" and args.windowed and args.product != "devices":
         _patch_macos_info_plist(output_path, {"LSMultipleInstancesProhibited": True})
     if args.target == "windows":
         _refresh_windows_icon_cache(output_path)

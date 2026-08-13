@@ -32,6 +32,7 @@ FRONTEND_PATHS = {
 # Why a running Central cannot serve this launcher.
 MISMATCH_WRONG_PRODUCT = "wrong_product"
 MISMATCH_MONITOR_ONLY = "monitor_only"
+MISMATCH_UNKNOWN_PRODUCT = "unknown_product"
 
 
 class CentralPortInUseByCentral(Exception):
@@ -143,13 +144,31 @@ def evaluate_server(runtime, *, need_product=None, needs_output=False):
     """
     runtime = runtime if isinstance(runtime, dict) else {}
     backend_product = str(runtime.get("product") or "").strip().lower()
+    raw_products = runtime.get("products")
+    if isinstance(raw_products, (list, tuple)):
+        backend_products = [
+            str(p).strip().lower() for p in raw_products if str(p or "").strip()
+        ]
+    else:
+        backend_products = [backend_product] if backend_product else []
 
     if need_product:
         need_product = str(need_product).strip().lower()
-        if backend_product and backend_product != need_product:
+        if not backend_products:
+            # A server that will not say what it serves must not be attached
+            # to on faith — an unknown backend failing loudly beats a wrong
+            # backend failing invisibly.
+            return {
+                "reason": MISMATCH_UNKNOWN_PRODUCT,
+                "backend_product": backend_product,
+                "backend_products": backend_products,
+                "need_product": need_product,
+            }
+        if need_product not in backend_products:
             return {
                 "reason": MISMATCH_WRONG_PRODUCT,
                 "backend_product": backend_product,
+                "backend_products": backend_products,
                 "need_product": need_product,
             }
 
@@ -197,6 +216,7 @@ def register_central_server(
     monitor_only=False,
     lan_enabled=False,
     app_version=None,
+    products=None,
 ):
     """Record where the Central is *and* what it is able to do.
 
@@ -213,6 +233,10 @@ def register_central_server(
         "lan_enabled": bool(lan_enabled),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    if products:
+        payload["products"] = [
+            str(p).strip().lower() for p in products if str(p or "").strip()
+        ]
     if app_version:
         payload["app_version"] = str(app_version)
     for path in registry_write_paths():
@@ -321,9 +345,9 @@ def find_running_central_server(requested_port=DEFAULT_HTTP_PORT, host="127.0.0.
     return None
 
 
-def _raise_existing_ui(host, port, url, open_browser):
-    """Focus an existing UI without opening a new browser window."""
-    if request_ui_focus(port, host=host):
+def _raise_existing_ui(host, port, url, open_browser, focus_allowed=True):
+    """Focus this frontend's UI, or open one when none exists."""
+    if focus_allowed and request_ui_focus(port, host=host):
         return "raised existing browser window"
     result = open_browser(url, attach=True)
     if result == "raised existing browser window":
@@ -365,6 +389,7 @@ def attach_to_running_central(
     open_browser,
     launcher_name,
     host="127.0.0.1",
+    server_default_frontend=None,
 ):
     """Open ``frontend_path`` against an already-running Central on ``port``."""
     url = build_central_url(port, frontend_path, host=host)
@@ -377,7 +402,18 @@ def attach_to_running_central(
     if no_browser:
         print("  Browser: not opened (--no-browser)")
     else:
-        browser_result = _raise_existing_ui(host, port, url, open_browser)
+        # The "focus the existing window" shortcut is only valid when this
+        # launcher's frontend is the one the server's own window shows.
+        # A different frontend attaching (DeviceManager onto a running
+        # RadiusCentral, say) must get its OWN window — raising the other
+        # app's window left this launcher exiting with nothing on screen.
+        same_frontend = (
+            server_default_frontend is None
+            or str(frontend_path or "").rstrip("/")
+            == str(server_default_frontend or "").rstrip("/")
+        )
+        browser_result = _raise_existing_ui(
+            host, port, url, open_browser, focus_allowed=same_frontend)
         print(f"  Browser: {browser_result}")
         if "could not" in str(browser_result).lower():
             # This is the silent-launch failure: the app attached correctly but
@@ -446,6 +482,7 @@ def try_attach_before_start(
         open_browser=open_browser,
         launcher_name=launcher_name,
         host=host,
+        server_default_frontend=runtime.get("default_frontend"),
     )
 
 
@@ -469,6 +506,40 @@ def stop_running_central(host="127.0.0.1", port=DEFAULT_HTTP_PORT, force=False,
         return False, body.get("error", f"HTTP {exc.code}")
     except (OSError, urllib.error.URLError, ValueError) as exc:
         return False, str(exc)
+
+
+def supports_remote_stop(runtime):
+    """True when the running Central advertises POST /api/server/stop.
+
+    Servers before 0.98 have no such route and answer 404. Callers must check
+    this before offering to restart a running server: attempting the stop and
+    failing leaves the old server holding the port with nothing explaining why,
+    which reads to the user as both apps refusing to launch.
+    """
+    if not isinstance(runtime, dict):
+        return False
+    return bool(runtime.get("server_control"))
+
+
+def describe_backend(runtime):
+    """Short human label for a running Central, for dialogs and errors."""
+    if not isinstance(runtime, dict):
+        return "a Central server"
+    product = str(runtime.get("product") or "").strip().lower()
+    version = str(runtime.get("app_version") or "").strip()
+    products = runtime.get("products")
+    name = {"primus": "PrimusCentral", "radius": "RadiusCentral"}.get(product)
+    if (
+        isinstance(products, (list, tuple))
+        and "primus" in products
+        and "radius" in products
+    ):
+        name = "Central (Primus + Radius)"
+    if name is None:
+        name = "a Central server"
+    if runtime.get("monitor_only"):
+        name = "DeviceManager"
+    return f"{name} v{version}" if version else name
 
 
 def wait_for_port_release(host="127.0.0.1", port=DEFAULT_HTTP_PORT, timeout=15.0):

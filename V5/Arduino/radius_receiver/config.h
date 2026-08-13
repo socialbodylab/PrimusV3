@@ -8,12 +8,13 @@
 #include <Arduino.h>
 
 #define FIRMWARE_VERSION_H     4
-#define FIRMWARE_VERSION_L     1
-#define FIRMWARE_VERSION_PATCH 1
+#define FIRMWARE_VERSION_L     20
+#define FIRMWARE_VERSION_PATCH 0
 
 #define _FW_STR_HELPER(x) #x
 #define _FW_STR(x)        _FW_STR_HELPER(x)
-#define FIRMWARE_VERSION  _FW_STR(FIRMWARE_VERSION_H) "." _FW_STR(FIRMWARE_VERSION_L) "." _FW_STR(FIRMWARE_VERSION_PATCH)
+#define FIRMWARE_VERSION  "4.20"
+#define FIRMWARE_VERSION_FULL _FW_STR(FIRMWARE_VERSION_H) "." _FW_STR(FIRMWARE_VERSION_L) "." _FW_STR(FIRMWARE_VERSION_PATCH)
 
 #define BOARD_FEATHER_ESP32S3_REVERSETFT  1
 #define BOARD_FEATHER_ESP32               2
@@ -58,6 +59,30 @@
 #endif
 
 #define BTN_D0  0
+
+// Buttons are compiled out entirely on the HUZZAH32 (V1) build: BTN_D1 (GPIO14)
+// is the SD chip-select and BTN_D2 (GPIO32) is the VS1053 chip-select, so
+// buttonsInit()'s INPUT_PULLDOWN on those pins fights the Music Maker SPI bus.
+// The V1 board is headless (NO_DISPLAY) so buttons have no function there anyway.
+#if TARGET_BOARD == BOARD_FEATHER_ESP32
+#define RADIUS_HAS_BUTTONS 0
+#else
+#define RADIUS_HAS_BUTTONS 1
+#endif
+
+// Battery telemetry (V1 HUZZAH32 only): stock VBAT/2 divider on A13 (GPIO35,
+// ADC1 — safe alongside WiFi). Exactly one analogReadMilliVolts() per second;
+// never multi-sample or delay() here — the VS1053 FIFO drains in ~11.6 ms.
+#if TARGET_BOARD == BOARD_FEATHER_ESP32
+#define RADIUS_BATTERY_MONITOR 1
+#else
+#define RADIUS_BATTERY_MONITOR 0
+#endif
+
+// NOTE: build_opt.h (sketch dir; consumed verbatim as compiler flags, so it
+// cannot carry comments) disables NimBLE's peripheral/broadcaster roles —
+// Marius is scanner + client only. Without this the merged firmware overflows
+// the HUZZAH32's stock 1.25 MB app partition. Do not delete that file.
 
 #define AUDIO_BOARD_MUSIC_MAKER 1
 #define AUDIO_BOARD AUDIO_BOARD_MUSIC_MAKER
@@ -119,7 +144,7 @@
 #define ESTA_CODE          0x0000
 
 #define NODE_CAPS_PREFIX   "PVRAD1"
-#define NODE_CAPS_FEATURES "RIHAS"
+#define NODE_CAPS_FEATURES "RIHASB"
 
 #define FPS_REPORT_PORT         PORT_WATCH_DEFAULT
 #define AUDIO_REPORT_PORT       PORT_WATCH_DEFAULT

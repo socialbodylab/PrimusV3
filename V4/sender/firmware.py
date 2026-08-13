@@ -186,7 +186,7 @@ def upload_script_path(profile):
         raise FirmwareRequestError(400, "invalid profile")
     if meta["family"] == "primus":
         return os.path.abspath(os.path.join(arduino_root(), meta["script"]))
-    return os.path.abspath(paths.resource_path("Arduino", meta["script"]))
+    return os.path.abspath(os.path.join(paths.radius_arduino_dir(), meta["script"]))
 
 
 def default_upload_script_path():
@@ -784,7 +784,8 @@ class FirmwareJobManager:
                     job.append_output(
                         f"Upload succeeded, but device refresh failed: {refresh_error}")
                 elif self._has_name_overrides(firmware_command.metadata):
-                    job.append_output("Name overrides applied to online receivers.")
+                    job.append_output(
+                        "Name overrides synced to matching flashed receiver(s) only.")
         except Exception as exc:
             job.append_output(redact_text(str(exc), firmware_command.secrets))
             job.set_status(

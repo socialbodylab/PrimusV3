@@ -18,13 +18,19 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("audioPanel", () => ({
 
         // ── Playback ────────────────────────────────────────────────────
-        playing:      {},   // { di: { file, cmd } }
+        // Optimistic overlay only: holds the local play/pause/stop intent
+        // briefly until the next telemetry poll confirms it. The source of
+        // truth for now-playing is dev.current_track + dev.playback_state
+        // (0 stopped / 1 playing / 2 paused) from the state poll.
+        _optimistic:  {},   // { di: { file, cmd, at } }
         _lastVolSent: {},
+        OPTIMISTIC_HOLD_MS: 4000,
 
         // ── File manager ────────────────────────────────────────────────
         cwd:     {},        // { di: "/" }
         entries: {},        // { di: [{name, is_dir, size}] }
         loading: {},        // { di: bool }
+        fmOpen:  {},        // { di: bool } SD file browser expanded
 
         // ── Upload ──────────────────────────────────────────────────────
         uploadStatus: {},   // { di: {name, progress} | null }
@@ -50,7 +56,17 @@ document.addEventListener("alpine:init", () => {
             if (this.cwd[di] === undefined) {
                 this.cwd = { ...this.cwd, [di]: "/" };
             }
-            if (this.entries[di] === undefined) {
+            // Deliberately no automatic loadDir() here: an FTP directory
+            // listing per node at page load starves the browser connection
+            // pool (each listing is an enable/handshake/disable FTP cycle).
+            // The listing loads when the SD Files section is first expanded
+            // or the Refresh button is pressed.
+        },
+
+        toggleFm(di) {
+            const open = !this.fmOpen[di];
+            this.fmOpen = { ...this.fmOpen, [di]: open };
+            if (open && this.entries[di] === undefined && !this.loading[di]) {
                 this.loadDir(di);
             }
         },
@@ -62,7 +78,11 @@ document.addEventListener("alpine:init", () => {
             this.loading = { ...this.loading, [di]: true };
             try {
                 const result = await api("POST", "/api/audio/files", { device: di, path });
-                this.entries = { ...this.entries, [di]: result.entries || [] };
+                // Hide dotfiles: SD cards loaded from a Mac accumulate
+                // .Spotlight-V100 / .Trashes dirs and "._foo.wav"
+                // AppleDouble files that are not real audio.
+                const entries = (result.entries || []).filter(e => !e.name.startsWith("."));
+                this.entries = { ...this.entries, [di]: entries };
             } catch (e) {
                 console.error("[audio] dir list failed:", e);
                 this.entries = { ...this.entries, [di]: [] };
@@ -101,22 +121,81 @@ document.addEventListener("alpine:init", () => {
             return Alpine.store("audio").getVolume(di);
         },
 
+        _setOptimistic(di, file, cmd) {
+            this._optimistic = { ...this._optimistic, [di]: { file, cmd, at: Date.now() } };
+        },
+
+        _device(di) {
+            return (Alpine.store("app").state?.devices || [])[di];
+        },
+
+        // Current playback for a device: recent local intent wins briefly,
+        // then telemetry (playback_state + current_track) takes over.
+        nowPlaying(di) {
+            const opt = this._optimistic[di];
+            if (opt && (Date.now() - opt.at) < this.OPTIMISTIC_HOLD_MS) {
+                if (opt.cmd === "stop") return null;
+                return {
+                    file: opt.file,
+                    state: opt.cmd === "pause" ? 2 : 1,
+                    looping: opt.cmd === "loop",
+                    optimistic: true,
+                };
+            }
+            const dev = this._device(di);
+            if (!dev || !dev.receiver_online) return null;
+            const state = dev.playback_state;
+            if (state !== 1 && state !== 2) return null;
+            return {
+                file: dev.current_track || "",
+                state,
+                looping: !!dev.audio_looping,
+            };
+        },
+
+        nowPlayingIcon(di) {
+            const np = this.nowPlaying(di);
+            if (!np) return "";
+            if (np.state === 2) return "‖";       // pause bars
+            if (np.looping) return "↺";           // loop arrow
+            return "▶";                            // play triangle
+        },
+
+        nowPlayingStateLabel(di) {
+            const np = this.nowPlaying(di);
+            if (!np) return "";
+            if (np.state === 2) return "paused";
+            return np.looping ? "looping" : "playing";
+        },
+
         async play(di, filename, cmd = "play") {
-            await api("POST", "/api/audio/cmd", {
-                device: di, cmd, filename, volume: this.getVolume(di),
-            });
-            this.playing = { ...this.playing, [di]: { file: filename, cmd } };
+            try {
+                await api("POST", "/api/audio/cmd", {
+                    device: di, cmd, filename, volume: this.getVolume(di),
+                });
+                this._setOptimistic(di, filename, cmd);
+            } catch (e) {
+                Alpine.store("app").showApiError("Play failed", e);
+            }
         },
 
         async stop(di) {
-            await api("POST", "/api/audio/cmd", { device: di, cmd: "stop", filename: "" });
-            const p = { ...this.playing };
-            delete p[di];
-            this.playing = p;
+            try {
+                await api("POST", "/api/audio/cmd", { device: di, cmd: "stop", filename: "" });
+                this._setOptimistic(di, "", "stop");
+            } catch (e) {
+                Alpine.store("app").showApiError("Stop failed", e);
+            }
         },
 
         async pause(di) {
-            await api("POST", "/api/audio/cmd", { device: di, cmd: "pause", filename: "" });
+            try {
+                await api("POST", "/api/audio/cmd", { device: di, cmd: "pause", filename: "" });
+                const current = this.nowPlaying(di);
+                this._setOptimistic(di, current?.file || this._device(di)?.current_track || "", "pause");
+            } catch (e) {
+                Alpine.store("app").showApiError("Pause failed", e);
+            }
         },
 
         onVolumeInput(di, value) {
@@ -130,11 +209,13 @@ document.addEventListener("alpine:init", () => {
         },
 
         isPlaying(di, filename) {
-            return this.playing[di]?.file === filename;
+            const np = this.nowPlaying(di);
+            return !!np && np.file === filename;
         },
 
         isLooping(di, filename) {
-            return this.playing[di]?.file === filename && this.playing[di]?.cmd === "loop";
+            const np = this.nowPlaying(di);
+            return !!np && np.file === filename && np.looping;
         },
 
         // ── File operations ───────────────────────────────────────────────
@@ -143,15 +224,19 @@ document.addEventListener("alpine:init", () => {
             return (cwd.endsWith("/") ? cwd : cwd + "/") + name;
         },
 
+        deleteKey(di, name) {
+            return `audio-del-${di}:${name}`;
+        },
+
         async deleteEntry(di, entry) {
-            if (!confirm(`Delete "${entry.name}"?`)) return;
+            if (!Alpine.store("app").requestConfirm(this.deleteKey(di, entry.name))) return;
             const path = this.joinPath(this.cwd[di] || "/", entry.name);
             try {
                 await api("POST", "/api/audio/delete", { device: di, path, is_dir: entry.is_dir });
+                Alpine.store("app").showNotice(`Deleted "${entry.name}".`, "success");
                 await this.loadDir(di);
             } catch (e) {
-                console.error("[audio] delete failed:", e);
-                alert(`Delete failed: ${e.message}`);
+                Alpine.store("app").showApiError(`Delete of "${entry.name}" failed`, e);
             }
         },
 
@@ -178,8 +263,7 @@ document.addEventListener("alpine:init", () => {
                 await api("POST", "/api/audio/rename", { device: di, src, dst });
                 await this.loadDir(di);
             } catch (e) {
-                console.error("[audio] rename failed:", e);
-                alert(`Rename failed: ${e.message}`);
+                Alpine.store("app").showApiError("Rename failed", e);
             }
         },
 
@@ -211,8 +295,7 @@ document.addEventListener("alpine:init", () => {
                 await api("POST", "/api/audio/mkdir", { device: di, path });
                 await this.loadDir(di);
             } catch (e) {
-                console.error("[audio] mkdir failed:", e);
-                alert(`Create folder failed: ${e.message}`);
+                Alpine.store("app").showApiError("Create folder failed", e);
             }
         },
 
@@ -239,7 +322,7 @@ document.addEventListener("alpine:init", () => {
                 try {
                     await this._uploadFile(di, file);
                 } catch (e) {
-                    console.error(`[audio] upload failed (${file.name}):`, e);
+                    Alpine.store("app").showApiError(`Upload of "${file.name}" failed`, e);
                 }
             }
             this.uploadStatus = { ...this.uploadStatus, [di]: null };

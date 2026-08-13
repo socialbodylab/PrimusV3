@@ -32,6 +32,8 @@ import mixer
 import sharing
 from artnet import (
     discover_artnet_nodes,
+    device_show_port,
+    device_setup_port,
     ftp_list_dir,
     ftp_upload,
     is_compatible_node,
@@ -62,6 +64,9 @@ DEBUG_API_TIMING = os.environ.get("PRIMUSV3_DEBUG_API_TIMING") == "1"
 _WEB_DIR = web_dir()
 _sync_lock = threading.Lock()
 _sync_job = None
+# Coalescing guard for /api/devices/sync (see _sync_network_devices).
+_device_sync_lock = threading.Lock()
+_device_sync_inflight = None
 _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 
 
@@ -79,44 +84,97 @@ def _safe_ftp_path(path):
 
 
 def _sync_network_devices(device_state, interface=None):
-    """Discover nodes, add compatible new devices, and connect all online targets."""
+    """Discover nodes and add/refresh devices, coalescing overlapping calls.
+
+    Every frontend runs its own 20 s auto-sync, so with three UIs open the
+    calls overlap; each full pass costs a 3.5 s discovery sweep plus a
+    Setup-lane config round trip per management-capable node, all serialized
+    behind _artnet_query_lock. Instead of piling a second (and third) sweep
+    behind the first, late arrivals wait for the in-flight pass and return
+    its result — the network state they'd re-measure seconds later is the
+    same.
+    """
+    global _device_sync_inflight
+    with _device_sync_lock:
+        job = _device_sync_inflight
+        if job is None:
+            job = {"event": threading.Event(), "result": None}
+            _device_sync_inflight = job
+            is_runner = True
+        else:
+            is_runner = False
+
+    if not is_runner:
+        job["event"].wait()
+        result = job["result"]
+        if result is None:
+            # The in-flight pass died on an exception; report an empty pass
+            # rather than propagating someone else's error.
+            result = {"added": [], "skipped": [], "connected": [], "nodes": []}
+        return result
+
+    try:
+        result = _run_device_sync(device_state, interface=interface)
+        job["result"] = result
+        return result
+    finally:
+        with _device_sync_lock:
+            _device_sync_inflight = None
+        job["event"].set()
+
+
+def _run_device_sync(device_state, interface=None):
+    """Discover nodes, add compatible new devices, refresh known ones."""
     product = sender_product()
     known_ips = device_state.discovery_targets()
     nodes = discover_artnet_nodes(known_ips=known_ips, timeout=3.5, interface=interface)
-    if nodes:
-        device_state.refresh_devices_from_nodes(nodes)
 
+    # add_device_from_node already refreshes an existing device (including a
+    # management config round trip for capable nodes), so compatible nodes go
+    # through it alone — a separate refresh pre-pass would do every node's
+    # work twice. Saves are batched: one state-file write per sync instead of
+    # one per node.
     added = []
     skipped = []
+    incompatible = []
+    changed = False
     for node in nodes or []:
         node_ip = node.get("ip")
         if not is_compatible_node(node, product):
             skipped.append({"ip": node_ip, "reason": "incompatible"})
+            incompatible.append(node)
             continue
-        result = device_state.add_device_from_node(node)
-        if result.get("status") == "added":
+        result = device_state.add_device_from_node(node, auto_save=False)
+        status = result.get("status")
+        if status in ("added", "updated"):
+            changed = True
+        if status == "added":
             added.append({
                 "ip": node_ip,
                 "name": node.get("short_name") or node_ip,
                 "device_index": result.get("device_index"),
             })
 
-    if getattr(device_state, "monitor_only", False):
-        # Discovery only — never open an output connection automatically.
-        # Otherwise the per-frame send loop would start streaming DMX
-        # (including idle keepalive frames) to devices this instance has no
-        # business driving, e.g. receivers a console like EOS is already
-        # controlling on the same network.
-        connected = []
-    else:
-        online_ips = {node.get("ip") for node in nodes if node.get("ip")}
-        connect_results = device_state.connect_all(
-            only_ips=online_ips if online_ips else None,
-        )
-        connected = [
-            result for result in connect_results
-            if result.get("ok") and not result.get("skipped")
-        ]
+    # An incompatible reply can still belong to a device we already track
+    # (e.g. a garbled node report from flaky firmware) — keep refreshing
+    # those so its IP/telemetry stay current.
+    if incompatible:
+        refreshed = device_state.refresh_devices_from_nodes(
+            incompatible, auto_save=False)
+        changed = changed or bool(refreshed)
+
+    if changed:
+        device_state.save_devices()
+
+    # Sync is discovery + refresh ONLY — it never opens an output
+    # connection. Connecting is what arms DMX to a device (including
+    # per-frame keepalive blackout frames), and in production the color
+    # data usually comes from an external console (EOS, TouchDesigner):
+    # a background sync that auto-connects would fight it. Connecting is
+    # always an explicit operator action (/api/connect, Connect All).
+    # This is also what made the old monitor_only mode unnecessary — every
+    # backend is passive until an operator arms output.
+    connected = []
     return {
         "added": added,
         "skipped": skipped,
@@ -126,6 +184,15 @@ def _sync_network_devices(device_state, interface=None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    # HTTP/1.1 keep-alive: the UIs poll several times per second, and
+    # without persistent connections every poll pays a TCP handshake —
+    # invisible on loopback, real cost for network clients. Every response
+    # path sets Content-Length, which keep-alive requires.
+    protocol_version = "HTTP/1.1"
+    # Reap idle or hung keep-alive connections so they don't pin a server
+    # thread forever.
+    timeout = 65
+
     controller_state = None
     primus_state = None
     radius_state = None
@@ -141,6 +208,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def _device_state(self):
         return self._primus_state() or self._radius_state()
+
+    def _backend_products(self):
+        """Products this server can serve.
+
+        A ControllerState with the Radius audio/FTP surface makes the
+        unified backend a valid host for the RadiusCentral frontend, so it
+        advertises both products; a standalone RadiusState backend stays
+        radius-only.
+        """
+        products = [sender_product()]
+        primus = self._primus_state()
+        if primus is not None and hasattr(primus, "send_audio_command"):
+            if "radius" not in products:
+                products.append("radius")
+        return products
 
     def _osc_service(self):
         return getattr(self.server, "osc_service", None)
@@ -245,6 +327,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/runtime":
             self._json_response({
                 "product": sender_product(),
+                "products": self._backend_products(),
                 "app_version": app_version(),
                 "ui_lifecycle": bool(getattr(self.server, "ui_lifecycle_enabled", False)),
                 "frontends": {
@@ -255,6 +338,12 @@ class Handler(BaseHTTPRequestHandler):
                 "default_frontend": default_frontend_path(),
                 "monitor_only": bool(getattr(self._device_state(), "monitor_only", False)),
                 "lan_enabled": bool(getattr(self.server, "lan_enabled", False)),
+                # Advertise that POST /api/server/stop exists. A launcher must
+                # never assume it: servers before 0.98 answer that route with
+                # 404, and a launcher that tried anyway aborted with a generic
+                # failure while the old server kept holding the port -- both
+                # apps then looked dead. Absent means "cannot stop remotely".
+                "server_control": True,
             })
             return
         if path == "/api/server/status":
@@ -271,6 +360,7 @@ class Handler(BaseHTTPRequestHandler):
                 "host": self.server.server_address[0],
                 "port": self.server.server_address[1],
                 "product": sender_product(),
+                "products": self._backend_products(),
                 "app_version": app_version(),
                 "monitor_only": bool(
                     getattr(self._device_state(), "monitor_only", False)),
@@ -284,7 +374,16 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
         if path == "/api/state":
-            self._json_response(self._device_state().get_json())
+            state = self._device_state()
+            wanted = (self._query_params().get("product") or "").strip().lower()
+            if wanted == "radius" and hasattr(state, "get_radius_json"):
+                # Unified backend: the RadiusCentral frontend asks for the
+                # radius-shaped view of the shared device list. Indices stay
+                # aligned with the unified list. A standalone RadiusState
+                # (no get_radius_json) already returns the radius shape.
+                self._json_response(state.get_radius_json())
+                return
+            self._json_response(state.get_json())
             return
         if path == "/api/device_full_config":
             state = self._primus_management_state()
@@ -501,9 +600,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 raw = self._device_state().ftp_download(di, "/cues.json")
-                self._json_response(json.loads(raw.decode()))
             except Exception as exc:
-                self._json_error(500, str(exc))
+                # A node with no cue map yet is a normal state, not an error:
+                # the editor should open an empty table. Only the FTP session
+                # itself failing outright is worth surfacing.
+                message = str(exc)
+                if "550" in message or "no such file" in message.lower():
+                    self._json_response({})
+                    return
+                self._json_error(500, message)
+                return
+            try:
+                self._json_response(json.loads(raw.decode()))
+            except Exception:
+                # Corrupt cue map on the SD card: let the operator start over
+                # rather than blocking the editor behind a 500.
+                self._json_response({})
             return
         if path == "/api/audio_sync/status":
             with _sync_lock:
@@ -527,7 +639,6 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_POST(self):
-        path = self.path.split("?")[0]
         path = self.path.split("?")[0]
 
         if path == "/api/audio/upload":
@@ -735,21 +846,27 @@ class Handler(BaseHTTPRequestHandler):
             if getattr(self._device_state(), "monitor_only", False):
                 self._json_error(409, "this instance is running in monitor-only mode")
                 return
-            di = data.get("device", 0)
-            if 0 <= di < len(self._device_state().devices):
+            try:
+                # Snapshot the IP in one step: a concurrent remove between a
+                # separate length check and the index read raised IndexError
+                # (an uncaught 500) on this route.
+                di = int(data.get("device", 0))
+                if di < 0:
+                    raise IndexError(di)
                 ip = self._device_state().devices[di]["ip"]
-                interface = self._sync_artnet_source()
-                nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface)
-                node = next((n for n in nodes if n["ip"] == ip), None)
-                if node:
-                    self._device_state().add_device_from_node(node)
-                result = self._device_state().connect(di)
-                if result.get("ok"):
-                    self._ok()
-                else:
-                    self._json_error(503, result.get("error", "connect failed"))
-            else:
+            except (IndexError, TypeError, ValueError, KeyError):
                 self._respond(400, "application/json", b'{"error":"invalid device index"}')
+                return
+            interface = self._sync_artnet_source()
+            nodes = discover_artnet_nodes(known_ips=[ip], timeout=1.0, interface=interface)
+            node = next((n for n in nodes if n["ip"] == ip), None)
+            if node:
+                self._device_state().add_device_from_node(node)
+            result = self._device_state().connect(di)
+            if result.get("ok"):
+                self._ok()
+            else:
+                self._json_error(503, result.get("error", "connect failed"))
 
         elif path == "/api/disconnect":
             di = data.get("device", 0)
@@ -1393,7 +1510,7 @@ class Handler(BaseHTTPRequestHandler):
             except NetworkSettingsError as exc:
                 self._json_network_error(exc)
 
-        if path == "/api/audio/cmd":
+        elif path == "/api/audio/cmd":
             di = data.get("device", -1)
             cmd = str(data.get("cmd", "stop"))
             filename = str(data.get("filename", ""))
@@ -1411,7 +1528,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json_error(400, "invalid device index or command")
             return
-        if path == "/api/audio/files":
+        elif path == "/api/audio/files":
             di = data.get("device", -1)
             ftp_path = str(data.get("path", "/"))
             if not (0 <= di < len(self._device_state().devices)):
@@ -1425,7 +1542,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/rename":
+        elif path == "/api/audio/rename":
             di = data.get("device", -1)
             src = str(data.get("src", ""))
             dst = str(data.get("dst", ""))
@@ -1440,7 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/delete":
+        elif path == "/api/audio/delete":
             di = data.get("device", -1)
             ftp_path = str(data.get("path", ""))
             is_dir = bool(data.get("is_dir", False))
@@ -1455,7 +1572,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/mkdir":
+        elif path == "/api/audio/mkdir":
             di = data.get("device", -1)
             ftp_path = str(data.get("path", ""))
             if not (0 <= di < len(self._device_state().devices)):
@@ -1469,7 +1586,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/cue_map":
+        elif path == "/api/audio/cue_map":
             di = data.get("device", -1)
             cues = data.get("cues")
             devices = self._device_state().devices
@@ -1486,13 +1603,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._json_error(500, str(exc))
             return
-        if path == "/api/audio_cues":
+        elif path == "/api/audio_cues":
             with self.audio_cues_lock:
                 Handler.audio_cues_data = data
                 _audio_cues_mod.save_audio_cues(data)
             self._json_response(data)
             return
-        if path == "/api/audio_cues/fire":
+        elif path == "/api/audio_cues/fire":
             number = data.get("number")
             with self.audio_cues_lock:
                 cues = self.audio_cues_data.get("cues", [])
@@ -1503,7 +1620,7 @@ class Handler(BaseHTTPRequestHandler):
             results = self._device_state().fire_audio_cue(cue)
             self._json_response({"results": results})
             return
-        if path == "/api/audio_sync":
+        elif path == "/api/audio_sync":
             global _sync_job
             with _sync_lock:
                 if _sync_job and _sync_job.get("status") == "running":
@@ -1527,7 +1644,7 @@ class Handler(BaseHTTPRequestHandler):
             ).start()
             self._json_response({"job_id": new_job["job_id"]})
             return
-        if path == "/api/netlog/clear":
+        elif path == "/api/netlog/clear":
             netlog.clear()
             self._ok()
             return
@@ -1650,11 +1767,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
-        self.close_connection = True
 
     def _serve_static(self, url_path):
         path = url_path.split("?")[0]
@@ -1760,12 +1875,17 @@ def _run_sync_job(job, state, cues_data):
         source_ip = state.artnet_source_ip
 
         with state.lock:
+            # Lane-aware ports resolved per device: a node whose Show or
+            # Setup lane has been moved off the legacy defaults would
+            # silently ignore commands sent to 6454.
             devices_snap = [
                 {
                     "ip": d["ip"],
                     "name": d.get("name", d["ip"]),
                     "is_radius": d.get("is_radius", False),
                     "connected": d.get("connected", False),
+                    "port_show": device_show_port(d, is_radius=True),
+                    "port_setup": device_setup_port(d, is_radius=True),
                 }
                 for d in state.devices
             ]
@@ -1779,7 +1899,8 @@ def _run_sync_job(job, state, cues_data):
         for dev in radius_devs:
             if dev["connected"]:
                 try:
-                    send_audio_cmd(dev["ip"], AUDIO_CMD_STOP, source_ip=source_ip)
+                    send_audio_cmd(dev["ip"], AUDIO_CMD_STOP, source_ip=source_ip,
+                                   dest_port=dev["port_show"])
                 except Exception:
                     pass
         time.sleep(0.3)
@@ -1791,6 +1912,7 @@ def _run_sync_job(job, state, cues_data):
             ip = dev["ip"]
             dev_name = dev["name"]
             connected = dev["connected"]
+            port_setup = dev["port_setup"]
 
             if not connected:
                 with _sync_lock:
@@ -1827,7 +1949,8 @@ def _run_sync_job(job, state, cues_data):
                 continue
 
             try:
-                entries = ftp_list_dir(ip, "/", source_ip=source_ip)
+                entries = ftp_list_dir(ip, "/", source_ip=source_ip,
+                                       dest_port=port_setup)
                 on_device = {e["name"] for e in entries if not e["is_dir"]}
             except Exception as exc:
                 for fname in sorted(needed):
@@ -1890,7 +2013,8 @@ def _run_sync_job(job, state, cues_data):
 
                 try:
                     ftp_upload(ip, f"/{fname}", data, source_ip=source_ip,
-                               progress_callback=_progress)
+                               progress_callback=_progress,
+                               dest_port=port_setup)
                     item["bytes_sent"] = len(data)
                     item["status"] = "done"
                 except Exception as exc:
@@ -1908,6 +2032,17 @@ def _run_sync_job(job, state, cues_data):
 
 class PrimusThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # Keep-alive connections end with a reset/broken pipe whenever a
+        # browser closes one — that is normal connection churn, not an
+        # error, and the default handler printed a full traceback per
+        # occurrence (several per minute per client).
+        import sys as _sys
+        exc = _sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def create_server(host, port, state, cue_list=None, ui_lifecycle_enabled=False, osc_service=None):

@@ -56,6 +56,7 @@ DEFAULT_RADIUS_CAPABILITIES = {
     "audio": False,
     "ftp": False,
     "show_info": False,
+    "battery": False,
 }
 
 AUDIO_CMD_MAP = {
@@ -304,16 +305,24 @@ class RadiusState:
             timeout=3.0,
             interface=interface,
         )
-        online_ips = {node.get("ip") for node in nodes if node.get("ip")}
+        # Only push flash name overrides to nodes whose discovered identity
+        # already matches them (the freshly flashed device) — never to every
+        # online node, which smears one performer's names across the fleet.
+        override_ips = {
+            node.get("ip")
+            for node in nodes
+            if node.get("ip")
+            and show_info_store.node_matches_firmware_name_overrides(node, overrides)
+        }
         self.refresh_devices_from_nodes(nodes)
 
-        if not has_name_overrides or not online_ips:
+        if not has_name_overrides or not override_ips:
             return
 
         with self.lock:
             for dev in self.devices:
                 ip = dev.get("ip")
-                if not ip or ip not in online_ips:
+                if not ip or ip not in override_ips:
                     continue
                 if device_name:
                     sync_device_name_to_receiver(
@@ -339,6 +348,12 @@ class RadiusState:
                     dev.get("character_name", ""),
                     dev.get("performer_name", ""),
                 )
+            _save_devices(self.devices)
+
+    def save_devices(self):
+        """Persist the device list once, for callers that batched several
+        auto_save=False mutations (e.g. the periodic network sync)."""
+        with self.lock:
             _save_devices(self.devices)
 
     def refresh_devices_from_nodes(self, nodes, auto_save=True):
@@ -845,6 +860,24 @@ class RadiusState:
             dev["fps"] = telemetry.get("fps")
         if "pkt_rate" in telemetry:
             dev["pkt_rate"] = telemetry.get("pkt_rate")
+        # PRS status fields (Radius firmware 4.16+)
+        for key in (
+            "battery_mv",
+            "battery_pct",
+            "battery_power_mode",
+            "battery_warning",
+            "rssi_dbm",
+            "uptime_seconds",
+            "wifi_connected",
+            "sd_ready",
+            "ftp_running",
+            "audio_playing",
+            "audio_looping",
+            "marius_configured",
+            "marius_connected",
+        ):
+            if key in telemetry:
+                dev[key] = telemetry.get(key)
 
     def get_json(self):
         with self.lock:
@@ -866,6 +899,10 @@ class RadiusState:
                     "static_ip": dev.get("static_ip"),
                     "gateway": dev.get("gateway"),
                     "subnet": dev.get("subnet"),
+                    "transport_error": dev.get("transport_error"),
+                    "mac": dev.get("mac"),
+                    "device_uid": dev.get("device_uid")
+                    or ("ip:{}".format(dev.get("ip")) if dev.get("ip") else None),
                     "current_track": dev.get("current_track", ""),
                     "playback_state": dev.get("playback_state", 0),
                 }
@@ -873,6 +910,7 @@ class RadiusState:
                 devices.append(item)
             return {
                 "product": "radius",
+                "products": ["radius"],
                 "devices": devices,
             }
 

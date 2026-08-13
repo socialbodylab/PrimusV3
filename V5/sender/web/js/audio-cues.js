@@ -39,6 +39,24 @@ document.addEventListener("alpine:init", () => {
             return [...this.cues].sort((a, b) => (a.number || 0) - (b.number || 0));
         },
 
+        // Cue numbers used more than once. The editor prevents creating
+        // duplicates, but imported sheets can still contain them — the
+        // backend fires only the first match, so surface a warning.
+        get duplicateCueNumbers() {
+            const seen = new Set();
+            const dups = new Set();
+            for (const c of this.cues) {
+                const n = c.number || 0;
+                if (seen.has(n)) dups.add(n);
+                seen.add(n);
+            }
+            return dups;
+        },
+
+        isDuplicateNumber(cue) {
+            return this.duplicateCueNumbers.has(cue.number || 0);
+        },
+
         // ── Lifecycle ─────────────────────────────────────────────────
 
         async init() {
@@ -46,14 +64,25 @@ document.addEventListener("alpine:init", () => {
             await this.loadProjectFiles();
         },
 
+        // Stable per-cue identity so Alpine can key rows on something that
+        // survives renumbering (cue.number is user-editable and can even be
+        // duplicated by an import).
+        _ensureIds(cues) {
+            return (cues || []).map(c => c.id ? c : { ...c, id: this._genId() });
+        },
+
+        _genId() {
+            return "cue-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+        },
+
         // ── Cue sheet persistence ─────────────────────────────────────
 
         async load() {
             try {
                 const data = await api("GET", "/api/audio_cues");
-                this.cues = data.cues || [];
+                this.cues = this._ensureIds(data.cues);
             } catch (e) {
-                console.error("[audio-cues] load failed:", e);
+                Alpine.store("app").showApiError("Cue sheet load failed", e);
             }
         },
 
@@ -66,7 +95,7 @@ document.addEventListener("alpine:init", () => {
             try {
                 await api("POST", "/api/audio_cues", { cues: this.cues });
             } catch (e) {
-                console.error("[audio-cues] save failed:", e);
+                Alpine.store("app").showApiError("Cue sheet save failed", e);
             }
         },
 
@@ -76,6 +105,7 @@ document.addEventListener("alpine:init", () => {
             const nums = this.cues.map(c => c.number || 0);
             const next = nums.length ? Math.max(...nums) + 1 : 1;
             this.cues = [...this.cues, {
+                id:      this._genId(),
                 number:  next,
                 note:    "",
                 actions: {},
@@ -85,7 +115,7 @@ document.addEventListener("alpine:init", () => {
 
         removeCue(idx) {
             const c = this.sortedCues[idx];
-            if (!confirm(`Remove cue ${c.number}?`)) return;
+            if (!Alpine.store("app").requestConfirm("cue-remove-" + c.id)) return;
             this.cues = this.cues.filter(x => x !== c);
             this.scheduleSave();
         },
@@ -98,6 +128,24 @@ document.addEventListener("alpine:init", () => {
                 j === i ? { ...x, [field]: value } : x
             );
             this.scheduleSave();
+        },
+
+        // Number edits go through validation: a duplicate is rejected and
+        // the input snaps back to the cue's current number.
+        updateCueNumber(idx, event) {
+            const c = this.sortedCues[idx];
+            let next = parseInt(event.target.value);
+            if (!Number.isFinite(next)) next = c.number || 1;
+            next = Math.min(255, Math.max(1, next));
+            if (next !== c.number
+                && this.cues.some(x => x !== c && (x.number || 0) === next)) {
+                Alpine.store("app").showNotice(
+                    `Cue ${next} already exists — pick an unused number.`, "error", 4000);
+                event.target.value = c.number;
+                return;
+            }
+            event.target.value = next;
+            this.updateCueField(idx, "number", next);
         },
 
         // ── Per-device actions ────────────────────────────────────────
@@ -139,7 +187,7 @@ document.addEventListener("alpine:init", () => {
                     this.fireResults = r;
                 }, 3000);
             } catch (e) {
-                console.error("[audio-cues] fire failed:", e);
+                Alpine.store("app").showApiError(`Fire cue ${c.number} failed`, e);
             }
         },
 
@@ -170,7 +218,7 @@ document.addEventListener("alpine:init", () => {
                 const res = await api("GET", "/api/project_audio");
                 this.projectFiles = res.files || [];
             } catch (e) {
-                console.error("[audio-cues] project files load failed:", e);
+                Alpine.store("app").showApiError("Project library load failed", e);
             }
         },
 
@@ -200,7 +248,9 @@ document.addEventListener("alpine:init", () => {
             const isRiff = magic[0]===0x52 && magic[1]===0x49 && magic[2]===0x46 && magic[3]===0x46;
             const isWave = magic[8]===0x57 && magic[9]===0x41 && magic[10]===0x56 && magic[11]===0x45;
             if (!isRiff || !isWave) {
-                alert(`"${file.name}" is not a valid WAV file.\n\nProject library requires PCM WAV format.`);
+                Alpine.store("app").showNotice(
+                    `"${file.name}" is not a valid WAV file — the project library requires PCM WAV format.`,
+                    "error", 5000);
                 return;
             }
             const params = new URLSearchParams({ filename: file.name });
@@ -212,18 +262,18 @@ document.addEventListener("alpine:init", () => {
             if (!resp.ok) {
                 let msg = `Upload failed (${resp.status})`;
                 try { msg = (await resp.json()).error || msg; } catch (_) {}
-                alert(msg);
+                Alpine.store("app").showNotice(msg, "error", 5000);
             }
         },
 
         async deleteProjectFile(name) {
-            if (!confirm(`Remove "${name}" from project library?`)) return;
+            if (!Alpine.store("app").requestConfirm("project-file-del-" + name)) return;
             try {
                 await fetch(`/api/project_audio/${encodeURIComponent(name)}`,
                             { method: "DELETE" });
                 await this.loadProjectFiles();
             } catch (e) {
-                console.error("[audio-cues] delete project file failed:", e);
+                Alpine.store("app").showApiError(`Remove "${name}" failed`, e);
             }
         },
 
@@ -258,7 +308,7 @@ document.addEventListener("alpine:init", () => {
                     });
                     await this.load();
                 } catch (e) {
-                    alert(`Import failed: ${e.message}`);
+                    Alpine.store("app").showApiError("Cue sheet import failed", e);
                 }
                 document.body.removeChild(el);
             });
@@ -271,14 +321,14 @@ document.addEventListener("alpine:init", () => {
             try {
                 const res = await api("POST", "/api/audio_sync");
                 if (res.error) {
-                    alert(res.error);
+                    Alpine.store("app").showNotice(res.error, "error", 5000);
                     return;
                 }
                 this.syncJob   = { job_id: res.job_id, status: "planning", items: [] };
                 this.syncModal = true;
                 this._syncTimer = setInterval(() => this.pollSync(), 500);
             } catch (e) {
-                alert(`Sync failed: ${e.message}`);
+                Alpine.store("app").showApiError("Sync failed", e);
             }
         },
 

@@ -1,13 +1,20 @@
 document.addEventListener("alpine:init", () => {
     const FIRMWARE_UPDATE_INTERVAL_MS = 30 * 60 * 1000;
 
+    // Pages may declare firmware defaults BEFORE the component constructs
+    // (window.PRIMUS_FIRMWARE_DEFAULTS = { multiFamily, family }). x-init runs
+    // AFTER the component's init() has already fetched /api/firmware/status,
+    // so relying on x-init alone races the first status response, which then
+    // resets the family/profile selection.
+    const pageDefaults = window.PRIMUS_FIRMWARE_DEFAULTS || {};
+
     Alpine.data("firmwareUploader", () => ({
         profile: "radius_v1",
         profiles: [
             { id: "radius_v1", label: "Radius V1", family: "radius", detail: "Feather HUZZAH32 + Music Maker FeatherWing" },
         ],
-        multiFamily: false,
-        family: "primus",
+        multiFamily: !!pageDefaults.multiFamily,
+        family: pageDefaults.family || "primus",
         families: { primus: [], radius: [] },
         available: false,
         availabilityMessage: "Checking firmware tools...",
@@ -84,7 +91,11 @@ document.addEventListener("alpine:init", () => {
         },
 
         get showPrimusFirmwareUpdates() {
-            return !this.multiFamily || this.family === "primus";
+            // The GitHub firmware-update panel tracks the Primus receiver
+            // firmware only. Key it off the *resolved* family in both modes —
+            // single-family mode previously always showed it, even when the
+            // active profile list was radius-only (e.g. RadiusCentral).
+            return this.activeFamilyLabel === "Primus";
         },
 
         get activeFamilyLabel() {

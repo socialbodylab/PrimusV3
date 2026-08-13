@@ -286,6 +286,8 @@ class ManagementNetworkSoakTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 preset_path = f"{temp_dir}/output_presets.json"
+                state_path = f"{temp_dir}/.primus_state.json"
+                radius_state_path = f"{temp_dir}/.radius_state.json"
                 with (
                     patch.object(artnet, "ARTNET_PORT", receiver.port),
                     patch.object(
@@ -299,6 +301,18 @@ class ManagementNetworkSoakTests(unittest.TestCase):
                         side_effect=lambda: OutputPresetStore(preset_path),
                     ),
                     patch.object(state_module, "_save_devices"),
+                    # Show-info persistence bypasses _save_devices; without
+                    # these the readback wrote into the real .primus_state.json.
+                    patch.object(
+                        state_module, "_state_file", return_value=state_path),
+                    patch.object(
+                        state_module.show_info_store, "primus_state_path",
+                        return_value=state_path,
+                    ),
+                    patch.object(
+                        state_module.show_info_store, "radius_state_path",
+                        return_value=radius_state_path,
+                    ),
                 ):
                     state = ControllerState(listener)
                     added = state.add_device_from_node(

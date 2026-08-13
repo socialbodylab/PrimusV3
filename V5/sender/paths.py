@@ -330,18 +330,13 @@ def ensure_runtime_data():
             _copy_missing_dir(resource_path("clips"), clips_dir())
             _copy_missing_dir(resource_path("looks"), looks_dir())
             _copy_missing_file(resource_path("cues.json"), cues_file(), '{"cues": []}\n')
-    if not is_primus_product():
-        try:
-            import audio_cues as _audio_cues_mod
-            _audio_cues_mod._ensure_audio_dirs()
-        except Exception:
-            pass
-    elif uses_app_data_dir():
-        try:
-            import audio_cues as _audio_cues_mod
-            _audio_cues_mod._ensure_audio_dirs()
-        except Exception:
-            pass
+    # The unified backend serves the Radius audio library from any product,
+    # so the audio dirs are ensured unconditionally.
+    try:
+        import audio_cues as _audio_cues_mod
+        _audio_cues_mod._ensure_audio_dirs()
+    except Exception:
+        pass
 
 
 def app_version():

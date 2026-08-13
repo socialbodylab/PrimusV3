@@ -1,6 +1,6 @@
 # V4 Firmware Development
 
-Canonical firmware for **both** Primus LED receivers and Radius audio receivers lives under `V4/Arduino/`. Upload profiles are selected in the sender Firmware panel or via the upload scripts below.
+**Historical track.** Canonical firmware for both Primus LED receivers and Radius audio receivers now lives under `V5/Arduino/` (see `V5/FIRMWARE_REFERENCE.md`); the V5 Radius firmware (4.16+) merges this tree's audio/tracing fixes with the V5 lane-port work and adds `PRS` battery/status telemetry. The `V4/Arduino/` tree documented below is kept as a source reference. Upload profiles are selected in the sender Firmware panel or via the upload scripts below.
 
 Packaged PrimusCentral apps bundle this source as a bootstrap fallback. On PrimusCentral,
 the Firmware page can check GitHub releases for `PrimusReceiverFirmware-<version>.zip`
@@ -75,6 +75,19 @@ Sender: `PrimusTelemetryListener` in [`sender/artnet.py`](sender/artnet.py) merg
 Source of truth for output types and pins: [`primusV3_receiver/config.h`](primusV3_receiver/config.h).
 Receive mode module: [`primusV3_receiver/receive_mode.h`](primusV3_receiver/receive_mode.h).
 
+### Factory clear NVS (`clear_nvs/`)
+
+One-shot sketch that erases the entire ESP32 NVS partition (device name, show info, static IP, output types, receive mode, WiFi credentials). Covers both Preferences namespaces used by this project (`primus35` and `artnet`).
+
+```bash
+./V4/Arduino/clear_nvs_upload.sh -v1 --auto
+./V4/Arduino/clear_nvs_upload.sh -v2 --auto
+./V4/Arduino/clear_nvs_upload.sh -v3 --auto
+./V4/Arduino/clear_nvs_upload.sh --board radius_v1 --auto
+```
+
+After upload, open serial at 115200 baud and confirm `NVS CLEAR COMPLETE`, then re-flash normal Primus or Radius firmware. This is a refurbish/reset tool — it is not part of the normal Firmware panel workflow.
+
 ---
 
 ## Radius audio (`radius_receiver/`)
@@ -119,7 +132,7 @@ Radius firmware optimizes for **audio-first loop scheduling** and **exclusive SD
 | 2 | loop | Loop filename |
 | 3 | pause | Pause |
 | 4 | volume | Set VS1053 volume (byte 13) |
-| 5 | test_tone | Play built-in test tone at volume |
+| 5 | test_tone | Built-in 1 kHz sine burst (500 ms); no filename |
 | 6 | play_cue | Byte 13 = cue number; lookup `/cues.json` |
 | 7 | loop_cue | Loop mapped cue file |
 
@@ -156,6 +169,79 @@ UDP 6455 back-channel:
 - FTP refused while audio is playing
 - Audio commands stop FTP before playback
 - FTP start stops audio before opening server
+
+## VS1053 Audio Chip: Safe Patterns
+
+### Do not use useInterrupt on ESP32
+
+The Adafruit VS1053 library supports interrupt-driven `feedBuffer()`, but on ESP32 the SPI layer uses FreeRTOS semaphores that cannot safely be called from an ISR. Radius firmware calls `_musicMaker.feedBuffer()` from `audioUpdate()` in the main loop instead.
+
+### sciWrite() does not check DREQ
+
+The Adafruit VS1053 library's `sciWrite()` writes SCI register bytes directly over SPI **without checking DREQ first**:
+
+```cpp
+void Adafruit_VS1053::sciWrite(uint8_t addr, uint16_t data) {
+  uint8_t buffer[4] = {VS1053_SCI_WRITE, addr, uint8_t(data >> 8), uint8_t(data & 0xFF)};
+  spi_dev_ctrl->write(buffer, 4);  // no DREQ gate
+}
+```
+
+The VS1053 datasheet states that SCI writes are only guaranteed when DREQ is high. A write that lands while DREQ is low may be silently dropped or corrupt an adjacent register. In practice, a bad write after `sineTest()` can put the chip into a state where subsequent `startPlayingFile()` calls produce no audio output, even though the library reports `playingMusic = true`.
+
+### sineTest() resets the chip and leaves DREQ unstable
+
+`sineTest()` calls `reset()` internally at the start:
+
+```cpp
+void Adafruit_VS1053::sineTest(uint8_t n, uint16_t ms) {
+  reset();           // soft reset + clock setup + setVolume(40,40)
+  // ... enters SM_TEST mode, plays sine wave, sends sine_stop ...
+  // SM_TEST is NOT cleared on return
+}
+```
+
+After `sineTest()` returns:
+
+- `SCI_MODE` still has `SM_TEST` set — the chip is still in hardware test mode.
+- DREQ may be low or transitioning as the VS1053 exits its sine burst.
+- Any `sciWrite()` call (e.g. `setVolume()`) issued before DREQ is confirmed high may be lost or corrupt state.
+
+`startPlayingFile()` does clear `SM_TEST` by writing a clean mode value to `SCI_MODE`, so normal audio playback after a `sineTest()` is safe **as long as no corrupting `sciWrite()` was called in between**.
+
+### Safe pattern for audioTestTone()
+
+Do not call `setVolume()` or any `sciWrite()` immediately after `sineTest()`. The working pattern in [`radius_receiver/audio.h`](radius_receiver/audio.h) is:
+
+```cpp
+void audioTestTone() {
+  if (_musicMaker.playingMusic) _musicMaker.stopPlaying();
+  _audioCurrentFile[0] = '\0';
+  _audioLooping = false;
+  // No setVolume before sineTest — reset() inside sineTest always overrides
+  // to setVolume(40,40) regardless.
+  _musicMaker.sineTest(0x44, 500);
+  // Do NOT call setVolume() here. sciWrite() does not check DREQ; a write
+  // immediately after sineTest() while DREQ is low will corrupt VS1053 state
+  // and silence all subsequent audio output until the next power cycle.
+}
+```
+
+ArtAudioCmd case 5 (hello / test tone from sender) must call `audioTestTone()` only — not `audioSetVolume()` before or after the sine burst. Display feedback should update before the blocking `sineTest()` call.
+
+The version that broke playback was adding `setVolume(254, 254)` / `audioSetVolume()` **after** `sineTest()`. A `setVolume()` call immediately **before** `sineTest()` is harmless (`reset()` overrides it to 40,40), but avoid any SCI write after the tone completes.
+
+### Controlling test tone volume (future improvement)
+
+`sineTest()` always plays at the volume that `reset()` sets (`setVolume(40, 40)`, approximately -20 dB). To adjust volume safely after a test tone, poll DREQ before calling `setVolume()`:
+
+```cpp
+uint32_t t = millis();
+while (!digitalRead(MM_DREQ_PIN) && millis() - t < 200) { delay(1); }
+audioSetVolume(_audioVolume);
+```
+
+Alternatively, replace `sineTest()` with a short WAV file playback for the test tone, which gives full volume control without touching SM_TEST mode.
 
 ## Compile-time overrides
 

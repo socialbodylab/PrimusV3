@@ -79,7 +79,7 @@ class CentralLauncherTests(unittest.TestCase):
             launcher_name="Device Manager",
         )
         self.assertTrue(attached)
-        self.assertEqual(opened, [("http://127.0.0.1:8080/devices", True)])
+        self.assertEqual(opened, [("http://127.0.0.1:8080/devices", False)])
 
 
 if __name__ == "__main__":

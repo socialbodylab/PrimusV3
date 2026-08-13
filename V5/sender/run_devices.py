@@ -15,12 +15,14 @@ os.environ.setdefault("PRIMUSV3_DEFAULT_FRONTEND", "devices")
 if "--frontend" not in sys.argv:
     sys.argv[1:1] = ["--frontend", "devices"]
 
-# Device Manager's job is to monitor devices, not drive them. This is inert if
-# we attach to an already-running Central server (its ControllerState was
-# already constructed without this flag) and only takes effect when this
-# process starts a fresh backend of its own.
-if "--monitor-only" not in sys.argv:
-    sys.argv[1:1] = ["--monitor-only"]
+# Device Manager no longer starts a monitor-only backend. Monitoring is
+# passive by construction now: the background device sync never
+# auto-connects, so no backend sends DMX to a device until an operator
+# explicitly connects it (from PrimusCentral, for tests/demos). One shared
+# backend, one behavior, regardless of which app started it — in production
+# the color data comes from an external console (EOS, TouchDesigner) and
+# this suite just monitors alongside it. --monitor-only remains accepted on
+# the CLI for scripts but is no longer required for safe coexistence.
 
 # Device Manager is meant to be viewed from a phone/tablet on the same
 # network (see Settings > Mobile / Tablet View), so its own fresh backend

@@ -38,10 +38,13 @@ from central_launcher import (
     CentralPortInUseByCentral,
     MISMATCH_MONITOR_ONLY,
     MISMATCH_WRONG_PRODUCT,
+    MISMATCH_UNKNOWN_PRODUCT,
+    describe_backend,
     frontend_path_for,
     probe_central_server,
     register_central_server,
     stop_running_central,
+    supports_remote_stop,
     try_attach_before_start,
     unregister_central_server,
     wait_for_port_release,
@@ -59,16 +62,38 @@ _dedicated_browser = DedicatedBrowser(DEDICATED_BROWSER_PROFILE_ROOT, ("PRIMUS_B
 _MACOS_ACTIVITY_TOKEN = None
 
 
+def _select_dedicated_browser(frontend_path):
+    """Give each frontend its own dedicated-browser profile.
+
+    All three launchers run through this module now, and sharing one
+    Chromium profile meant one app's window focus/track state stomped
+    another's — a DeviceManager attach could end up focusing the
+    RadiusCentral window instead of opening its own.
+    """
+    global _dedicated_browser
+    name = str(frontend_path or "").strip("/").strip().lower() or "primus"
+    _dedicated_browser = DedicatedBrowser(
+        f"primusv5-{name}-browser-profiles", ("PRIMUS_BROWSER",))
+
+
 def _ui_has_live_output(server):
     state = getattr(server, "controller_state", None)
     if state is None:
         return False
     source = getattr(state, "playback_source", None)
-    return source in (
+    if source in (
         ControllerState.SOURCE_CONTROLLER,
         ControllerState.SOURCE_MIXER,
         ControllerState.SOURCE_DESIGNER,
-    )
+    ):
+        return True
+    # The unified backend also serves RadiusCentral: audio playing on a
+    # Radius receiver is live output the same way a running cue is. Fail
+    # toward "live" — a broken check must never make a mid-cue quit legal.
+    try:
+        return bool(state.radius_has_live_playback())
+    except Exception:
+        return True
 
 
 def _attach_mismatch_handler(host="127.0.0.1"):
@@ -81,8 +106,30 @@ def _attach_mismatch_handler(host="127.0.0.1"):
     """
     app_name = _launcher_display_name()
 
+    def _cannot_restart_remotely(backend, port):
+        """Old server on the port: say so, and say what to do about it.
+
+        Offering "Restart in full mode" against a pre-0.98 server produced the
+        worst outcome available -- the stop 404s, we abort, and the old server
+        keeps the port, so every subsequent launch of either app fails the same
+        silent way. Never offer an action we cannot carry out.
+        """
+        choice = dialog_choose(
+            app_name,
+            f"{backend} is already running on port {port} in Monitor Only mode, "
+            "so it will not drive lights.\n\n"
+            "That version is too old to be restarted from here. Quit it from its "
+            f"own icon in the Dock, then open {app_name} again.",
+            ["Open read-only", "Cancel"],
+            "Cancel",
+        )
+        return "attach" if choice == "Open read-only" else "abort"
+
     def handler(mismatch, port, runtime):
         if mismatch["reason"] == MISMATCH_MONITOR_ONLY:
+            backend = describe_backend(runtime)
+            if not supports_remote_stop(runtime):
+                return _cannot_restart_remotely(backend, port)
             choice = dialog_choose(
                 app_name,
                 "Another Central server is already running in Monitor Only mode "
@@ -98,29 +145,63 @@ def _attach_mismatch_handler(host="127.0.0.1"):
                 return "abort"
             ok, message = stop_running_central(host, port)
             if not ok:
+                # A 404 here means the server advertised server_control but does
+                # not actually serve the route -- same practical situation as an
+                # old server, so give the same actionable instruction.
+                if "404" in str(message):
+                    return _cannot_restart_remotely(backend, port)
                 dialog_notify(
                     app_name,
-                    f"Could not stop the running server on port {port}: {message}")
+                    f"Could not stop {backend} on port {port}: {message}\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
                 return "abort"
             if not wait_for_port_release(host, port):
                 dialog_notify(
                     app_name,
-                    f"The server on port {port} did not shut down in time. "
-                    "Quit it manually and try again.")
+                    f"{backend} on port {port} did not shut down in time.\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
                 return "abort"
             return "start"
 
-        if mismatch["reason"] == MISMATCH_WRONG_PRODUCT:
-            backend = mismatch.get("backend_product") or "another product"
+        if mismatch["reason"] in (MISMATCH_WRONG_PRODUCT, MISMATCH_UNKNOWN_PRODUCT):
+            backend = describe_backend(runtime)
+            # Never offer to open our frontend on a backend that cannot serve
+            # it — that is exactly the silent RadiusCentral-on-Primus failure.
+            # The only honest offers are replacing the old server or walking
+            # away.
+            if not supports_remote_stop(runtime):
+                dialog_notify(
+                    app_name,
+                    f"{backend} is already running on port {port} and cannot "
+                    f"serve {app_name}.\n\n"
+                    "That version is too old to be restarted from here. Quit "
+                    f"it from its own icon in the Dock, then open {app_name} "
+                    "again.")
+                return "abort"
             choice = dialog_choose(
                 app_name,
-                f"A {backend} Central server is already running on port {port}. "
-                f"{app_name} cannot share it.\n\n"
-                f"Open the running {backend} interface instead?",
-                ["Open running server", "Cancel"],
-                "Cancel",
+                f"{backend} is already running on port {port} and cannot "
+                f"serve {app_name}.\n\n"
+                "Restart it as a shared Central server that serves both apps?",
+                ["Restart shared server", "Cancel"],
+                "Restart shared server",
             )
-            return "attach" if choice == "Open running server" else "abort"
+            if choice != "Restart shared server":
+                return "abort"
+            ok, message = stop_running_central(host, port)
+            if not ok:
+                dialog_notify(
+                    app_name,
+                    f"Could not stop {backend} on port {port}: {message}\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
+                return "abort"
+            if not wait_for_port_release(host, port):
+                dialog_notify(
+                    app_name,
+                    f"{backend} on port {port} did not shut down in time.\n\n"
+                    "Quit it from its own icon in the Dock, then try again.")
+                return "abort"
+            return "start"
         return "abort"
 
     return handler
@@ -140,7 +221,7 @@ def _configure_app_logging():
     sys.stdout = log_file
     sys.stderr = log_file
     print()
-    print(f"PrimusCentral started {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{_launcher_display_name()} started {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 def _begin_macos_low_latency_activity():
@@ -289,6 +370,29 @@ def _frame_payload(look, pixels_per_output):
             "type": output_type,
         })
     return payload
+
+
+def _resilient_loop(fn, state, *args):
+    """Run a render loop, restarting it if it ever dies on an exception.
+
+    The animation and mixer/controller loops ARE the show — a single
+    unhandled exception must never silently end DMX output for the rest
+    of the night. Log the traceback and re-enter the loop.
+    """
+    errors = 0
+    while getattr(state, "running", False):
+        try:
+            fn(state, *args)
+            return
+        except Exception:
+            errors += 1
+            if errors <= 5 or errors % 100 == 0:
+                import traceback
+                print(f"ERROR: {fn.__name__} crashed (#{errors}); restarting:")
+                traceback.print_exc()
+            # Grow the backoff so a deterministic crash cannot spin at 2 Hz
+            # (and spam the log) for the rest of the night.
+            time.sleep(min(0.5 * errors, 5.0))
 
 
 def _mixer_controller_loop(state, cue_list):
@@ -486,6 +590,8 @@ def _mixer_controller_loop(state, cue_list):
 def _launcher_display_name():
     if os.environ.get("PRIMUSV3_DEFAULT_FRONTEND") == "devices":
         return "Device Manager"
+    if os.environ.get("PRIMUSV3_DEFAULT_FRONTEND") == "radius":
+        return "RadiusCentral V5"
     return "PrimusCentral V5"
 
 
@@ -529,9 +635,17 @@ def main():
     _configure_app_logging()
 
     frontend_path = frontend_path_for(args.frontend, sender_product())
+    _select_dedicated_browser(frontend_path)
     # DeviceManager only watches; the show frontends drive DMX. Only the latter
     # are incompatible with a monitor-only backend.
     needs_output = not args.monitor_only and str(args.frontend or "").lower() != "devices"
+    # What the launcher needs from a running backend depends on the frontend
+    # it will open: a RadiusCentral window needs a backend that can serve the
+    # radius product (the unified backend advertises both), not merely any
+    # primus server.
+    need_product = (
+        "radius" if str(args.frontend or "").lower() == "radius" else "primus"
+    )
     on_mismatch = _attach_mismatch_handler()
     if not args.replace and try_attach_before_start(
         port=args.port,
@@ -539,7 +653,7 @@ def main():
         no_browser=args.no_browser,
         open_browser=_open_browser,
         launcher_name=_launcher_display_name(),
-        need_product="primus",
+        need_product=need_product,
         needs_output=needs_output,
         on_mismatch=on_mismatch,
     ):
@@ -584,7 +698,7 @@ def main():
                 no_browser=args.no_browser,
                 open_browser=_open_browser,
                 launcher_name=_launcher_display_name(),
-                need_product="primus",
+                need_product=need_product,
                 needs_output=needs_output,
                 on_mismatch=on_mismatch,
             ):
@@ -604,11 +718,16 @@ def main():
     # Shared by the auto-shutdown monitor and /api/server/stop so both agree on
     # whether it is safe to quit.
     server.live_output_fn = _ui_has_live_output
+    url = f"http://127.0.0.1:{port}{frontend_path}"
     if not args.no_browser:
         server.ui_focus_callback = _dedicated_browser.focus
         ui_focus_server = UiFocusServer(port, _dedicated_browser.focus)
         ui_focus_server.start()
-    url = f"http://127.0.0.1:{port}{frontend_path}"
+        # The lifecycle monitor reopens our window when all windows are
+        # closed but live output forbids quitting — a windowless resident
+        # app swallows relaunches (macOS just activates the running
+        # process) and looks like an app that won't open.
+        server.ui_reopen_callback = lambda: _open_browser(url)
     lan_url = None
     if args.lan:
         try:
@@ -620,16 +739,26 @@ def main():
             lan_url = f"http://{lan_ip}:{port}{frontend_path}"
     register_central_server(
         port, sender_product(),
+        # Record the address the server is actually reachable at: a --lan
+        # server that registers itself as 127.0.0.1 lies to every reader,
+        # and future remote discovery depends on the registry telling the
+        # truth (see V5/REMOTE_BACKEND_NOTES.md).
+        host=(lan_ip if args.lan and lan_ip else "127.0.0.1"),
         monitor_only=bool(args.monitor_only),
         lan_enabled=bool(args.lan),
         app_version=app_version(),
+        # The unified backend carries the Radius audio/FTP surface, so a
+        # RadiusCentral launcher may attach to it.
+        products=["primus", "radius"],
     )
 
-    anim = threading.Thread(target=animation_loop, args=(state,), daemon=True)
+    anim = threading.Thread(
+        target=_resilient_loop, args=(animation_loop, state), daemon=True)
     anim.start()
 
     mc_thread = threading.Thread(
-        target=_mixer_controller_loop, args=(state, cue_list), daemon=True)
+        target=_resilient_loop,
+        args=(_mixer_controller_loop, state, cue_list), daemon=True)
     mc_thread.start()
 
     if ui_lifecycle_enabled:
@@ -673,11 +802,24 @@ def main():
             ui_focus_server.stop()
         unregister_central_server()
         osc_service.stop()
+        # Ordering matters: close the HTTP listener, stop and join the
+        # animation thread, THEN blackout. A tick that fires after
+        # state.shutdown() would repaint the pixels blackout just cleared,
+        # so blackout must be the last frame a receiver sees.
+        server.server_close()
+        state.running = False
+        anim.join(timeout=2.0)
         state.shutdown()
         fps_listener.stop()
-        server.server_close()
         if browser_profile_root:
             _remove_dedicated_browser_profiles(browser_profile_root)
+        if _MACOS_ACTIVITY_TOKEN is not None:
+            # run_radius always cleaned this up; run_primus leaked the
+            # caffeinate child on every shutdown.
+            try:
+                _MACOS_ACTIVITY_TOKEN.terminate()
+            except Exception:
+                pass
         print("Done.")
 
 

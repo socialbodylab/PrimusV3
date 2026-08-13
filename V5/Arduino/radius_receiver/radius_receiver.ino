@@ -4,8 +4,10 @@
  * V1: Feather HUZZAH32 + Music Maker FeatherWing (headless)
  * V2: ESP32-S3 Reverse TFT Feather + Music Maker FeatherWing
  *
- * Art-Net: 0x6000 rename, 0x8200 IP, 0x8210 show info, 0x8300 audio, 0x8301 FTP
- * Back-channel UDP 6455: PFP packet rate, PTR track telemetry, optional 0x8302 audio status
+ * Art-Net: 0x6000 rename, 0x8200 IP, 0x8210 show info, 0x8220 lane ports,
+ *          0x8300 audio, 0x8301 FTP
+ * Watch lane (UDP 6455): PFP packet rate, PTR track telemetry (frozen formats),
+ *          PRS unified status (battery/flags, 1 Hz), optional 0x8302 audio status
  * OSC port 53001: /cue/N, /stop, /hello
  */
 
@@ -16,8 +18,11 @@
 
 #include "config.h"
 #include "display.h"
+#if RADIUS_HAS_BUTTONS
 #include "buttons.h"
+#endif
 #include "audio.h"
+#include "battery.h"
 #include "cues.h"
 #include "ftp.h"
 #include "telemetry.h"
@@ -90,6 +95,11 @@ unsigned long lastFpsTime = 0;
 unsigned long lastTrackHeartbeatMs = 0;
 unsigned long packetCount = 0;
 uint8_t infoScreenIndex = 0;
+
+// PRS unified status back-channel state
+uint16_t statusSequence = 0;
+unsigned long nextStatusReportMs = 0;
+unsigned long lastTestToneMs = 0;
 
 #if RADIUS_DIAG
 unsigned long diagLoopMaxUs = 0;
@@ -281,33 +291,66 @@ void resetLanePortsToDefaults() {
 }
 
 void buildNodeReport(char* reportBuf, size_t reportLen) {
-  int pos = snprintf(reportBuf, reportLen, "#0001 [%04d] OK|%s|B:%s",
-                     (int)packetCount, NODE_CAPS_PREFIX, NODE_CAPS_BOARD);
-  if (pos < 0 || (size_t)pos >= reportLen) return;
+  // Canonical token order (highest survival priority first):
+  //   OK|PVRAD1|B:<board>|F:<features>|IP:<S/D>|<moved-lane tokens>|V:<ver>|MC:/MP:
+  // The Node Report is a hard 64-byte Art-Net field. Each token below is
+  // appended only when it fits whole — a truncated "|MGMT:645" still parses
+  // as a plausible port and would black-hole all Setup traffic (guard pattern
+  // copied from primusV3_receiver.ino buildNodeReport).
+  int pos = snprintf(reportBuf, reportLen, "#0001 [%04d] OK|%s|B:%s|F:%s",
+                     (int)packetCount, NODE_CAPS_PREFIX, NODE_CAPS_BOARD,
+                     NODE_CAPS_FEATURES);
+  if (pos < 0 || (size_t)pos >= (int)reportLen) return;
 
-  pos += snprintf(reportBuf + pos, reportLen - pos, "|F:%s", NODE_CAPS_FEATURES);
-  if (pos < 0 || (size_t)pos >= reportLen) return;
-
-  // Lane port map — put this early since it is the primary payload of this
-  // change; IP/Marius tokens below are lower priority and may get truncated
-  // first if the 64-byte Node Report field runs out of room.
-  pos += snprintf(reportBuf + pos, reportLen - pos, "|AUD:%u|MGMT:%u|TELE:%u|FTP:%u",
-                  (unsigned)portShow, (unsigned)portSetup, (unsigned)portWatch,
-                  (unsigned)FTP_PORT);
-  if (pos < 0 || (size_t)pos >= reportLen) return;
-
-  if (useStaticIP) {
-    pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:S");
-  } else {
-    pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:D");
+  {
+    int tokenLen = snprintf(nullptr, 0, "|IP:%c", useStaticIP ? 'S' : 'D');
+    if (pos + tokenLen < (int)reportLen) {
+      pos += snprintf(reportBuf + pos, reportLen - pos, "|IP:%c",
+                      useStaticIP ? 'S' : 'D');
+    }
   }
-  if (pos < 0 || (size_t)pos >= reportLen) return;
 
+  // Lane ports: advertise only a lane that has been moved off its compiled
+  // default. The full triple alone is ~28 bytes and would crowd out every
+  // token after it; the sender assumes the documented defaults (and falls
+  // back to dual-listen on 6454) when a token is absent.
+  {
+    const struct { const char* tag; uint16_t value; uint16_t deflt; } laneTokens[] = {
+      { "AUD",  portShow,  PORT_SHOW_DEFAULT  },
+      { "MGMT", portSetup, PORT_SETUP_DEFAULT },
+      { "TELE", portWatch, PORT_WATCH_DEFAULT },
+    };
+    for (uint8_t i = 0; i < 3 && pos < (int)reportLen - 1; i++) {
+      if (laneTokens[i].value == laneTokens[i].deflt) continue;
+      int tokenLen = snprintf(nullptr, 0, "|%s:%u", laneTokens[i].tag,
+                              (unsigned)laneTokens[i].value);
+      if (pos + tokenLen >= (int)reportLen) break;
+      pos += snprintf(reportBuf + pos, reportLen - pos, "|%s:%u",
+                      laneTokens[i].tag, (unsigned)laneTokens[i].value);
+    }
+  }
+
+  {
+    int tokenLen = snprintf(nullptr, 0, "|V:%s", FIRMWARE_VERSION);
+    if (pos + tokenLen < (int)reportLen) {
+      pos += snprintf(reportBuf + pos, reportLen - pos, "|V:%s", FIRMWARE_VERSION);
+    }
+  }
+
+  // Marius tokens last — nothing operationally critical parses them, and the
+  // puck name is the one unbounded field, so it must never displace the rest.
   if (mariusIsConfigured()) {
-    if (mariusIsConnected()) {
-      snprintf(reportBuf + pos, reportLen - pos, "|MC:1|MP:%s", mariusPuckName());
-    } else {
-      snprintf(reportBuf + pos, reportLen - pos, "|MC:0");
+    bool connected = mariusIsConnected();
+    int tokenLen = snprintf(nullptr, 0, "|MC:%c", connected ? '1' : '0');
+    if (pos + tokenLen < (int)reportLen) {
+      pos += snprintf(reportBuf + pos, reportLen - pos, "|MC:%c",
+                      connected ? '1' : '0');
+    }
+    if (connected) {
+      int mpLen = snprintf(nullptr, 0, "|MP:%s", mariusPuckName());
+      if (pos + mpLen < (int)reportLen) {
+        pos += snprintf(reportBuf + pos, reportLen - pos, "|MP:%s", mariusPuckName());
+      }
     }
   }
 }
@@ -669,14 +712,28 @@ void sendAudioStatus(uint8_t status, const char* filename) {
   udpFps.endPacket();
 }
 
+// Test tone wrapper — records the trigger time so the PRS status packet can
+// flag "test tone active" (sineTest blocks ~700 ms, so the 1 Hz status tick
+// can never observe it directly). Do NOT call audioSetVolume() immediately
+// before this: sineTest() resets the VS1053 and an SCI write while DREQ is
+// low can be dropped and corrupt chip state.
+void runAudioTestTone() {
+  lastTestToneMs = millis();
+  audioTestTone();
+}
+
+bool testToneRecentlyActive() {
+  return lastTestToneMs != 0 && (millis() - lastTestToneMs) < 2000UL;
+}
+
 void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (len < 15) return;
 
   uint8_t cmd = data[12];
   uint8_t volume = data[13];
-  char filename[33] = {0};
+  char filename[65] = {0};
   uint16_t fnLen = len - 14;
-  if (fnLen > 32) fnLen = 32;
+  if (fnLen > 64) fnLen = 64;
   memcpy(filename, data + 14, fnLen);
 
   uint16_t duration = 0;
@@ -685,6 +742,25 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   if (len >= nullPos + 3) {
     duration = (uint16_t)data[nullPos + 1] | ((uint16_t)data[nullPos + 2] << 8);
   }
+
+  Serial.print("[ArtAudio] cmd=");
+  Serial.print(cmd);
+  Serial.print(" vol=");
+  Serial.print(volume);
+  if (cmd == 1 || cmd == 2) {
+    Serial.print(" file=");
+    Serial.print(filename);
+    if (duration > 0) {
+      Serial.print(" dur=");
+      Serial.print(duration);
+      Serial.print("s");
+    }
+  }
+  if (cmd == 6 || cmd == 7) {
+    Serial.print(" cue=");
+    Serial.print(volume);
+  }
+  Serial.println();
 
   if (ftpIsRunning()) {
     ftpStop();
@@ -697,13 +773,22 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
     case 2:  audioLoop(filename, volume, duration); break;
     case 3:  audioPause(); break;
     case 4:  audioSetVolume(volume); break;
-    case 5:  audioSetVolume(volume); audioTestTone(); break;
+    case 5:
+      // No audioSetVolume() before the tone — see runAudioTestTone(). Show the
+      // TEST TONE screen before the blocking sineTest so the display sequences
+      // correctly (active during, idle after).
+      if (infoScreenIndex == 2)
+        displayAudioStatus("TEST TONE", _audioVolume, true);
+      runAudioTestTone();
+      break;
     case 6:
     case 7: {
       AudioCue cue;
       if (cueLookup(volume, &cue)) {
         if (cmd == 6) audioPlay(cue.filename, _audioVolume, cue.duration);
         else          audioLoop(cue.filename, _audioVolume, cue.duration);
+      } else {
+        Serial.printf("[ArtAudio] Cue %d not found\n", volume);
       }
       break;
     }
@@ -711,8 +796,12 @@ void handleArtAudioCmd(uint8_t* data, uint16_t len) {
   }
 
   sendAudioStatus(audioIsPlaying() ? 1 : 0, audioCurrentFile());
-  if (infoScreenIndex == 2)
-    displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  if (infoScreenIndex == 2) {
+    if (cmd == 5)
+      displayAudioStatus("TEST TONE", _audioVolume, false);
+    else
+      displayAudioStatus(audioCurrentFile(), _audioVolume, audioIsPlaying());
+  }
 }
 
 void dispatchOscCue(uint8_t cueNum) {
@@ -743,7 +832,7 @@ void handleOscPacket() {
 
   if (strcmp(addr, "/hello") == 0 || strcmp(addr, "/radius/hello") == 0
       || strcmp(addr, "/primus/hello") == 0) {
-    audioTestTone();
+    runAudioTestTone();
     if (infoScreenIndex == 2)
       displayAudioStatus("TEST TONE", _audioVolume, true);
     return;
@@ -763,6 +852,21 @@ void processArtNetPacket(uint8_t* data, uint16_t len, IPAddress remoteAddr, uint
 
   uint16_t opcode = (uint16_t)data[8] | ((uint16_t)data[9] << 8);
   packetCount++;
+
+  // Re-latch senderIP whenever a direct command opcode arrives from a new
+  // address — these only ever come from the actual controlling sender, so
+  // telemetry follows a Central whose IP changed instead of sticking to the
+  // first packet ever seen. ArtPoll deliberately does NOT re-latch: WiFiUDP
+  // cannot distinguish a unicast poll from a broadcast one (no destination-IP
+  // API), and a broadcast discovery sweep from a passive tool must not steal
+  // the telemetry stream. First-packet latching in the drain loops still
+  // bootstraps senderIP before any command arrives.
+  if (opcode == ARTNET_OPCODE_AUDIO_CMD || opcode == ARTNET_OPCODE_FTP_CMD) {
+    if (!senderKnown || senderIP != remoteAddr) {
+      senderIP = remoteAddr;
+      senderKnown = true;
+    }
+  }
 
   // ArtPoll is Discovery-lane only. Radius must never accept ArtDmx on any
   // lane, so there is deliberately no opcode case for it anywhere below.
@@ -845,6 +949,66 @@ void sendFpsTelemetry(uint16_t pktRate) {
   udpFps.endPacket();
 }
 
+// ── PRS unified status packet — Watch lane, 1 Hz ─────────────────────
+// 17 bytes: 'P','R','S', version=1, seq u16 BE (wraps; reboot detection),
+// uptime seconds u32 BE, flags u16 BE, RSSI int8, battery power mode u8,
+// battery mV u16 BE, battery pct (255 = n/a).
+// PTR and PFP stay byte-for-byte frozen; PRS is purely additive.
+#define RADIUS_STATUS_PROTOCOL_VERSION 1
+#define RADIUS_STATUS_PACKET_LEN       17
+#define RSTATUS_WIFI_CONNECTED    0x0001
+#define RSTATUS_STATIC_IP         0x0002
+#define RSTATUS_TEST_TONE_ACTIVE  0x0008
+#define RSTATUS_BATTERY_VALID     0x0080
+#define RSTATUS_SD_READY          0x0100
+#define RSTATUS_FTP_RUNNING       0x0200
+#define RSTATUS_AUDIO_PLAYING     0x0400
+#define RSTATUS_AUDIO_LOOPING     0x0800
+#define RSTATUS_MARIUS_CONFIGURED 0x1000
+#define RSTATUS_MARIUS_CONNECTED  0x2000
+
+void sendRadiusStatus() {
+  if (!senderKnown || !wifiConnected) return;
+
+  uint16_t flags = 0;
+  if (wifiConnected)            flags |= RSTATUS_WIFI_CONNECTED;
+  if (activeStaticIP)           flags |= RSTATUS_STATIC_IP;
+  if (testToneRecentlyActive()) flags |= RSTATUS_TEST_TONE_ACTIVE;
+  if (radiusBatteryIsValid())   flags |= RSTATUS_BATTERY_VALID;
+  if (audioSdIsReady())         flags |= RSTATUS_SD_READY;
+  if (ftpIsRunning())           flags |= RSTATUS_FTP_RUNNING;
+  if (audioIsPlaying())         flags |= RSTATUS_AUDIO_PLAYING;
+  if (_audioLooping)            flags |= RSTATUS_AUDIO_LOOPING;
+  if (mariusIsConfigured())     flags |= RSTATUS_MARIUS_CONFIGURED;
+  if (mariusIsConnected())      flags |= RSTATUS_MARIUS_CONNECTED;
+
+  uint32_t uptimeS = millis() / 1000UL;
+
+  uint8_t buf[RADIUS_STATUS_PACKET_LEN] = {0};
+  buf[0]  = 'P';
+  buf[1]  = 'R';
+  buf[2]  = 'S';
+  buf[3]  = RADIUS_STATUS_PROTOCOL_VERSION;
+  buf[4]  = (statusSequence >> 8) & 0xFF;
+  buf[5]  = statusSequence & 0xFF;
+  buf[6]  = (uptimeS >> 24) & 0xFF;
+  buf[7]  = (uptimeS >> 16) & 0xFF;
+  buf[8]  = (uptimeS >> 8) & 0xFF;
+  buf[9]  = uptimeS & 0xFF;
+  buf[10] = (flags >> 8) & 0xFF;
+  buf[11] = flags & 0xFF;
+  buf[12] = (uint8_t)(int8_t)WiFi.RSSI();
+  buf[13] = radiusBatteryStatus.powerMode;
+  buf[14] = (radiusBatteryStatus.batteryMv >> 8) & 0xFF;
+  buf[15] = radiusBatteryStatus.batteryMv & 0xFF;
+  buf[16] = radiusBatteryStatus.batteryPct;
+  statusSequence++;  // u16 wraps by design
+
+  udpFps.beginPacket(senderIP, portWatch);
+  udpFps.write(buf, sizeof(buf));
+  udpFps.endPacket();
+}
+
 void telemetryHeartbeat() {
   if (!TRACK_TELEMETRY_ENABLED) return;
   if (!audioIsPlaying()) return;
@@ -856,6 +1020,7 @@ void telemetryHeartbeat() {
   sendTrackTelemetry(audioPlaybackState(), audioCurrentFile());
 }
 
+#if RADIUS_HAS_BUTTONS
 void handleScreenCycle() {
   uint8_t maxScreens = mariusIsConfigured() ? NUM_INFO_SCREENS + 1 : NUM_INFO_SCREENS;
   infoScreenIndex = (infoScreenIndex + 1) % maxScreens;
@@ -884,8 +1049,10 @@ void handleScreenCycle() {
 void handleD1Press() {
   switch (infoScreenIndex) {
     case 2:
-      audioTestTone();
+      // Show TEST TONE before the blocking sineTest, revert to idle after.
       displayAudioStatus("TEST TONE", _audioVolume, true);
+      runAudioTestTone();
+      displayAudioStatus("TEST TONE", _audioVolume, false);
       break;
     case 3:
       if (ftpIsRunning()) ftpStop();
@@ -899,6 +1066,7 @@ void handleD1Press() {
       break;
   }
 }
+#endif  // RADIUS_HAS_BUTTONS
 
 void setup() {
   Serial.begin(115200);
@@ -907,7 +1075,9 @@ void setup() {
   Serial.println(FIRMWARE_NAME);
   Serial.print("Firmware v"); Serial.println(FIRMWARE_VERSION);
 
+#if RADIUS_HAS_BUTTONS
   buttonsInit();
+#endif
   initConnectionIndicator();
   displayInit();
   displayStartup();
@@ -938,12 +1108,28 @@ void setup() {
   if (mariusIsConfigured()) mariusInit();
 
   lastFpsTime = millis();
+
+  // PRS cadence: 1 Hz with MAC-derived boot jitter (so a rack of receivers
+  // does not burst in phase) plus a +500 ms offset so the PRS tick lands
+  // anti-phase to the PTR/PFP 1-second tick above.
+  uint8_t statusMac[6];
+  WiFi.macAddress(statusMac);
+  uint16_t statusJitterMs =
+    (((uint16_t)statusMac[4] << 8) | statusMac[5]) % 251;
+  nextStatusReportMs = millis() + 500UL + statusJitterMs;
 }
 
 void loop() {
+#if RADIUS_DIAG
+  unsigned long diagLoopStartUs = micros();
+#endif
+
   audioUpdate();
   ftpUpdate();
   mariusUpdate();
+  // Refill the VS1053 FIFO right after Marius — BLE housekeeping can take
+  // long enough that waiting for the next full loop pass risks a dropout.
+  audioUpdate();
 
   {
     static bool wasAudioActive = false;
@@ -1009,12 +1195,17 @@ void loop() {
   }
 
   handleOscPacket();
+  // Refill the VS1053 FIFO again after the UDP drain loops — a burst of
+  // packets (FTP gate, cue storm) can hold the loop long enough to matter.
+  audioUpdate();
   checkWifiConnection();
   syncConnectionIndicator();
 
+#if RADIUS_HAS_BUTTONS
   buttonsPoll();
   if (btnScreenCycle) { btnScreenCycle = false; handleScreenCycle(); }
   if (btnD1)          { btnD1 = false; handleD1Press(); }
+#endif
 
   telemetryHeartbeat();
 
@@ -1029,4 +1220,33 @@ void loop() {
     packetCount = 0;
     lastFpsTime = now;
   }
+
+  // PRS status tick — anti-phase to the PTR/PFP tick above (see setup()).
+  // Battery sampling is exactly one ADC one-shot per second; it runs even
+  // before a sender is known so the EMA is warm when telemetry starts.
+  if ((long)(now - nextStatusReportMs) >= 0) {
+    radiusBatterySample(wifiConnected);
+    sendRadiusStatus();
+    nextStatusReportMs += 1000UL;
+    if ((long)(now - nextStatusReportMs) >= 1000L) {
+      // Catch-up clamp: after a stall (sineTest, WiFi reconnect) resume the
+      // cadence from now instead of bursting missed packets.
+      nextStatusReportMs = now + 1000UL;
+    }
+  }
+
+#if RADIUS_DIAG
+  // Loop-time instrumentation: worst single loop() pass per 1 s window.
+  // Verification target: loopMaxUs stays below ~8000 µs during playback
+  // (VS1053 FIFO drains in ~11.6 ms; keep feed gaps under ~10 ms).
+  {
+    unsigned long diagLoopUs = micros() - diagLoopStartUs;
+    if (diagLoopUs > diagLoopMaxUs) diagLoopMaxUs = diagLoopUs;
+    if (now - diagWindowStartMs >= 1000) {
+      Serial.printf("[Diag] loopMaxUs=%lu\n", diagLoopMaxUs);
+      diagLoopMaxUs = 0;
+      diagWindowStartMs = now;
+    }
+  }
+#endif
 }

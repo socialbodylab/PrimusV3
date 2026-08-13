@@ -10,6 +10,12 @@ V5_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 if V5_DIR not in sys.path:
     sys.path.insert(0, V5_DIR)
 
+# The sender dir too, so this file can run on its own rather than relying on
+# another test in the suite having imported from there first.
+SENDER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if SENDER_DIR not in sys.path:
+    sys.path.insert(0, SENDER_DIR)
+
 import build_sender_app
 
 

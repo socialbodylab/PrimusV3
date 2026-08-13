@@ -40,6 +40,7 @@ extern IPAddress senderIP;
 extern bool      senderKnown;
 extern bool      wifiConnected;
 extern WiFiUDP   udp;
+bool audioIsPlaying();  // defined in audio.h (same translation unit)
 
 // ── NUS UUIDs ─────────────────────────────────────────────────────────
 #define NUS_SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -60,7 +61,7 @@ struct MariusAction {
     uint8_t  type;           // MARIUS_ACTION_*
 
     // audio_play / artnet_audio: filename + volume
-    char     file[33];       // WAV filename on SD
+    char     file[65];       // WAV filename on SD
     uint8_t  volume;         // 0–100 or MARIUS_VOLUME_UNSET
     bool     loop;           // audio_play: true → audioLoop()
 
@@ -422,8 +423,8 @@ static void _mariusParseActionArray(JsonArray arr, MariusAction* actions, uint8_
         if (strcmp(typeStr, "audio_play") == 0) {
             a.type = MARIUS_ACTION_AUDIO_PLAY;
             const char* fn = obj["file"] | "";
-            strncpy(a.file, fn, 32);
-            a.file[32] = '\0';
+            strncpy(a.file, fn, 64);
+            a.file[64] = '\0';
             if (a.file[0] == '\0') {
                 Serial.println("[Marius]   audio_play missing file — skipped");
                 continue;
@@ -460,8 +461,8 @@ static void _mariusParseActionArray(JsonArray arr, MariusAction* actions, uint8_
             a.artnet_cmd = obj["cmd"] | 0;
             if (a.artnet_cmd == 1 || a.artnet_cmd == 2) {
                 const char* fn = obj["file"] | "";
-                strncpy(a.file, fn, 32);
-                a.file[32] = '\0';
+                strncpy(a.file, fn, 64);
+                a.file[64] = '\0';
                 if (a.file[0] == '\0') {
                     Serial.println("[Marius]   artnet_audio play/loop missing file — skipped");
                     continue;
@@ -629,6 +630,10 @@ void mariusUpdate() {
             break;
 
         case MARIUS_CONNECTING:
+            // NimBLE connect can block up to ~5 s — never let it interrupt
+            // live playback (VS1053 FIFO drains in ~11.6 ms). Stay in
+            // CONNECTING and try again once the track has finished.
+            if (audioIsPlaying()) break;
             if (_mariusConnect()) {
                 _mariusState = MARIUS_CONNECTED;
             } else {

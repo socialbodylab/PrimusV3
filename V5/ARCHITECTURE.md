@@ -1,146 +1,222 @@
 # V5 Unified Backend Architecture
 
-V5 is the **canonical track** for PrimusV3 sender development. The goal is one Python backend that serves multiple product frontends (Primus LED, Radius audio) with shared device management, networking, firmware tooling, and packaging.
-
-## Current state (June 2026)
-
-| Layer | Status |
-|-------|--------|
-| **Firmware source** | Both families under `V5/Arduino/` |
-| **Firmware UI + jobs** | Product-scoped profiles per app |
-| **Radius backend** | `radius_state.py`, audio cues, netlog, push sync |
-| **Radius frontend** | `index.html` + `app-radius.js` |
-| **Primus backend** | `state.py`, clips, looks, mixer, OSC, ArtDmx loop |
-| **Primus frontend** | `index-primus.html` + `app-primus.js`, look-mixer/controller |
-| **Packaged apps** | Both built from V5 via `--product primus|radius` |
-
-## Directory layout
+One Python process serves three apps. PrimusCentral (LED show control),
+RadiusCentral (audio), and DeviceManager (monitoring/config/firmware) are
+launchers onto frontends of the same server — one HTTP server, one device
+list, one telemetry listener, one registry entry. This document describes the
+system as it is; the history of how it got here is in [CHANGES.md](CHANGES.md).
 
 ```
-V5/
-  sender/                 Unified sender (Primus + Radius product split)
-  Arduino/
-    primusV3_receiver/    Primus LED firmware (v1, v2, v3 profiles)
-    upload.sh             Primus compile/upload script
-    radius_receiver/      Radius audio firmware (radius_v1)
-    radius_upload.sh      Radius compile/upload script
-  build_sender_app.py     PyInstaller packaging (--product primus|radius)
-  ARCHITECTURE.md         This file
-  FIRMWARE_DEVELOPMENT.md Firmware protocol notes (both families)
-  PACKAGING.md            App bundle and release workflow
+PrimusCentral.app   RadiusCentral.app   DeviceManager.app      (launchers)
+      │                   │                   │
+      └────────── attach or start ───────────┘
+                        │
+              one server process (run_primus.py)
+   ┌───────────────────────────────────────────────────────┐
+   │  HTTP server (server.py)                              │
+   │    /primus   /radius   /devices   + /api/* (111)      │
+   │  ControllerState (state.py)                           │
+   │    devices[] — Primus and Radius records              │
+   │    animation tick → ArtDmx   audio/FTP cmd surface    │
+   │  PrimusTelemetryListener — UDP 6455                   │
+   │    demux PST/PBT/PFP (Primus) + PTR/PRS (Radius)      │
+   │  OSC listener (Primus cues) · firmware jobs · netlog  │
+   └───────────────────────────────────────────────────────┘
+          │ Show lane          │ Setup lane        ▲ Watch lane
+          │ 6454 ArtDmx        │ 6457 config       │ 6455 telemetry
+          │ 6456 ArtAudioCmd   │ + FTP gate        │
+          ▼                    ▼                   │
+      ESP32 receivers (Primus LED · Radius audio), FTP data on TCP 21
 ```
 
-Historical copies under `V4/Arduino/` and `V3_6/Arduino/` remain for reference, but **new firmware work should land in `V5/Arduino/`**.
+## Process model
+
+- `run.py` is the single entry point. `--product primus` starts the unified
+  server with `/primus` as the default frontend; `--product radius` flips the
+  process to the `primus` product with `/radius` as the default frontend and
+  delegates to `run_primus.main()`; `run_devices.py` is the DeviceManager
+  launcher (`--frontend devices`, plus `--lan` for the Mobile View).
+- `server.py` hosts the JSON API and the static Alpine.js frontends
+  (no build step). HTTP/1.1 with keep-alive. `GET /` serves the default
+  frontend for the active product directly (no redirect).
+- **`ControllerState` is the one device list.** Primus records carry an
+  `ArtNetSender` and output tables; Radius records are tagged
+  `is_radius: true`, never get a sender, and are excluded from the DMX tick by
+  explicit guards. The audio/FTP command surface (`send_audio_command`,
+  `fire_audio_cue`, `ftp_*`) lives on `ControllerState`, so all
+  `/api/audio/*` routes work on the shared server.
+- `GET /api/state` returns the Primus shape; `GET /api/state?product=radius`
+  returns the radius shape — **all devices, indices aligned with the unified
+  list** (the Radius UI filters client-side). Device indices therefore mean
+  the same thing in every frontend.
+- **`RadiusState` is legacy.** It runs only under
+  `PRIMUSV3_RADIUS_STANDALONE=1` (kept for tests and as a fallback) and has
+  not been kept feature-current. Don't extend it.
+
+## The animation tick
+
+`state.py` runs the animation loop at `state.fps` (default 30) with
+macOS-specific timing help: a `caffeinate` process assertion, user-interactive
+thread QoS, and low-latency frame pacing with a spin tail (see
+[PACKAGING.md](PACKAGING.md) — these are load-bearing for packaged FPS; do not
+remove them, and do not resurrect the old `objc_msgSend` bridge that crashed
+the app). Pixel building happens under the state lock; UDP sends happen
+outside it. Per-frame memoization dedupes identical wired output across
+devices. `/api/performance` exposes rolling timings and counters.
+
+The tick's relationship to devices is the system's core safety invariant:
+
+> **Connecting a device is what arms DMX to it.** A connected Primus device
+> receives frames every tick — including keepalive blackouts when idle —
+> which fights any external console driving the same node. Therefore
+> `/api/devices/sync` (background discovery, every 20 s from every frontend)
+> **never** connects anything, on any backend. Connect is an explicit
+> operator action (`/api/connect`, `/api/connect_all`). This invariant
+> replaced the old `monitor_only` mode outright.
+
+One-off setup actions (hello, output config, IP config) use transient sends
+and never create standing output. Radius devices are connected-by-default
+because for them the flag gates one-shot audio commands, not a stream.
+
+## Telemetry
+
+One `PrimusTelemetryListener` binds UDP 6455 (`0.0.0.0`) and demuxes by magic:
+
+| Magic | From | Content |
+|---|---|---|
+| `PST` | Primus 3.14+ | 28-byte unified status (fps, flags, battery, lock state) |
+| `PBT` | Primus V1 pre-3.14 | legacy battery packet |
+| `PFP` | both | 7-byte FPS/packet-rate (Radius always reports fps 0) |
+| `PTR` | Radius | track name + playback state (byte-frozen) |
+| `PRS` | Radius 4.16+ | 17-byte unified status (flags, RSSI, battery) |
+
+Byte layouts live in [FIRMWARE_REFERENCE.md](FIRMWARE_REFERENCE.md). Merge
+precedence: `PST` beats the legacy packets; `PRS` layers on (Radius never
+sends PST); `PTR` overlays track state. Entries go stale after 12 s;
+"receiver online" means seen within 3 s. Devices are identified by source IP.
+
+The socket is single-owner — that fact is *why* RadiusCentral had to become a
+frontend rather than a second process. If the bind fails, the listener falls
+back to an ephemeral port and telemetry silently reads offline; the fix is to
+find and stop the other process (`run.py --server-status` / `--stop-server`).
+
+Primus nodes send telemetry only after a target is set
+(`POST /api/set_device_telemetry_target`); there is no broadcast fallback.
+The target is explicit and persisted so third-party ArtDmx (EOS) can never
+redirect monitoring. Radius nodes latch the sender IP from real command
+packets (never from ArtPoll, so passive discovery tools can't steal the
+stream).
+
+## Launcher contract
+
+The apps are launchers; before attaching to an existing server each one must
+answer: is a Central running, can it serve *my product*, can it serve *my
+capabilities*? `central_launcher.evaluate_server()` is where that happens.
+A mismatch must never silently attach — packaged apps have no console, so a
+silent wrong decision is indistinguishable from a failed launch.
+
+- The registry (`central_server.json`, in shared PrimusV3 app data) records
+  host, port, pid, `products` (the unified backend registers
+  `["primus","radius"]`), `monitor_only`, `lan_enabled`, `app_version`.
+  `GET /api/runtime` advertises the same and is the liveness probe;
+  `GET /api/server/status` carries the richer operational detail
+  (`live_output`, client sessions, uptime) so `/api/runtime` can stay
+  shape-stable for old clients.
+- `try_attach_before_start(..., need_product=, needs_output=, on_mismatch=)`:
+  the handler returns `"attach"`, `"start"`, or `"abort"`; with no handler the
+  default is to refuse, not attach. A backend with no product information is a
+  loud mismatch (`MISMATCH_UNKNOWN_PRODUCT`). Dialogs are stdlib-only
+  (`launcher_dialog.py`; `PRIMUSV3_NO_DIALOGS=1` forces the non-blocking
+  fallback for scripts/CI).
+- Attach calls `reserve_ui_session()` first, so the running server counts the
+  new client before its browser window exists and can't auto-quit in the gap.
+- `POST /api/server/stop` refuses with 409 while output is live unless
+  `{"force": true}` — one app can never black out a show another is running.
+
+## Window / UI lifecycle (packaged apps)
+
+- Each frontend runs in its own dedicated Chromium app window with its own
+  profile directory and icon. Attach launches use a fresh profile subdir every
+  time (Chromium's single-instance handoff drops `--app` URLs otherwise), and
+  window liveness is judged by live processes, never marker files.
+- Frontends heartbeat `POST /api/ui/heartbeat` every 2 s with a per-window
+  session id. When all sessions are gone and nothing is live, the server
+  releases any zombie mixer preview and quits after a short grace period.
+- If output **is** live with no window, the server reopens its window (at most
+  every 30 s) instead of running as an invisible resident.
+- Auto-quit and `/api/server/stop` consume the same `live_output_fn`
+  (Primus playback source active OR `radius_has_live_playback()` from PTR),
+  composed once in `run_primus.py`. Both fail toward "live" on error.
+
+## Persistence
+
+- `paths.py` decides the data directory: env overrides
+  (`PRIMUSV3_DATA_DIR`, `RADIUSV5_DATA_DIR`), app data when packaged
+  (`~/Library/Application Support/PrimusV3/V5/sender/` on macOS), else the
+  source tree.
+- `.primus_state.json`: devices (including `device_uid`, capabilities,
+  management state, per-output config), device groups, Primus show-info.
+- `.radius_state.json`: Radius show-info (character/performer), and — written
+  by the legacy standalone backend only — a devices list that the unified
+  backend imports read-only at startup.
+- `show_info_store.py` is the single decision point for which file a device's
+  show info lands in (`is_radius` routes to the radius file).
+- On first launch of a packaged RadiusCentral against the unified tree,
+  legacy `RadiusV3` app data (state, cue sheet, audio library) is copied —
+  never moved — into the PrimusV3 tree (`run.py::_migrate_radius_app_data`).
+- Restore is discovery-verified: saved devices are matched by IP then unique
+  name against a boot-time sweep; offline devices come back as saved records,
+  and a saved `is_radius` record is forced back to radius capabilities even if
+  its saved capability dict was lost (otherwise it would be given an
+  `ArtNetSender` and streamed DMX keepalives).
 
 ## Firmware families
 
 | Family | Profiles | Sketch | Upload script | Capability tag |
-|--------|----------|--------|---------------|----------------|
-| **Primus** | `v1`, `v2`, `v3` | `primusV3_receiver/` | `upload.sh` | `PV3CAP1\|…` |
-| **Radius** | `radius_v1` | `radius_receiver/` | `radius_upload.sh` | `PVRAD1\|…` |
+|---|---|---|---|---|
+| Primus | `v1`, `v2`, `v3` | `Arduino/primusV3_receiver/` | `Arduino/upload.sh` | `PV3CAP1\|…` |
+| Radius | `radius_v1`, `radius_v2` | `Arduino/radius_receiver/` | `Arduino/radius_upload.sh` | `PVRAD1\|…` |
 
-The sender resolves the correct script from `firmware.FIRMWARE_PROFILES` (`V5/sender/firmware.py`). Each packaged app exposes **only its product's profiles** — RadiusCentral serves `radius_v1` only; PrimusCentral serves `v1`/`v2`/`v3` only. Override for dev with `PRIMUSV3_SENDER_PRODUCT=primus|radius` or `python3 run.py --product …`.
+Firmware upload jobs (`firmware.py`, `/api/firmware/*`) are product-scoped per
+app; DeviceManager passes `scope=mixed` to see all five profiles in one panel.
+Node capability parsing lives in `artnet.py` (`parse_node_capabilities`);
+[FIRMWARE_REFERENCE.md](FIRMWARE_REFERENCE.md) is the byte-level contract.
 
-## Product split (implemented)
+## Network model
 
-One **HTTP server** (`server.py`) exposes the full Primus + Radius JSON API. Static UI is served from separate HTML entry points:
+UDP lanes (Show/Setup/Watch) are documented in
+[PORTS_AND_LANES.md](PORTS_AND_LANES.md). Sender-side network settings
+(`network_settings.py`, `/api/network/*`) manage the host's Art-Net interface
+selection, SSID profiles, and the editable lane-port defaults; host static-IP
+apply is macOS-only and escalates through a GUI prompt.
 
-| URL | Frontend |
-|-----|----------|
-| `/primus` | Look Designer + Cue Controller (`index-primus.html`) |
-| `/radius` | Audio production UI (`index.html`) |
-| `/devices` | Mixed monitoring and Primus setup (`index-devices.html`) |
-| `/` | Redirects to the default frontend for the active product (`PRIMUSV3_SENDER_PRODUCT` or app bundle name) |
+HTTP binds loopback by default. `--lan` (injected by `run_devices.py` for the
+Mobile/Tablet View) binds `0.0.0.0` — there is **no auth anywhere** by policy
+(trusted, isolated show network), so widening any bind is a security decision;
+see [REMOTE_BACKEND_NOTES.md](REMOTE_BACKEND_NOTES.md) before changing this.
 
-Packaged apps open their default path (`/primus` or `/radius`) on launch. Both frontends are always available on the same server process when running from source.
+## Design rules that explain the code
 
-| Concern | Primus backend | Radius backend |
-|---------|----------------|----------------|
-| Entry | `run_primus.py` via `run.py --product primus` | `run_radius.py` (default) |
-| State | `state.py` → `ControllerState`, ArtDmx loop | `radius_state.py` → `RadiusState` |
-| UI path | `/primus` | `/radius` |
-| App data | `PrimusV3/V5/sender/` + clips/looks/cues | `RadiusV3/V5/sender/` + audio |
+- **No external Python dependencies in the sender.** Stdlib only — Art-Net,
+  OSC, FTP, HTTP are all hand-rolled. The single biggest constraint.
+- **Table-driven output types** on both sides (`OUTPUT_TYPES` /
+  `LOOK_OUTPUT_TYPES` in Python ↔ `OutputType` enum / `OUTPUT_TYPE_TABLE` in
+  C++, matched by index). Custom opcodes live in the 0x8000+ range.
+- **Brightness is sender-side RGB scaling only.** Receiver driver stays at
+  255; the V2 brightness-byte protocol is intentionally dead.
+- **Frontends are origin-relative.** Every fetch goes through a bare-path
+  `api()` helper; no hardcoded hosts, no CORS surface. Keep it that way.
+- The backend is authoritative for device config: UI drafts go through HTTP →
+  a Setup-lane mutation → ACK/NACK → readback; the UI renders what came back,
+  not what it sent.
 
-Product-specific routes return `503` when that backend is not running (e.g. clip APIs on a Radius-only launch).
+## What still needs work
 
-## Future unification (optional)
-
-1. **Single device state** — one device list with `device_class` routing (LED → ArtDmx, Radius → audio/FTP)
-2. **Merged web UI** — Primus + Radius tabs in one `index.html`; workshop profile from V3_6
-3. **Shared run loop** — one process with both telemetry listeners where needed
-
-## Frontend model
-
-Frontends are **static Alpine.js SPAs** served from `V5/sender/web/`. No build step. Mode tabs select panels; shared sidebar handles discovery/connect/rename/IP for all device types.
-
-```
-┌─────────────────────────────────────────┐
-│  Navbar: product-specific mode tabs     │
-├──────────┬──────────────────────────────┤
-│ Sidebar  │  Active panel (Alpine x-data) │
-│ devices  │  → HTTP JSON API            │
-└──────────┴──────────────────────────────┘
-                    │
-                    ▼
-            V5/sender/server.py  (unified API + static frontends)
-                    │
-        ┌───────────┴───────────┐
-        ▼                       ▼
-  ControllerState          RadiusState
-  (Primus runtime)         (Radius runtime)
-  ArtDmx / clips           audio / FTP / cues
-        │                       │
-        └───────────┬───────────┘
-                    ▼
-              V5/sender/artnet.py
-```
-
-## Primus management-v2 setup path
-
-`device-conn.js` is the additive shared setup layer used by DeviceManager and
-PrimusCentral. It owns descriptor validation/order summaries, output preset
-CRUD/application, explicit telemetry targeting, production/recovery actions,
-and consistent `409`/NACK/readback-pending presentation. It gates all of those
-actions on a non-Radius `management_supported` record.
-
-The backend remains authoritative:
-
-```text
-UI draft → HTTP management route → 0x8140 mutation → 0x8141 ACK/NACK
-                                               ↘ GET_CONFIG readback
-                                                  ↘ /api/state
-```
-
-Off A0/A1 slots remain in `/api/state` and in both UIs. Grid metadata maps
-logical coordinates onto physical wire order; sender ArtDmx remains physical
-wire order. Output presets live in sender app data and only reach receiver NVS
-when explicitly applied.
-
-DeviceManager's `monitor_only` invariant is unchanged: periodic sync never
-connects devices for output, and one-off setup packets do not create standing
-DMX. Mobile mode hides setup while retaining its existing Hello action. Radius
-records stay in the mixed monitor but never enter the Primus management path.
-
-PST has one explicit persisted target. The sender/UI never learns it from
-ArtDmx or EOS, which prevents traffic from another console from silently
-redirecting monitoring. Production lock is the commissioning boundary, not a
-multi-sender ownership mechanism. Management-v1 arbitration/leases are
-deliberately deferred to a future protocol version.
-
-## Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `RADIUSV5_DATA_DIR` | Writable sender data (V5 default; `RADIUSV4_DATA_DIR` remains a compatibility alias) |
-| `RADIUSV5_USE_APP_DATA` | Use platform app data from source runs (`RADIUSV4_USE_APP_DATA` remains accepted) |
-| `RADIUSV5_TOOLS_DIR` | Firmware tools directory override (`RADIUSV4_TOOLS_DIR` remains accepted) |
-| `PRIMUSV3_DATA_DIR` | Writable Primus sender data (alias of legacy env) |
-| `PRIMUSV3_SENDER_PRODUCT` | `primus` or `radius` — selects backend, UI, and firmware profiles |
-| `PRIMUSV3_USE_APP_DATA` | Use platform app data from source runs (Primus) |
-
-## Related docs
-
-- [README.md](README.md) — quick start and UI modes
-- [FIRMWARE_DEVELOPMENT.md](FIRMWARE_DEVELOPMENT.md) — opcode tables and hardware notes
-- [PACKAGING.md](PACKAGING.md) — PyInstaller, signing, DMG
-- [RADIUS_CENTRAL_BRANCH_FEATURES.md](RADIUS_CENTRAL_BRANCH_FEATURES.md) — branch parity inventory
+See [CHANGES.md — What still needs work](CHANGES.md#what-still-needs-work)
+for the current list (lane-resolution divergence, the `G:` token hazard,
+standalone-path drift, the no-auth/`--lan` tension, silent `OSError`
+swallowing in persistence). The forward-looking design notes for running this
+backend on a dedicated machine are in
+[REMOTE_BACKEND_NOTES.md](REMOTE_BACKEND_NOTES.md), including standing rules
+for interim work (no new `127.0.0.1` literals, no new fast polling, no new
+signalling on the focus socket).

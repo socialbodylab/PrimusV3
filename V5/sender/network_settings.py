@@ -14,6 +14,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 
 from artnet import ipv4_octets
@@ -810,7 +811,30 @@ def _mac_interfaces(settings):
     return interfaces, route
 
 
+_status_cache_lock = threading.Lock()
+_status_cache = {"at": 0.0, "value": None}
+_STATUS_CACHE_SECONDS = 2.0
+
+
 def get_network_status():
+    # Memoized briefly: this shells out to networksetup/ifconfig/route
+    # (one subprocess per network service) and is called from most device
+    # routes plus a 15 s poll from every open frontend. Without a cache an
+    # operator action bursts a dozen process spawns, and a hung
+    # networksetup call stalls the HTTP thread.
+    now = time.monotonic()
+    with _status_cache_lock:
+        cached = _status_cache["value"]
+        if cached is not None and (now - _status_cache["at"]) < _STATUS_CACHE_SECONDS:
+            return copy.deepcopy(cached)
+    status = _get_network_status_uncached()
+    with _status_cache_lock:
+        _status_cache["value"] = copy.deepcopy(status)
+        _status_cache["at"] = time.monotonic()
+    return status
+
+
+def _get_network_status_uncached():
     settings = load_settings()
     supported = sys.platform == "darwin" or sys.platform.startswith("win")
     status = {

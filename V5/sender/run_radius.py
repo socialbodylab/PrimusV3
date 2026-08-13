@@ -224,6 +224,11 @@ def main():
         action="store_true",
         help="Stop any running Central server and start a new one",
     )
+    parser.add_argument(
+        "--lan",
+        action="store_true",
+        help="Bind the HTTP server to all interfaces instead of loopback",
+    )
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -261,9 +266,10 @@ def main():
     ui_lifecycle_enabled = is_bundled() and not args.no_browser
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
     ui_focus_server = None
+    bind_host = "0.0.0.0" if args.lan else "127.0.0.1"
     try:
         server = _create_server_with_fallback(
-            "127.0.0.1", args.port, state, ui_lifecycle_enabled=ui_lifecycle_enabled)
+            bind_host, args.port, state, ui_lifecycle_enabled=ui_lifecycle_enabled)
     except CentralPortInUseByCentral:
         if try_attach_before_start(
             port=args.port,

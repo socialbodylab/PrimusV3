@@ -47,6 +47,15 @@ _dedicated_browser = DedicatedBrowser(DEDICATED_BROWSER_PROFILE_ROOT, ("PRIMUS_B
 _MACOS_ACTIVITY_TOKEN = None
 
 
+def _ui_lifecycle_enabled(frontend, no_browser=False):
+    """Whether packaged apps should quit when all UI windows close."""
+    if not is_bundled() or no_browser:
+        return False
+    if str(frontend or "").strip().lower() == "devices":
+        return False
+    return True
+
+
 def _ui_has_live_output(server):
     state = getattr(server, "controller_state", None)
     if state is None:
@@ -480,7 +489,7 @@ def main():
     print("Restoring saved devices...")
     state.restore_devices()
 
-    ui_lifecycle_enabled = is_bundled() and not args.no_browser
+    ui_lifecycle_enabled = _ui_lifecycle_enabled(args.frontend, args.no_browser)
     browser_profile_root = _browser_profile_root() if not args.no_browser else None
     ui_focus_server = None
     bind_host = "0.0.0.0" if args.lan else "127.0.0.1"
