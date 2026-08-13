@@ -640,7 +640,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
-        path = self.path.split("?")[0]
 
         if path == "/api/audio/upload":
             self._handle_audio_upload()
@@ -1511,7 +1510,7 @@ class Handler(BaseHTTPRequestHandler):
             except NetworkSettingsError as exc:
                 self._json_network_error(exc)
 
-        if path == "/api/audio/cmd":
+        elif path == "/api/audio/cmd":
             di = data.get("device", -1)
             cmd = str(data.get("cmd", "stop"))
             filename = str(data.get("filename", ""))
@@ -1529,7 +1528,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json_error(400, "invalid device index or command")
             return
-        if path == "/api/audio/files":
+        elif path == "/api/audio/files":
             di = data.get("device", -1)
             ftp_path = str(data.get("path", "/"))
             if not (0 <= di < len(self._device_state().devices)):
@@ -1543,7 +1542,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/rename":
+        elif path == "/api/audio/rename":
             di = data.get("device", -1)
             src = str(data.get("src", ""))
             dst = str(data.get("dst", ""))
@@ -1558,7 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/delete":
+        elif path == "/api/audio/delete":
             di = data.get("device", -1)
             ftp_path = str(data.get("path", ""))
             is_dir = bool(data.get("is_dir", False))
@@ -1573,7 +1572,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/mkdir":
+        elif path == "/api/audio/mkdir":
             di = data.get("device", -1)
             ftp_path = str(data.get("path", ""))
             if not (0 <= di < len(self._device_state().devices)):
@@ -1587,7 +1586,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     self._json_error(500, str(exc))
             return
-        if path == "/api/audio/cue_map":
+        elif path == "/api/audio/cue_map":
             di = data.get("device", -1)
             cues = data.get("cues")
             devices = self._device_state().devices
@@ -1604,13 +1603,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._json_error(500, str(exc))
             return
-        if path == "/api/audio_cues":
+        elif path == "/api/audio_cues":
             with self.audio_cues_lock:
                 Handler.audio_cues_data = data
                 _audio_cues_mod.save_audio_cues(data)
             self._json_response(data)
             return
-        if path == "/api/audio_cues/fire":
+        elif path == "/api/audio_cues/fire":
             number = data.get("number")
             with self.audio_cues_lock:
                 cues = self.audio_cues_data.get("cues", [])
@@ -1621,7 +1620,7 @@ class Handler(BaseHTTPRequestHandler):
             results = self._device_state().fire_audio_cue(cue)
             self._json_response({"results": results})
             return
-        if path == "/api/audio_sync":
+        elif path == "/api/audio_sync":
             global _sync_job
             with _sync_lock:
                 if _sync_job and _sync_job.get("status") == "running":
@@ -1645,7 +1644,7 @@ class Handler(BaseHTTPRequestHandler):
             ).start()
             self._json_response({"job_id": new_job["job_id"]})
             return
-        if path == "/api/netlog/clear":
+        elif path == "/api/netlog/clear":
             netlog.clear()
             self._ok()
             return
