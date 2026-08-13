@@ -2,7 +2,7 @@
 
 ## What is this project?
 
-PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Python sender drives ESP32 receiver nodes over Art-Net (UDP 6454). The sender has a built-in web UI, clip/look workflow, cue controller, OSC input, firmware upload panel, and effects engine. The current V3.6 track supports reflashed V1, V2, and V3.1 hardware with one shared Art-Net protocol.
+PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Python sender drives ESP32 receiver nodes over Art-Net (discovery/LED on UDP 6454). The sender has a built-in web UI, clip/look workflow, cue controller, OSC input, firmware upload panel, and effects engine. **V5 is the active track** (see below): one unified sender packaged as PrimusCentral (LED), RadiusCentral (audio), and DeviceManager (monitoring/config/firmware), supporting reflashed V1/V2/V3 hardware over a shared Art-Net protocol. V3.6 remains a historical reference track.
 
 ## Active version: V5 (PrimusCentral + RadiusCentral + DeviceManager)
 
@@ -24,9 +24,10 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - Web UI: `V5/sender/web/index.html` (served at `/radius`)
 - State: `V5/sender/radius_state.py` (device, audio, FTP only — no clips/looks/cues)
 - App data: `RadiusV3/V5/sender/` (`.radius_state.json`)
-- Firmware: `V5/Arduino/radius_receiver/` + `radius_upload.sh` (profile `radius_v1`, HUZZAH32 + Music Maker)
-- Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd; shared `0x8200` ArtIPConfig; capability tag `PVRAD1|B:v1|IP:D|F:RA`
-- Track telemetry: UDP 6455 magic `PTR` for current filename
+- Firmware: `V5/Arduino/radius_receiver/` + the shared `V5/Arduino/upload.sh` (profiles `radius_v1` = HUZZAH32 + Music Maker, `radius_v2` = ESP32-S3 Reverse TFT + Music Maker). There is no separate `radius_upload.sh`; both families share one `upload.sh` and `firmware.FIRMWARE_PROFILES` picks the sketch dir.
+- Radius opcodes: `0x8300` ArtAudioCmd, `0x8301` ArtFtpCmd, `0x8302` ArtAudioStatus (now-playing telemetry, sender-inbound); shared `0x8200` ArtIPConfig. Capability tag `PVRAD1|B:v1|AUD:6456|MGMT:6457|TELE:6455|FTP:21|IP:D|F:RIHAS` (V2 uses `B:v2`), feature flags `R`=rename, `I`=IP config, `H`=hello/test-tone, `A`=audio, `S`=show info; optional Marius tokens `MC:`/`MP:` on V2.
+- Radius lane ports: ArtAudioCmd/ArtDmx (Show) on **6456** (`PORT_SHOW_RADIUS`, off the 6454 discovery/LED port), Setup (FTP/identity/IP) on **6457**, telemetry (Watch) on **6455**. Discovery ArtPoll still bootstraps on 6454.
+- Now-playing telemetry: `0x8302` ArtAudioStatus is the primary, event-driven source (persists until the next state change — no staleness window); legacy `PTR` on UDP 6455 remains a fallback. Both parse to the same `{playback_state, current_track}` shape (`parse_audio_status_packet` / `parse_track_packet` in `artnet.py`).
 
 **Launcher contract (all three apps).** There is one backend process; the apps are launchers onto its frontends. Before attaching, a launcher must answer three questions, and `central_launcher.evaluate_server()` is where that happens: is a Central running, can it serve *my product*, and can it serve *my capabilities* (drive output). A mismatch must never silently attach — packaged apps are windowed with no console, so a silent decision is indistinguishable from a failed launch. Key pieces:
 
@@ -36,16 +37,15 @@ PrimusV3 is a WiFi LED lighting controller for live performance costumes. A Pyth
 - RadiusCentral refuses a non-Radius backend outright (see the limitation below).
 - Attach calls `reserve_ui_session()` so the running Central counts the new client before its browser exists and cannot auto-quit in that gap.
 - The registry (`central_server.json`) records capabilities — `monitor_only`, `lan_enabled`, `app_version` — not just host/port.
-- Both the auto-shutdown monitor and `POST /api/server/stop` read the same `server.live_output_fn`, so they can never disagree about whether quitting is safe. Primus uses `playback_source`; Radius uses `RadiusState.has_live_playback()` (any device reporting playback via PTR).
+- Both the auto-shutdown monitor and `POST /api/server/stop` read the same `server.live_output_fn`, so they can never disagree about whether quitting is safe. Primus uses `playback_source`; Radius uses `RadiusState.has_live_playback()` (any device reporting playback via `0x8302` ArtAudioStatus, or legacy PTR).
 - Operator control: `python3 V5/sender/run.py --server-status` and `--stop-server [--force]`. This is the supported way to clear an orphaned server holding the port.
 
-**KNOWN LIMITATION — RadiusCentral cannot currently run alongside PrimusCentral/DeviceManager.** PrimusCentral and DeviceManager deliberately share one backend (DeviceManager is a frontend on the Primus server), but RadiusCentral is a *different product* and has no working co-existence story. Launching it while a Primus Central is running silently attaches it to that Primus backend:
+**KNOWN LIMITATION — there is no clean story for running a RadiusCentral backend alongside a PrimusCentral/DeviceManager backend, but RadiusCentral now fails loudly instead of silently attaching.** PrimusCentral and DeviceManager deliberately share one backend (DeviceManager is a frontend on the Primus server); RadiusCentral is a *different product* with its own backend.
 
-- `find_running_central_server()` in `central_launcher.py` returns any live Central **without checking product**, and `candidate_ports()` probes the requested port, then the registry port, then 8080 — so `--port 8081` still attaches to a Primus server on 8080. `central_server.json` holds a single `{port, product, pid}`; it is a one-server registry.
-- Result: `/radius` returns 200 and the UI loads, but it is served by a `primus` backend. `radius_state.py` / `.radius_state.json` are never loaded, `/api/state` returns clips/looks/cues with no audio/ftp/track keys, and `/api/audio/cue_map` returns 400. **The failure is invisible — the app looks healthy.**
-- Deeper blocker: the Watch-lane telemetry listener binds `0.0.0.0:6455` with `SO_REUSEADDR` only, so a second backend cannot bind it (`Errno 48`). Fixing only the launcher moves the failure rather than removing it, and adding `SO_REUSEPORT` would be worse — telemetry would be split arbitrarily between processes.
+- **Fixed (the silent-attach bug is gone):** `evaluate_server()` now checks product, and `try_attach_before_start(..., need_product="radius", on_mismatch=...)` in `run_radius.py` refuses a `primus` backend. Its `_attach_mismatch_handler` shows a native dialog on `MISMATCH_WRONG_PRODUCT` — "a *primus* Central is running on this port; quit it or open its interface" — and aborts unless the operator explicitly chooses to open the other product's UI. RadiusCentral no longer boots a `/radius` page backed by Primus state, so in the normal packaged flow it will not start a second backend beside a Primus one.
+- **Why a second backend is still a bad idea, if one is forced up anyway** (e.g. distinct HTTP ports, bypassing the registry): it does *not* hard-fail on the shared Watch port. The telemetry listener (`artnet.py`) tries `0.0.0.0:6455` (`SO_REUSEADDR`) with retries, and on failure **falls back to an ephemeral port and prints an error to the console** — it never raises `Errno 48` to the caller. Only one process actually receives on 6455, so the second instance comes up "healthy" but silently shows **no receiver telemetry** (FPS, battery, Radius now-playing), and packaged windowed apps never surface that console error. The registry compounds this: `central_server.json` is a single-record file (`register_central_server` overwrites it), so it can only ever point at one Central — a second registration clobbers the first.
 
-Preferred direction when this is addressed: make RadiusCentral a **third frontend on one shared backend**, the same way DeviceManager already is, with the single 6455 listener demuxing by magic (`PST`/`PFP` = Primus, `PTR` = Radius). That removes the port conflict by construction, and DeviceManager's mixed monitoring already discovers `PVRAD1` nodes on the Primus backend. The work is that the backend picks one product globally via `sender_product()` and would need to hold both states at once. Independently, the launcher should **fail loudly on product mismatch** rather than silently attaching.
+Preferred direction when real co-existence is tackled: make RadiusCentral a **third frontend on one shared backend**, the way DeviceManager already is, with the single 6455 listener demuxing by magic/opcode (`PFP`/`PBT`/`PST` = Primus, `0x8302`/`PTR` = Radius). DeviceManager's mixed monitoring already discovers `PVRAD1` nodes on the Primus backend and ingests `0x8302` now-playing; the remaining work is that the backend would need to hold both product states at once rather than picking one globally via `sender_product()`.
 
 ### DeviceManager (network monitoring, device config, and firmware app)
 
@@ -64,26 +64,36 @@ DeviceManager is not a separate backend — it is a third frontend served by the
 
 See `V5/README.md` and `V5/PACKAGING.md` for quick start and release details.
 
-### V3.6 reference track (`V3_6/`)
+### Brightness (current spec)
 
-V3.5, V3.1, and V3.0 remain historical references. The `V3_6/` tree still documents the V3.6 Art-Net protocol and can be run from source (`python3 V3_6/sender/run.py`) for comparison, but **do not build new PrimusCentral releases from `V3_6/build_sender_app.py`** — use V5 with `--product primus` instead.
+Show dimming is **sender-side only**: the sender scales RGB pixel values before ArtDmx transport, and the receiver LED driver brightness stays fixed at 255. Clip, Look, and Timeline segment brightness all scale this way. Do not revive the old V2 brightness-byte protocol or receiver `setBrightness()` for show dimming.
 
-V3.6 adds sender-side Clip, Look, and Timeline segment brightness. Receiver LED driver brightness stays fixed at 255; the sender scales RGB pixel values before ArtDmx transport. Do not revive the old V2 brightness-byte protocol or receiver `setBrightness()` for show dimming.
+### Sharing bundles (current spec)
 
-V3.6 also adds portable Clip and Look sharing bundles through `sharing.py`: `GET /api/clips/:id/export`, `GET /api/looks/:id/export`, and `POST /api/import_bundle`. Look imports remap Clip IDs and clear saved `device_ips` so shared files do not overwrite local content or target someone else's receiver IPs.
+Portable Clip and Look bundles ship through `sharing.py`: `GET /api/clips/:id/export`, `GET /api/looks/:id/export`, `POST /api/import_bundle`. Look imports remap Clip IDs and clear saved `device_ips` so shared files never overwrite local content or target someone else's receiver IPs.
 
-The 0.7 workshop release defaults the browser UI to a workshop profile that hides some output choices and renames the workshop kit: `small_grid` = Badge, `short_strip` = Collar, `extra_long_strip` = Belt, `none` = None. This is UI-only; do not remove output types from sender state, API, or firmware. Full UI can be restored with `?ui=full` or `?profile=full`; return with `?ui=workshop` or `?profile=workshop`. The browser stores the choice in `localStorage` as `primusUiProfile`.
+### Workshop UI profile (current spec)
+
+The browser UI can default to a workshop profile that hides some output choices and renames the kit: `small_grid` = Badge, `short_strip` = Collar, `extra_long_strip` = Belt, `none` = None. UI-only — do not remove output types from sender state, API, or firmware. Restore the full UI with `?ui=full` / `?profile=full`; return with `?ui=workshop` / `?profile=workshop`. The choice is stored in `localStorage` as `primusUiProfile`.
+
+### Historical reference directory (`V3_6/`)
+
+`V3_6/` is a frozen historical copy that documents the older V3.6 Art-Net protocol and can be run from source (`python3 V3_6/sender/run.py`) for comparison; V3.5/V3.1/V3.0 are older still. **Do not build PrimusCentral releases from `V3_6/build_sender_app.py`** — use V5 with `--product primus`. The name is a directory, not a spec version: the concepts, effects, API, and conventions documented below are the live V5 spec regardless of which track first introduced them.
 
 ## Repository layout
 
 ### V5 Unified Sender (`V5/sender/`) — canonical track
 
-- `run.py` — Entry point for PrimusCentral (`--product primus`), RadiusCentral (`--product radius`), and DeviceManager (`--product primus --frontend devices`, or `run_devices.py`).
-- `state.py` — Core runtime state, output tables, animation tick, device tracking, brightness scaling, Art-Net send loop, `/api/performance` diagnostics, and macOS thread QoS helpers.
-- `server.py` — HTTP server. Serves static web UI and JSON API endpoints.
-- `effects.py`, `clips.py`, `mixer.py`, `controller.py`, `sharing.py` — Primus clip/look/cue workflow.
-- `firmware.py`, `network_settings.py`, `osc_control.py`, `artnet.py`, `paths.py` — Shared infrastructure.
-- `web/` — Static Alpine.js UI (`index-primus.html`, `index.html`, `index-devices.html`, shared CSS/JS).
+- `run.py` — Shared entry point. Bootstraps the product from `--product`/bundle, exposes product-free operator controls (`--server-status`, `--stop-server`), then dispatches to `run_primus.py` (PrimusCentral + DeviceManager) or `run_radius.py` (RadiusCentral). `run_devices.py` is the DeviceManager shortcut (attach-or-start `primus` with `--monitor-only`/`--lan`).
+- `paths.py` — `sender_product()` is the single global product switch; also resolves writable data/tools dirs and bundle detection.
+- `state.py` — Primus `ControllerState`: runtime state, output tables, animation tick, device tracking, brightness scaling, Art-Net send loop, `/api/performance` diagnostics, macOS thread QoS helpers.
+- `radius_state.py` — Radius `RadiusState`: device list, audio/FTP, now-playing (`has_live_playback()`), show-info. No clips/looks/cues.
+- `server.py` / `server_primus.py` / `server_radius.py` — HTTP server core plus per-product request handlers; serves static web UI and JSON API.
+- `central_launcher.py`, `launcher_dialog.py`, `ui_lifecycle.py`, `ui_focus.py`, `browser_launcher.py` — Launcher contract: attach-or-start, `evaluate_server()` product/capability checks, native dialogs, session reservation.
+- `effects.py`, `clips.py`, `mixer.py`, `controller.py`, `cue_boards.py`, `sharing.py`, `output_presets.py`, `virtual_resolution.py` — Primus clip/look/cue workflow.
+- `audio_cues.py`, `show_info_store.py`, `netlog.py` — Radius audio-cue map, character/performer persistence, and Net Log.
+- `firmware.py`, `firmware_source.py`, `serial_monitor.py`, `network_settings.py`, `osc_control.py`, `artnet.py`, `primus_protocol.py` — Shared infrastructure (firmware jobs, lane-port config, Art-Net opcodes/telemetry/discovery).
+- `web/` — Static Alpine.js UI (`index-primus.html`, `index.html`, `index-devices.html`, shared `js/device-conn.js`, CSS/JS).
 - `tests/` — Stdlib unittest coverage.
 
 ### V5 Sender Data
@@ -95,8 +105,8 @@ The 0.7 workshop release defaults the browser UI to a workshop profile that hide
 ### Receiver Firmware (canonical: `V5/Arduino/`)
 
 - `V5/Arduino/primusV3_receiver/` — Shared Primus firmware with `-v1`, `-v2`, and `-v3` upload profiles.
-- `V5/Arduino/upload.sh` — Primus compile/upload script.
-- `V5/Arduino/radius_receiver/` + `radius_upload.sh` — Radius audio firmware.
+- `V5/Arduino/radius_receiver/` — Radius audio firmware with `radius_v1` and `radius_v2` profiles.
+- `V5/Arduino/upload.sh` — **One** compile/upload script for both families. Primus profiles: `-v1`/`-v2`/`-v3`; Radius profiles: `radius_v1` (aka `rv1`) / `radius_v2` (aka `rv2`, `-radius`). There is no separate `radius_upload.sh`.
 - `V4/Arduino/` and `V3_6/Arduino/` remain historical; new firmware changes should land in `V5/Arduino/`.
 
 ### V3.6 Reference Sender (`V3_6/sender/`) — historical/source only
@@ -106,11 +116,15 @@ Same module layout as V4 Primus path, but not used for current PrimusCentral rel
 ### Docs
 - `README.md` - Project overview, V5 quick start, packaging marker summary.
 - `V5/README.md` - V5 documentation index, PrimusCentral and RadiusCentral quick start.
+- `V5/ARCHITECTURE.md` - V5 unified backend: product split, one HTTP server, per-product frontends, firmware families.
+- `V5/FIRMWARE_DEVELOPMENT.md` - V5 firmware protocol notes for both Primus and Radius families (opcodes, lane ports, capability tags, pins).
+- `V5/RADIUS_INTEGRATION.md` - RadiusCentral internals and DeviceManager mixed Primus/Radius discovery and management.
 - `V5/PACKAGING.md` - App packaging, signing, notarization, DMG creation, and packaged FPS validation.
+- `V5/FLEXIBLE_DEVICE_CONTROL_POSTMORTEM.md` - History of the flexible-device-control work V5 was copied from.
 - `API_REFERENCE.md` - Network protocol, HTTP API, sharing endpoints, performance diagnostics, packaging touchpoints.
+- `V5/0??ReleaseNotes.md` - Per-release notes (v0.81 … v0.97; Radius notes in `092RadiusReleaseNotes.md` / `093RadiusReleaseNotes.md`).
 - `V3_6/README.md` - Historical V3.6 protocol/source reference.
-- `V3_6/FIRMWARE_DEVELOPMENT.md` - Firmware profiles, pins, protocol contracts, and validation.
-- `V3_6/SENDER_DEVELOPMENT.md` - Sender architecture, discovery metadata, API behavior, and tests.
+- `V3_6/FIRMWARE_DEVELOPMENT.md` / `V3_6/SENDER_DEVELOPMENT.md` - Historical V3.6 firmware and sender references.
 
 ## Critical sync points
 
@@ -123,8 +137,8 @@ The sender and receiver must agree on:
 - **Custom opcode 0x8200**: ArtIPConfig for static IP / DHCP configuration.
 - **Discovery capability tag**: `PV3CAP1|F:RIOHM|B:<profile>|IP:D|U:S:0|...` in ArtPollReply Node Report (`U:C:N` for combined mode; trailing `...` is the per-output `port:type:universe[:virtual]` tuples, with the optional fourth field being virtual pixel count on firmware 3.11+). Firmware **3.12+** put `F:` (feature flags) right after the `PV3CAP1` prefix instead of last — the Node Report is a hard 64-byte Art-Net field, and with 2 outputs + a 3-digit base universe + combined mode + a static IP the full token set can exceed that, so whatever comes last risks silent truncation. `F:` gates nearly every capability the sender can act on (rename, hello, IP config, output config, receive mode, battery, show info), so losing it is far worse than losing the lower-stakes per-output tuples, which now come last instead.
 - **Feature flags**: `R` rename, `H` identify flash, `I` IP config, `O` output config, `M` receive mode config, `B` battery telemetry, `S` show info storage, `L` Setup-lane aware.
-- **Lane ports (firmware 3.14+)**: Show 6454 / Setup 6457 / Watch 6455. A node advertises `SHOW:`/`MGMT:`/`TELE:` **only for a lane moved off its default** — the full 30-byte triple alone overflows the 64-byte Node Report and silently ate `IP:`, `U:`, `G:` and all per-output tuples. `L` in `F:` is what marks a node lane-aware, so `L` + no lane token means "on the documented defaults" and no `L` means pre-lane firmware whose Setup stays on the Show port. Node Report priority under pressure: `F:` → `B:` → `IP:` → `U:` → moved-lane tokens → per-output tuples → `G:` (last; nothing parses it). Every token is appended only if it fits whole — a truncated `|MGMT:645` parses as a plausible port and would black-hole all Setup traffic.
-- **FPS telemetry**: 7-byte `PFP` packets on UDP 6455.
+- **Lane ports (firmware 3.14+)**: Primus Show 6454 / Setup 6457 / Watch 6455. **Radius Show defaults to 6456** (`PORT_SHOW_RADIUS`, config.h `PORT_SHOW_DEFAULT`), off the 6454 discovery/LED port; its Setup is 6457 and Watch 6455. Discovery ArtPoll still bootstraps on 6454 for both. Sender constants live in `artnet.py` (`PORT_SHOW_PRIMUS`/`PORT_SHOW_RADIUS`/`PORT_SETUP`/`PORT_WATCH`) and `network_settings.py`. A node advertises `SHOW:`/`MGMT:`/`TELE:` **only for a lane moved off its default** — the full 30-byte triple alone overflows the 64-byte Node Report and silently ate `IP:`, `U:`, `G:` and all per-output tuples. `L` in `F:` is what marks a node lane-aware, so `L` + no lane token means "on the documented defaults" and no `L` means pre-lane firmware whose Setup stays on the Show port. Node Report priority under pressure: `F:` → `B:` → `IP:` → `U:` → moved-lane tokens → per-output tuples → `G:` (last; nothing parses it). Every token is appended only if it fits whole — a truncated `|MGMT:645` parses as a plausible port and would black-hole all Setup traffic.
+- **Telemetry (UDP 6455 / Watch lane)**: Primus sends 7-byte `PFP` FPS packets, 9-byte `PBT` battery packets, and `PST` state packets. Radius sends `0x8302` ArtAudioStatus now-playing (primary) with legacy `PTR` as fallback. One listener demuxes all magics/opcodes.
 - **Brightness**: sender-side RGB scaling only; no receiver brightness channel.
 - **Virtual resolution**: sender renders at full physical resolution; Art-Net transport uses `virtual_pixels` per output (Badge default 1); receiver upscales to physical LEDs.
 
@@ -163,6 +177,8 @@ Firmware (canonical `V5/Arduino/`):
 ./V5/Arduino/upload.sh -v3 --auto
 ./V5/Arduino/upload.sh -v2 --all
 ./V5/Arduino/upload.sh -v2 -ssid "PrimusRouter" -pw "router-password" --auto
+./V5/Arduino/upload.sh radius_v1 --compile
+./V5/Arduino/upload.sh radius_v2 --compile
 ```
 
 Use `--auto` only when exactly one ESP32-like serial port is connected. Use `--all` only when every detected ESP32-like candidate should receive the same board profile. Upload commands compile automatically before flashing.
@@ -237,7 +253,9 @@ Useful samples include `animation_tick_ms`, `animation_sleep_requested_ms`, `ani
 
 Cumulative rates include startup/browser/restore time, so calculate steady-state FPS from counter deltas after launch has settled or use receiver FPS telemetry.
 
-## V3.6 concepts
+## Show-control concepts (PrimusCentral)
+
+These are the live V5 spec, not a legacy note — the clip/look/cue model carried forward unchanged from earlier tracks, so the version label was dropped.
 
 - **Clip**: A saved effect configuration for one output type. Stores effect parameters and normalized brightness.
 - **Look**: Timeline tracks and segments combining Clips across two output slots. Stores master brightness.
@@ -248,7 +266,7 @@ Cumulative rates include startup/browser/restore time, so calculate steady-state
 ## Conventions
 
 - No external Python runtime dependencies in the sender.
-- V3.6 web UI is static files under `V3_6/sender/web/` (Alpine.js, no build step).
+- Web UI is static files under `V5/sender/web/` (Alpine.js, no build step).
 - 0.7 workshop focus belongs in browser UI profiles, not firmware/protocol tables.
 - Keep output types table-driven on both sender and firmware sides.
 - Device-control UI is capability-aware: rename, hello, IP config, output config, receive mode, and virtual send resolution (`Send px`) are enabled from discovery capabilities, with legacy Primus fallback for older firmware.
@@ -262,17 +280,19 @@ Cumulative rates include startup/browser/restore time, so calculate steady-state
 
 none, solid, pulse, linear, constrainbow, rainbow, noise, static_noise, sparkle_noise, knight_rider, chase, radial (grid), spiral (grid)
 
-## V3.6 API endpoints
+## HTTP API
 
-**GET**: `/`, `/api/runtime`, `/api/state`, `/api/performance`, `/api/network/status`, `/api/clips`, `/api/clips/<id>`, `/api/clips/<id>/export`, `/api/looks`, `/api/looks/<id>`, `/api/looks/<id>/export`, `/api/cues`, `/api/integrations/osc`, `/api/firmware/status`, `/api/firmware/jobs/<id>`
+One server exposes the full Primus + Radius JSON API; the active product/frontend decides what a given app uses. **`API_REFERENCE.md` is the canonical, exhaustive list** — this is a by-function map of the current V5 surface, not a complete route table (it drifts fastest, so verify against `server*.py` before relying on any single path).
 
-**POST (devices)**: `/api/update`, `/api/connect`, `/api/disconnect`, `/api/connect_all`, `/api/disconnect_all`, `/api/discover`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/rename_node`, `/api/hello_device`, `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_device_output`, `/api/set_device_receive_mode`, `/api/set_device_virtual_resolution`, `/api/set_playback_source`, `/api/device_groups`
-
-**POST (clips/looks/sharing)**: `/api/clip/preview`, `/api/clips/save`, `/api/clips/save_single`, `/api/import_bundle`, `/api/looks/save`, `/api/mixer/frame`, `/api/mixer/preview`, `/api/mixer/update`, `/api/mixer/stop_preview`
-
-**POST (cues/controller/OSC/firmware/network)**: `/api/cues`, `/api/cues/go`, `/api/cues/stop`, `/api/cues/goto`, `/api/controller/activate`, `/api/controller/activate_many`, `/api/controller/deactivate_look`, `/api/controller/blackout`, `/api/integrations/osc`, `/api/firmware/jobs`, `/api/network/preferred_interface`, `/api/network/controller_connection`, `/api/network/ssid_profile`, `/api/network/apply_static_ip`, `/api/network/set_dhcp`
-
-**DELETE**: `/api/clips/<id>`, `/api/looks/<id>`, `/api/device_groups/<id>`
+- **Runtime & diagnostics**: `/api/runtime` (product, `monitor_only`, `lan_enabled`), `/api/state`, `/api/performance`, `/api/network/status`.
+- **Devices & discovery**: `/api/discover`, `/api/devices/sync`, `/api/add_discovered`, `/api/add_manual`, `/api/remove_device`, `/api/connect[_all]`, `/api/disconnect[_all]`, `/api/rename_node`, `/api/hello_device`, `/api/device_groups`, `/api/device_full_config`, `/api/device_lane_ports`, `/api/device_show_info`.
+- **Device config**: `/api/set_device_ip`, `/api/revert_device_dhcp`, `/api/set_device_output`, `/api/set_device_receive_mode`, `/api/set_device_virtual_resolution`, `/api/set_device_telemetry_target`.
+- **Clips / Looks / Cues / sharing (Primus)**: `/api/clips[/…]`, `/api/looks[/…]`, `/api/cues[…]`, `/api/clip/preview`, `/api/mixer/*`, `/api/controller/*`, `/api/cue_boards`, `/api/output_presets`, `/api/import_bundle`, `/api/clips|looks/<id>/export`.
+- **Radius audio / FTP**: `/api/audio/*` (`files`, `cmd`, `cue_map`, `upload`, `rename`, `delete`, `mkdir`, `osc_cue`), `/api/audio_cues/*`, `/api/audio_sync[/status]`, `/api/project_audio`.
+- **Firmware**: `/api/firmware/status`, `/api/firmware/jobs[/<id>]`, `/api/firmware/updates/check`, `/api/serial/monitor/*`, `/api/serial/status`.
+- **Network / lane ports**: `/api/network/preferred_interface`, `/api/network/controller_connection`, `/api/network/ssid_profile`, `/api/network/apply_static_ip`, `/api/network/set_dhcp`, `/api/network/lane_ports`.
+- **Integrations**: `/api/integrations/osc`.
+- **Server & UI lifecycle**: `/api/server/status`, `/api/server/stop`, `/api/ui/focus|heartbeat|closed`, `/api/netlog[/clear]`.
 
 ## Hardware
 
