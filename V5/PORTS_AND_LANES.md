@@ -3,7 +3,7 @@
 Receiver traffic is split into three UDP **lanes** so that a burst of setup or
 telemetry traffic can never sit in front of show data in a receive queue, and
 so firewall rules and packet captures have a meaningful shape. This document
-is the as-implemented reference for V5 (Primus firmware 3.14.1, Radius 4.20,
+is the as-implemented reference for V5 (Primus firmware 3.14.2, Radius 4.20,
 and the unified sender). The original design rationale and trade-off
 discussion is in [docs/systems/PORT_ORGANIZATION.md](../docs/systems/PORT_ORGANIZATION.md);
 where that document says "should", this one says what the code does.
@@ -111,7 +111,7 @@ site via `device_show_port()` / `device_setup_port()`):
 | `MGMT:` token | — | that port |
 | `L`, no `MGMT:` | default Show | **6457** (lane-aware default) |
 | no `L`, no tokens (pre-lane Primus) | 6454 | **6454** (Setup rides Show) |
-| pre-lane / token-less Radius | **6454** (see caveat) | same as Show |
+| token-less Radius | **6456** (the audio lane every firmware since 4.1 listens on) | same as Show |
 
 Lane ports read back from a Primus `GET_CONFIG` (payload v2 carries them at
 offsets 27–32) are **authoritative** and overwrite inference. Resolved ports
