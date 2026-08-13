@@ -4,7 +4,7 @@ macOS release built from the V5 unified sender. **First release where all
 three apps ship together under one tag** — the separate `RadiusCentral-v0.9x`
 stream ends here.
 
-Receiver firmware published alongside: **Primus 3.14.1**, **Radius 4.20**
+Receiver firmware published alongside: **Primus 3.14.2**, **Radius 4.20**
 (the in-app update check now finds current firmware on GitHub).
 
 ## Headline: one backend for all three apps
@@ -84,6 +84,13 @@ usable 50–100 range.
   reopens its window instead of running invisibly.
 - Fixed an HTTP keep-alive regression where most POST routes wrote a stray
   second 404 response, desyncing subsequent requests on the connection.
+- A Radius node advertising no `AUD:` lane token now gets audio on **6456**
+  (its real audio lane) instead of the 6454 discovery port, which only worked
+  through the dual-listen migration bridge.
+- Primus firmware **3.14.2**: the `G:` Node Report token (which gates the
+  sender's entire management surface) moved early in the capability tag,
+  where it can never be truncated away. 3.14.0/3.14.1 emitted it last and a
+  crowded report silently disabled device management.
 - Fleet-smear guard restored: post-flash name overrides apply only to the
   flashed device, never the whole online fleet.
 - "Sync All" is lane-aware (was hard-coded to port 6454); concurrent FTP
@@ -118,7 +125,7 @@ references.
 ## SHA-256
 
 ```text
-b3292ae239a0ebd5cdc342d88c10a799dfad326a2817290595d4466f9475d58a  PrimusCentral-0.99-macOS-arm64.dmg
-d515e7e3ab6faab8ab9d88e781905f9d1f7f71ab968b9415a713a0c50b2689c1  RadiusCentral-0.99-macOS-arm64.dmg
-077cffcdfa135d9c12ced05e1609eeec6054b138dc1211bbc1054bc6fadeed50  DeviceManager-0.99-macOS-arm64.dmg
+PRIMUS_DIGEST  PrimusCentral-0.99-macOS-arm64.dmg
+RADIUS_DIGEST  RadiusCentral-0.99-macOS-arm64.dmg
+DEVICES_DIGEST  DeviceManager-0.99-macOS-arm64.dmg
 ```

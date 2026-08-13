@@ -1225,6 +1225,20 @@ void sendArtPollReply(IPAddress dest) {
                           "|B:%s", BOARD_PROFILE_CODE);
     if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
   }
+  // |G: rides directly behind |B: because the sender parses it to gate the
+  // whole 0x8140 management protocol (management_supported, lock state) —
+  // it is as capability-critical as |F:. It sat last until 3.14.2 on the
+  // mistaken belief that nothing parsed it; a crowded report then silently
+  // demoted the device to "no management protocol". Fixed 5 bytes, so this
+  // position guarantees it always fits.
+  if (reportPos < (int)sizeof(reportBuf) - 1) {
+    int genLen = snprintf(nullptr, 0, "|G:1%c", isProductionMode() ? 'L' : 'P');
+    if (reportPos + genLen < (int)sizeof(reportBuf) - 1) {
+      reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
+                            "|G:1%c", isProductionMode() ? 'L' : 'P');
+      if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
+    }
+  }
   if (reportPos < (int)sizeof(reportBuf) - 1) {
     reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
                           "|IP:%c", useStaticIP ? 'S' : 'D');
@@ -1238,7 +1252,7 @@ void sendArtPollReply(IPAddress dest) {
   // the lane split" from the L feature flag instead, and assumes the
   // documented defaults unless a token below says otherwise.
   //
-  // These rank above the per-output tuples and |G: because a node whose Setup
+  // These rank above the per-output tuples because a node whose Setup
   // lane has moved but cannot say so is unmanageable: the sender would keep
   // talking to 6457 while the device listens elsewhere. Each token is appended
   // only when it fits whole — a truncated "|MGMT:645" still parses as a valid
@@ -1269,16 +1283,6 @@ void sendArtPollReply(IPAddress dest) {
                           "|%u:%u:%u:%u", i, (uint8_t)outputs[i].type,
                           outputs[i].universe, outputs[i].virtualPixelCount);
     if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
-  }
-  // |G: goes last: no sender code parses it today, so it is the only token here
-  // whose loss costs nothing. Whatever space survives the tokens above is its.
-  if (reportPos < (int)sizeof(reportBuf) - 1) {
-    int genLen = snprintf(nullptr, 0, "|G:1%c", isProductionMode() ? 'L' : 'P');
-    if (reportPos + genLen < (int)sizeof(reportBuf) - 1) {
-      reportPos += snprintf(reportBuf + reportPos, sizeof(reportBuf) - reportPos,
-                            "|G:1%c", isProductionMode() ? 'L' : 'P');
-      if (reportPos > (int)sizeof(reportBuf)) reportPos = sizeof(reportBuf);
-    }
   }
   strncpy((char*)&reply[108], reportBuf, 63);
 

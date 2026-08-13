@@ -5,7 +5,7 @@ Single-file reference for both receiver firmwares. Read directly from source, no
 | | |
 |---|---|
 | **Primus source** | `V5/Arduino/primusV3_receiver/` — `primusV3_receiver.ino`, `config.h`, `receive_mode.h`, `management_protocol.h`, `display.h`, `buttons.h`, `battery.h` |
-| **Primus firmware** | `PrimusV3.6` v3.14.1 · NVS namespace `primus35` |
+| **Primus firmware** | `PrimusV3.6` v3.14.2 · NVS namespace `primus35` |
 | **Radius source** | `V5/Arduino/radius_receiver/` — `radius_receiver.ino`, `config.h`, `audio.h`, `battery.h`, `cues.h`, `ftp.h`, `marius.h`, `build_opt.h` |
 | **Radius firmware** | v4.20 · NVS namespace `artnet` |
 
@@ -417,7 +417,7 @@ Sent on every play/stop/pause/loop transition, plus a 1 Hz heartbeat while playi
 ## 12. Capability tag — ArtPollReply Node Report, 64-byte hard limit
 
 ```
-#0001 [0042] OK|PV3CAP1|F:RIOHBMSGL|B:v31|IP:D|U:C:0|0:4:0:1|1:2:0:72|G:1P
+#0001 [0042] OK|PV3CAP1|F:RIOHBMSGL|B:v31|G:1P|IP:D|U:C:0|0:4:0:1|1:2:0:72
 ```
 
 | Order | Token | Meaning | Why in this position |
@@ -425,18 +425,19 @@ Sent on every play/stop/pause/loop transition, plus a 1 Hz heartbeat while playi
 | 1 | `#nnnn [pkts] OK\|PV3CAP1` | counter + versioned prefix | identifies the tag |
 | 2 | `F:` | feature flags | **first** — losing it degrades the device to "unconfirmed legacy hardware" with rename, hello, IP, output, receive-mode, battery and show-info all disabled |
 | 3 | `B:` | board profile code | drives the hardware label in the UI |
-| 4 | `IP:` | `S` static / `D` DHCP | |
-| 5 | `U:` | `C`ombined / `S`plit + base universe | |
-| 6 | `SHOW:` `MGMT:` `TELE:` | lane ports — **only emitted for a lane moved off its default** (firmware 3.14.1+) | a node whose Setup lane moved but cannot say so is unmanageable; `L` in `F:` + no lane token means "on the documented defaults", no `L` means pre-lane firmware with Setup on Show |
-| 7 | `port:type:universe:virtual` | per-output tuples | only appended when the whole token fits — a truncated tuple looks valid but mis-reports the output type; the sender keeps last-known values when they vanish |
-| 8 | `G:` | management protocol version + `L`ocked / `P`rototype | ⚠️ ranked last on the theory that nothing parses it — **wrong**: the sender's `MANAGEMENT_TOKEN_RE` gates `management_supported` on it, so a report loaded heavily enough to drop `G:` silently disables all `0x8140` management for that device. Known issue (see CHANGES.md). |
+| 4 | `G:` | management protocol version + `L`ocked / `P`rototype | **directly behind `B:` since 3.14.2** — the sender's `MANAGEMENT_TOKEN_RE` gates `management_supported` on it, so it is as capability-critical as `F:`. Fixed 5 bytes, always fits here. Firmware 3.14.0/3.14.1 emitted it *last* (on the mistaken belief nothing parsed it), where a crowded report silently dropped it and disabled all `0x8140` management — reflash those devices. |
+| 5 | `IP:` | `S` static / `D` DHCP | |
+| 6 | `U:` | `C`ombined / `S`plit + base universe | |
+| 7 | `SHOW:` `MGMT:` `TELE:` | lane ports — **only emitted for a lane moved off its default** (firmware 3.14.1+) | a node whose Setup lane moved but cannot say so is unmanageable; `L` in `F:` + no lane token means "on the documented defaults", no `L` means pre-lane firmware with Setup on Show |
+| 8 | `port:type:universe:virtual` | per-output tuples | **last** — only appended when the whole token fits (a truncated tuple looks valid but mis-reports the output type); the sender keeps last-known values when they vanish |
 
 Firmware **3.12+** moved `F:` to immediately after the prefix (earlier
 firmware put it last, where it was silently truncated away). Firmware
 **3.14.1** removed the unconditional `SHOW:/MGMT:/TELE:` triple — those 30
 bytes alone overflowed the report on every device — introduced the `L` flag,
 and applied the whole-token-or-nothing guard to lane tokens and `G:` as well
-as the tuples. **Note:** the lane split itself shipped under an unchanged
+as the tuples. Firmware **3.14.2** moved `G:` up to ride directly behind
+`B:`, after the discovery that the sender does parse it (see the table). **Note:** the lane split itself shipped under an unchanged
 3.14.0 version string, so two different firmwares report 3.14.0; `L` is the
 reliable signal, not the version.
 

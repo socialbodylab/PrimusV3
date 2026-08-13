@@ -79,23 +79,23 @@ it:
    parses as a plausible port and would black-hole all Setup traffic, so a
    token that doesn't fit entirely is dropped, never clipped.
 
-Priority under pressure (highest survival first), Primus:
+Priority under pressure (highest survival first), Primus (3.14.2+):
 
 ```
-F:  →  B:  →  IP:  →  U:  →  moved-lane tokens  →  per-output tuples  →  G:
+F:  →  B:  →  G:  →  IP:  →  U:  →  moved-lane tokens  →  per-output tuples
 ```
 
 `F:` first because losing it demotes the device to "unconfirmed legacy
-hardware" with every capability disabled. Lane tokens outrank output tuples
-because a node whose Setup lane moved but can't say so is unmanageable.
+hardware" with every capability disabled. `G:` (management protocol version +
+lock state) rides directly behind it because the sender gates
+`management_supported` on it — as capability-critical as `F:`, and at a fixed
+5 bytes it always fits there. Lane tokens outrank output tuples because a
+node whose Setup lane moved but can't say so is unmanageable.
 
-> ⚠️ `G:` (management protocol version + lock state) is ranked last on the
-> stated theory that nothing parses it. **That theory is wrong** — the sender
-> parses `G:` and gates `management_supported` on it (`state.py`
-> `MANAGEMENT_TOKEN_RE`), so a report loaded heavily enough to drop `G:`
-> silently disables every `0x8140` operation for that device. Known issue;
-> needs a firmware reorder or a sender-side fallback. See
-> [CHANGES.md](CHANGES.md#what-still-needs-work).
+> ⚠️ Firmware **3.14.0 and 3.14.1** emitted `G:` *last*, on the mistaken
+> belief that nothing parsed it — a crowded report silently dropped it and
+> the sender disabled every `0x8140` operation for that device. 3.14.2 fixed
+> the order; devices still on 3.14.0/3.14.1 should be reflashed.
 
 Radius token order: `PVRAD1 | B: | F: | IP: | <moved lanes> | V: | MC:/MP:` —
 the Marius puck name rides last because it is the one unbounded field.
@@ -142,15 +142,17 @@ Both firmwares compile with `PORT_DUAL_LISTEN = 1`:
 This was meant as a one-release migration bridge. Today it is **load-bearing**
 in two ways, and flipping the flag to 0 is a breaking change, not a cleanup:
 
-1. The sender resolves a token-less Radius node's audio port to **6454**
-   (the discovery port), where audio only works because dual-listen accepts
-   it. The `radius-central` branch carries the fix (route legacy Radius audio
-   to 6456 — found on real hardware when routing to 6454 silenced the node),
-   and that fix is **not on main**. Reconcile before touching lane
-   resolution or dual-listen.
-2. A lane-aware Radius node on defaults advertises nothing, and the sender's
-   Radius resolution path never consults `L` — Setup traffic can resolve to
-   the Show port and lands only because the firmware accepts it anywhere.
+1. ~~The sender resolved a token-less Radius node's audio port to 6454~~ —
+   **fixed on main** (2026-08-13, matching the fix first made on the
+   `radius-central` branch after real hardware went silent): a Radius node
+   with no `AUD:` token now resolves to **6456**, the audio lane every
+   firmware since 4.1 actually listens on.
+2. A token-less Radius node's **Setup** traffic still resolves to its Show
+   port (6456), where it lands only because dual-listen accepts Setup
+   opcodes on any lane — the node's native Setup socket is 6457. Radius has
+   no `L`-flag equivalent to distinguish "lane-aware, on defaults" from
+   truly ancient firmware, so this stays until one exists (or until every
+   fleet unit advertises).
 
 ## Recovery
 

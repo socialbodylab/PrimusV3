@@ -78,12 +78,19 @@ class LanePortCapabilityTests(unittest.TestCase):
         ports = resolve_lane_ports(caps, is_radius=True)
         self.assertEqual(ports["port_show"], PORT_SHOW_RADIUS)
 
-    def test_legacy_radius_without_aud_stays_on_discovery(self):
+    def test_radius_without_aud_defaults_to_audio_lane(self):
+        """No AUD: token means the default audio lane, 6456 — never 6454.
+
+        Every Radius firmware since 4.1 listens for ArtAudioCmd on 6456, and
+        a lane-aware node on defaults advertises no token at all. Routing to
+        the 6454 discovery port silenced real hardware (audio is accepted
+        there only while dual-listen is compiled in).
+        """
         report = "PVRAD1|B:v1|IP:D|F:RIHAS"
         caps = parse_node_capabilities(report, "Radius", "")
         ports = resolve_lane_ports(caps, is_radius=True)
-        self.assertEqual(ports["port_show"], PORT_DISCOVERY)
-        self.assertEqual(ports["port_setup"], PORT_DISCOVERY)
+        self.assertEqual(ports["port_show"], PORT_SHOW_RADIUS)
+        self.assertEqual(ports["port_setup"], PORT_SHOW_RADIUS)
 
     def test_legacy_primus_without_mgmt_falls_back_setup_to_show(self):
         report = "PV3CAP1|F:RIOH|B:v1|IP:D"

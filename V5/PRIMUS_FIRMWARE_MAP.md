@@ -1,7 +1,7 @@
 # Primus Receiver Firmware Map (V5)
 
 Source: `V5/Arduino/primusV3_receiver/` — `primusV3_receiver.ino` (~2600 L), `config.h`, `receive_mode.h`, `management_protocol.h`, `display.h`, `buttons.h`, `battery.h`.
-Firmware `PrimusV3.6` **3.14.1**, NVS namespace `primus35`.
+Firmware `PrimusV3.6` **3.14.2**, NVS namespace `primus35`.
 
 ---
 
@@ -229,18 +229,18 @@ from the lane ports onward appends whole-or-not-at-all (a truncated
 `|MGMT:645` parses as a plausible port and would black-hole Setup traffic):
 
 ```
-#0001 [pkts] OK|PV3CAP1|F:RIOHBMSGL|B:v31|IP:D|U:C:0|0:4:0:1|1:2:0:72|G:1P
+#0001 [pkts] OK|PV3CAP1|F:RIOHBMSGL|B:v31|G:1P|IP:D|U:C:0|0:4:0:1|1:2:0:72
 ```
 
 | Token | Meaning |
 |---|---|
 | `F:` | feature flags — **first**, because losing it degrades the device to "unconfirmed legacy" |
 | `B:` | board profile code |
+| `G:` | management protocol version + `L`ocked / `P`rototype — behind `B:` since **3.14.2**: the sender's `MANAGEMENT_TOKEN_RE` gates `management_supported` on it, so it must never be dropped. 3.14.0/3.14.1 put it last and a crowded report silently disabled management — reflash those devices |
 | `IP:` | `S` static / `D` DHCP |
 | `U:` | `C`ombined or `S`plit + base universe |
 | `SHOW:`/`MGMT:`/`TELE:` | lane ports — **emitted only for a lane moved off its default** (3.14.1+); a node on defaults shows none, and `L` in `F:` is what marks it lane-aware |
-| `port:type:universe:virtual` | per-output tuples — only appended when the whole token fits; the sender keeps last-known values when they vanish |
-| `G:` | management protocol version + `L`ocked / `P`rototype — ⚠️ ranked last on the belief nothing parses it, but the sender's `MANAGEMENT_TOKEN_RE` gates `management_supported` on it; dropping it silently disables all `0x8140` management (known issue, see CHANGES.md) |
+| `port:type:universe:virtual` | per-output tuples — **last**; only appended when the whole token fits; the sender keeps last-known values when they vanish |
 
 ---
 

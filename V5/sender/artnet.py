@@ -1503,13 +1503,16 @@ def resolve_lane_ports(capabilities=None, is_radius=False):
     missing token means "default" for lane-aware nodes (F: contains L) and
     "pre-lane-split firmware" otherwise:
     Missing MGMT + lane-aware → Setup 6457. Missing MGMT + legacy → Setup = Show.
-    Missing AUD on Radius → Show stays 6454 (legacy V5 Radius on discovery port).
+    Missing AUD on Radius → Show 6456: every Radius firmware since 4.1 listens
+    for ArtAudioCmd there, and a lane-aware node on defaults advertises no
+    token at all. Routing to the 6454 discovery port instead silenced real
+    hardware (nodes only accept audio there while dual-listen is compiled in).
     """
     caps = capabilities or {}
     if is_radius:
         show = caps.get("port_show")
         if show is None:
-            show = PORT_DISCOVERY  # legacy Radius ArtAudio on 6454
+            show = PORT_SHOW_RADIUS  # Radius ArtAudio default lane
         setup = caps.get("port_setup")
         if setup is None:
             setup = show

@@ -275,20 +275,20 @@ should be known before building on the relevant area.
 
 **Protocol / firmware**
 
-- **Dual-listen is load-bearing, not just transitional.** The sender resolves
-  a pre-lane Radius node's audio port to 6454 (the discovery port), and a
-  lane-aware Radius node on defaults advertises no lane token — so audio and
-  setup traffic frequently arrives on "wrong" lanes and works only because
-  `PORT_DUAL_LISTEN=1` accepts it. **Flipping that flag off today would
-  silence Radius audio.** Related: the `radius-central` branch carries a fix
-  (routing legacy Radius audio to 6456) that is *not* on main — reconcile
-  before touching lane resolution.
-- **The `G:` capability token is parsed, despite comments saying otherwise.**
-  Firmware comments and older docs claim no sender code reads `G:`; in fact it
-  gates `management_supported` — every `0x8140` operation. It is ranked last
-  in the Node Report priority order, so a heavily loaded report drops it first
-  and the sender silently treats the device as having no management protocol.
-  Needs either a firmware reorder (a 3.14.2) or a sender-side fallback.
+- **Dual-listen is still load-bearing for Radius Setup traffic.** The audio
+  half was fixed on 2026-08-13 (a token-less Radius node's audio now resolves
+  to 6456, matching the fix first made on the `radius-central` branch), but a
+  token-less node's *Setup* traffic still resolves to the Show port and lands
+  only because `PORT_DUAL_LISTEN=1` accepts it — Radius has no `L`-flag
+  equivalent. Flipping the flag off still requires that gap closed first.
+  The rest of the `radius-central` branch should still be diffed against
+  main by its owner.
+- ~~The `G:` capability token is parsed, despite comments saying otherwise~~ —
+  **fixed in firmware 3.14.2** (2026-08-13): `G:` now rides directly behind
+  `B:`, where it always fits, since the sender gates `management_supported`
+  on it. Devices on 3.14.0/3.14.1 (which emitted it last and could silently
+  lose management under a crowded Node Report) should be reflashed — only
+  two units ever received 3.14.1.
 - **Primus replies are pinned to literal 6454** (ArtPollReply, management
   replies, show-info responses) rather than the runtime Show port. Move the
   Show lane and the node answers on the old port.
@@ -344,7 +344,7 @@ should be known before building on the relevant area.
   this unified tree. Earlier: PrimusCentral/DeviceManager shared the `v0.9x`
   stream (0.97, 0.98 from V5) while RadiusCentral tagged separately as
   `RadiusCentral-v0.9x` — that split ends here.
-- **Primus receiver firmware 3.14.1** and **Radius receiver firmware 4.20**
+- **Primus receiver firmware 3.14.2** and **Radius receiver firmware 4.20**
   published to GitHub releases (the in-app update check compares against
   GitHub, which had been sitting at 3.11.0).
 - Remaining: reflash the Radius fleet to 4.20 over USB
