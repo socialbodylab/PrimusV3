@@ -59,7 +59,7 @@ WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 WINDOWS_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
 WINDOWS_INSTALLER_APP_ID = "{{E8573E10-0D2C-4C6E-91C8-D1F5927A9328}"
 WINDOWS_README_SOURCE = Path("PrimusCentral-Windows-README.txt")
-DEFAULT_APP_VERSION = "0.98"
+DEFAULT_APP_VERSION = "0.99"
 DEFAULT_MACOS_ENTITLEMENTS = Path(__file__).resolve().parent / "macos" / "PrimusCentral.entitlements"
 
 
