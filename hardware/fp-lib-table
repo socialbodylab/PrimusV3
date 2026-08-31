@@ -1,0 +1,11 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "LIB_74VHCT125AFT")(type "KiCad")(uri "${KIPRJMOD}/parts/LIB_74VHCT125AFT")(options "")(descr ""))
+  (lib (name "ETQ-P3M4R7KVP")(type "KiCad")(uri "${KIPRJMOD}/parts/ETQ-P3M4R7KVP")(options "")(descr ""))
+  (lib (name "STX-3000")(type "KiCad")(uri "${KIPRJMOD}/parts/STX-3000")(options "")(descr ""))
+  (lib (name "AONR21307")(type "KiCad")(uri "${KIPRJMOD}/parts/AONR21307")(options "")(descr ""))
+  (lib (name "74AHCT1G125DBV")(type "KiCad")(uri "${KIPRJMOD}/parts/74AHCT1G125DBV")(options "")(descr ""))
+  (lib (name "TPS63070")(type "KiCad")(uri "${KIPRJMOD}/parts/TPS63070")(options "")(descr ""))
+  (lib (name "JS202011AQN")(type "KiCad")(uri "${KIPRJMOD}/parts/JS202011AQN")(options "")(descr ""))
+  (lib (name "sbl")(type "KiCad")(uri "${KIPRJMOD}/parts/sbl.pretty")(options "")(descr ""))
+)

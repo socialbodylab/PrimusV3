@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP JS202011AQN
+D SWITCH SLIDE SPDT 300MA 6V
+K
+F https://www.ckswitches.com/media/1422/js.pdf
+$ENDCMP
+#
+#End Doc Library
